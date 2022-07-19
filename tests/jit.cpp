@@ -1,0 +1,95 @@
+#include "gtest/gtest.h"
+
+#include "exprast.hpp"
+#include "numberexprast.hpp"
+#include "strideenvironment.hpp"
+
+#include "astfunctions.h"
+#include "strideparser.h"
+
+#include "llvm/ADT/STLExtras.h"
+//#include "llvm/ExecutionEngine/ExecutionEngine.h"
+//#include "llvm/ExecutionEngine/GenericValue.h"
+//#include "llvm/ExecutionEngine/MCJIT.h"
+#include "llvm/IR/Argument.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Type.h"
+
+//#include "llvm/ExecutionEngine/JITLink/JITLink.h"
+//#include "llvm/ExecutionEngine/JITLink/JITLinkMemoryManager.h"
+//#include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
+#include "llvm/ExecutionEngine/Orc/LLJIT.h"
+//#include "llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h"
+#include "llvm/ExecutionEngine/Orc/ObjectTransformLayer.h"
+#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
+
+//#include "llvm/Support/Casting.h"
+#include "llvm/Support/InitLLVM.h"
+#include "llvm/Support/TargetSelect.h"
+//#include "llvm/Support/ManagedStatic.h"
+//#include "llvm/Support/raw_ostream.h"
+
+using namespace llvm;
+
+TEST(JIT, Create) {
+
+  ASTNode tree;
+  tree = ASTFunctions::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
+  EXPECT_NE(tree, nullptr);
+
+  StrideEnvironment strenv;
+  generateCode(tree, strenv.state);
+  strenv.state.TheModule->dump();
+  // -------------------
+
+  InitializeNativeTarget();
+  InitializeNativeTargetAsmPrinter();
+
+  auto JTMB = orc::JITTargetMachineBuilder::detectHost();
+  if (!JTMB) {
+    std::cerr << " No machine builder" << std::endl;
+  }
+  JTMB->setCodeModel(CodeModel::Small);
+
+  auto JIT =
+      orc::LLJITBuilder()
+          .setJITTargetMachineBuilder(std::move(*JTMB))
+          //          .setObjectLinkingLayerCreator(
+          //              [&](orc::ExecutionSession &ES, const Triple &TT) {
+          //                  // Create ObjectLinkingLayer.
+          //                  auto ObjLinkingLayer =
+          //                  std::make_unique<orc::ObjectLinkingLayer>(
+          //                      ES,
+          // jitlink::InProcessMemoryManager::Create());
+          //                  // Add an instance of our plugin.
+          //// ObjLinkingLayer->addPlugin(std::make_unique<MyPlugin>());
+          //                  return ObjLinkingLayer;
+          //              })
+          .create();
+  if (!JIT)
+    return; // JIT.takeError();
+
+  if (auto Err = (*JIT)->addIRModule(
+          llvm::orc::ThreadSafeModule(std::move(strenv.state.TheModule),
+                                      std::move(strenv.state.TheContext)))) {
+  }
+  auto EntrySym = (*JIT)->lookup("entry");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = (int32_t(*)(...))EntrySym->getAddress();
+
+  double out;
+
+  int32_t retvalue = Entry(&out);
+  EXPECT_EQ(retvalue, 0);
+  EXPECT_EQ(out, 5);
+}
