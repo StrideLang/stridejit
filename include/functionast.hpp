@@ -61,9 +61,10 @@ public:
               std::unique_ptr<ExprAST> Body);
 
   const PrototypeAST &getProto() const;
-  ;
+
   const std::string &getName() const;
   llvm::Function *codegen(JitState &state);
+  std::vector<llvm::Function *> externalFunctions;
 };
 
 /// CallExprAST - Expression class for function calls.

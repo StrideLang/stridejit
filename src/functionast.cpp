@@ -116,18 +116,6 @@ llvm::Value *CallExprAST::codegen(JitState &state) {
   // Look up the name in the global module table.
   llvm::Function *CalleeF = state.getFunction(Callee);
   if (!CalleeF) {
-    if (Callee == "Sine") {
-      //      llvm::FunctionType *doubleDouble = llvm::FunctionType::get(
-      //          llvm::Type::getDoubleTy(*state.TheContext),
-      //          {llvm::Type::getDoubleTy(*state.TheContext)}, false);
-      //      llvm::Function *SinFunction =
-      //          llvm::Function::Create(doubleDouble,
-      //          llvm::Function::ExternalLinkage,
-      //                                 "sin", *state.TheModule);
-      //      state.Builder->CreateCall(CalleeF, ArgsV, "sin");
-      //          llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr);
-    }
-
     return state.LogErrorV("Unknown function referenced");
   }
 
@@ -144,7 +132,12 @@ llvm::Value *CallExprAST::codegen(JitState &state) {
       return nullptr;
   }
   CalleeF->dump();
-  state.Builder->CreateCall(CalleeF, ArgsV, CalleeF->getName());
-  CalleeF->getArg(1)->dump();
-  return CalleeF->getArg(1);
+  return state.Builder->CreateCall(CalleeF, ArgsV, CalleeF->getName());
+  //  if (Return) {
+  //      return Return->codegen(state);
+  //  } else {
+  //      // FIXME determine output
+  //      CalleeF->getArg(1)->dump();
+  //      return CalleeF->getArg(1);
+  //  }
 }

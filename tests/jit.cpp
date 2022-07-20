@@ -38,6 +38,48 @@
 
 using namespace llvm;
 
+TEST(JIT, MathFunction) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "functions.stride");
+
+  EXPECT_TRUE(ret);
+
+  auto EntrySym = strenv.JIT->lookup("entry");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
+
+  double out = 0;
+
+  Entry(&out);
+  EXPECT_EQ(out, 1.0);
+}
+
+TEST(JIT, CreateClass) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
+
+  EXPECT_TRUE(ret);
+
+  auto EntrySym = strenv.JIT->lookup("entry");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
+
+  double out;
+
+  Entry(&out);
+  EXPECT_EQ(out, 5);
+}
+
 TEST(JIT, Create) {
 
   ASTNode tree;
@@ -85,11 +127,10 @@ TEST(JIT, Create) {
     std::cerr << "No entry" << std::endl;
   }
 
-  auto *Entry = (int32_t(*)(...))EntrySym->getAddress();
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
 
-  double out;
+  double out = 0;
 
-  int32_t retvalue = Entry(&out);
-  EXPECT_EQ(retvalue, 0);
+  Entry(&out);
   EXPECT_EQ(out, 5);
 }

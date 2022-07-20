@@ -2,6 +2,60 @@
 
 StrideEnvironment::StrideEnvironment() {}
 
+bool StrideEnvironment::compile(std::string path) {
+  llvm::InitializeNativeTarget();
+  llvm::InitializeNativeTargetAsmPrinter();
+  ASTNode tree;
+  tree = ASTFunctions::parseFile(path.c_str());
+
+  generateCode(tree, state);
+
+  auto JTMB = llvm::orc::JITTargetMachineBuilder::detectHost();
+  if (!JTMB) {
+    std::cerr << " No machine builder" << std::endl;
+    return false;
+  }
+  JTMB->setCodeModel(llvm::CodeModel::Small);
+
+  auto JIT_ =
+      llvm::orc::LLJITBuilder()
+          .setJITTargetMachineBuilder(std::move(*JTMB))
+          //          .setObjectLinkingLayerCreator(
+          //              [&](orc::ExecutionSession &ES, const Triple &TT) {
+          //                  // Create ObjectLinkingLayer.
+          //                  auto ObjLinkingLayer =
+          //                  std::make_unique<orc::ObjectLinkingLayer>(
+          //                      ES,
+          // jitlink::InProcessMemoryManager::Create());
+          //                  // Add an instance of our plugin.
+          //// ObjLinkingLayer->addPlugin(std::make_unique<MyPlugin>());
+          //                  return ObjLinkingLayer;
+          //              })
+          .create();
+  if (!JIT_)
+    return false; // JIT.takeError();
+  JIT = std::move(*JIT_);
+  auto librarySearch =
+      llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(
+          JIT->getDataLayout().getGlobalPrefix());
+  if (!librarySearch) {
+    return false;
+  }
+  JIT->getMainJITDylib().addGenerator(std::move(*librarySearch));
+  // TODO only load required libraries
+  if (!llvm::sys::DynamicLibrary::LoadLibraryPermanently("m")) {
+    std::cerr << "Failed to load m" << std::endl;
+  }
+  if (mVerbose) {
+    state.TheModule->dump();
+  }
+  if (auto Err = JIT->addIRModule(llvm::orc::ThreadSafeModule(
+          std::move(state.TheModule), std::move(state.TheContext)))) {
+    return false;
+  }
+  return true;
+}
+
 ///////// -----------------------
 
 #include "exprast.hpp"
@@ -185,6 +239,10 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
   ASTNode prev = nullptr;
   ASTNode next;
   ASTNode current;
+
+  std::unordered_map<std::string, std::string> functionMap = {{"Sine", "sin"},
+                                                              {"Cos", "cos"}};
+
   do {
     if (stream && stream->getNodeType() == AST::Stream) {
       current = stream->getLeft();
@@ -205,28 +263,52 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
       generated.expr = createExpr(current);
     } else if (current->getNodeType() == AST::Block) {
       auto block = createExpr(current);
-      if (prev->getNodeType() != AST::Function) {
-        // Functions pass the output as arguments, so no need to assign
+      if (prev->getNodeType() == AST::Function) {
+        auto prevFunc = std::static_pointer_cast<FunctionNode>(prev);
+        auto externFunc = functionMap.find(prevFunc->getName());
+        if (externFunc != functionMap.end()) {
+          generated.expr = std::make_unique<BinaryExprAST>(
+              '=', std::move(block), std::move(generated.expr));
+        } else {
+          // Stride Functions pass the output as arguments, so no need to assign
+        }
+      } else {
         generated.expr = std::make_unique<BinaryExprAST>(
             '=', std::move(block), std::move(generated.expr));
       }
 
     } else if (current->getNodeType() == AST::Function) {
       auto newFunc = std::static_pointer_cast<FunctionNode>(current);
-      generated.functions.push_back(
-          createFunctionDeclaration(newFunc, prev, next, tree, state));
       std::vector<std::unique_ptr<ExprAST>> Args;
-      if (prev) {
+      if (prev) { // inputs
         Args.emplace_back(std::move(generated.expr));
       }
-      if (next) {
-        // FIXME: ensure next node is processed correctly. This will not work
-        // for many cases, e.g. if next is a function
-        auto nextExpr = createExpr(next);
-        Args.emplace_back(createExpr(next));
+      auto externFunc = functionMap.find(newFunc->getName());
+      if (externFunc != functionMap.end()) {
+
+        llvm::FunctionType *FT = llvm::FunctionType::get(
+            llvm::Type::getDoubleTy(*state.TheContext),
+            {llvm::Type::getDoubleTy(*state.TheContext)}, false);
+        generated.externalFunctions.push_back(
+            llvm::Function::Create(FT, llvm::Function::ExternalLinkage,
+                                   externFunc->second, *state.TheModule));
+
+        generated.expr =
+            std::make_unique<CallExprAST>(externFunc->second, std::move(Args));
+      } else {
+        if (next) { // outputs
+          // FIXME: ensure next node is processed correctly. This will not work
+          // for many cases, e.g. if next is a function
+          auto nextExpr = createExpr(next);
+          Args.emplace_back(createExpr(next));
+        }
+        generated.functions.push_back(
+            createFunctionDeclaration(newFunc, prev, next, tree, state));
+
+        generated.expr = std::make_unique<CallExprAST>(
+            std::string(newFunc->getName()), std::move(Args));
       }
-      generated.expr = std::make_unique<CallExprAST>(
-          std::string(newFunc->getName()), std::move(Args));
+
     } else if (current->getNodeType() == AST::Int ||
                current->getNodeType() == AST::String) {
       generated.expr = createExpr(current);
@@ -288,10 +370,15 @@ createFunctionDecl(std::shared_ptr<FunctionNode> func, ASTNode prev,
   auto streams = funcDecl->getPropertyValue("streams");
 
   std::unique_ptr<ExprAST> collected, out;
+  std::vector<llvm::Function *> externalFunctions;
   for (const auto &streamNode : streams->getChildren()) {
     if (streamNode->getNodeType() == AST::Stream) {
       auto stream = std::static_pointer_cast<StreamNode>(streamNode);
-      collected = createStreamCode(stream, tree, state).expr;
+      auto code = createStreamCode(stream, tree, state);
+      collected = std::move(code.expr);
+      externalFunctions.insert(externalFunctions.end(),
+                               code.externalFunctions.begin(),
+                               code.externalFunctions.end());
     } else {
     }
   }
@@ -306,6 +393,7 @@ createFunctionDecl(std::shared_ptr<FunctionNode> func, ASTNode prev,
   // llvm::Function *TheFunction = state.getFunction(P.getName());
   auto newfunc =
       std::make_unique<FunctionAST>(std::move(proto), std::move(collected));
+  newfunc->externalFunctions = std::move(externalFunctions);
   return newfunc;
 }
 

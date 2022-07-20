@@ -86,11 +86,27 @@ public:
   std::unique_ptr<llvm::legacy::FunctionPassManager> TheFPM;
 };
 
+#include "llvm/ExecutionEngine/Orc/LLJIT.h"
+#include "llvm/ExecutionEngine/Orc/ObjectTransformLayer.h"
+#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
+
+#include "llvm/Support/InitLLVM.h"
+#include "llvm/Support/TargetSelect.h"
+
+#include <iostream>
+
+#include "astfunctions.h"
+#include "strideparser.h"
+
 class StrideEnvironment {
 public:
   StrideEnvironment();
 
+  bool compile(std::string path);
+
   JitState state;
+  std::unique_ptr<llvm::orc::LLJIT> JIT;
+  bool mVerbose{true};
 };
 
 #include "llvm/ADT/StringRef.h"
@@ -127,6 +143,7 @@ llvm::orc::ThreadSafeModule irgenAndTakeOwnership(FunctionAST &FnAST,
 struct GeneratedCode {
   std::unique_ptr<ExprAST> expr;
   std::vector<std::unique_ptr<FunctionAST>> functions;
+  std::vector<llvm::Function *> externalFunctions;
 };
 
 std::unique_ptr<ExprAST> createExpr(ASTNode node);
