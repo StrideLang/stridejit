@@ -38,6 +38,92 @@
 
 using namespace llvm;
 
+TEST(JIT, List) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "listinput.stride");
+
+  EXPECT_TRUE(ret);
+
+  auto EntrySym = strenv.JIT->lookup("DefaultDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
+
+  double in = 0;
+  double out = 0;
+
+  Entry(&in, &out);
+  EXPECT_EQ(out, 0.0);
+
+  in = 10;
+  Entry(&in, &out);
+  EXPECT_EQ(out, 1.0);
+}
+
+TEST(JIT, TwoStreams) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "twostreams.stride");
+
+  EXPECT_TRUE(ret);
+
+  auto EntrySym = strenv.JIT->lookup("DefaultDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
+
+  double in = 0;
+  double out = 0;
+
+  Entry(&in, &out);
+  EXPECT_EQ(out, cos(cos(in)));
+
+  in = 3.14159;
+  Entry(&in, &out);
+  EXPECT_FLOAT_EQ(out, cos(cos(in)));
+
+  in = 1.0;
+  Entry(&in, &out);
+  EXPECT_FLOAT_EQ(out, cos(cos(in)));
+}
+
+TEST(JIT, IO) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "io.stride");
+
+  EXPECT_TRUE(ret);
+
+  auto EntrySym = strenv.JIT->lookup("DefaultDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
+
+  double in = 0;
+  double out = 0;
+
+  Entry(&in, &out);
+  EXPECT_EQ(out, 1.0);
+
+  in = 3.14159;
+  Entry(&in, &out);
+  EXPECT_FLOAT_EQ(out, cos(3.14159));
+
+  in = 1.0;
+  Entry(&in, &out);
+  EXPECT_FLOAT_EQ(out, cos(1.0));
+}
+
 TEST(JIT, MathFunction) {
 
   StrideEnvironment strenv;
@@ -46,7 +132,7 @@ TEST(JIT, MathFunction) {
 
   EXPECT_TRUE(ret);
 
-  auto EntrySym = strenv.JIT->lookup("entry");
+  auto EntrySym = strenv.JIT->lookup("DefaultDomain_process");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
   }
@@ -67,7 +153,7 @@ TEST(JIT, CreateClass) {
 
   EXPECT_TRUE(ret);
 
-  auto EntrySym = strenv.JIT->lookup("entry");
+  auto EntrySym = strenv.JIT->lookup("DefaultDomain_process");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
   }
@@ -122,7 +208,7 @@ TEST(JIT, Create) {
           llvm::orc::ThreadSafeModule(std::move(strenv.state.TheModule),
                                       std::move(strenv.state.TheContext)))) {
   }
-  auto EntrySym = (*JIT)->lookup("entry");
+  auto EntrySym = (*JIT)->lookup("DefaultDomain_process");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
   }

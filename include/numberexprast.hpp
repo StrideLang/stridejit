@@ -46,4 +46,15 @@ public:
   llvm::Value *codegen(JitState &state) override;
 };
 
+class ListExprAST : public ExprAST {
+  std::vector<std::unique_ptr<ExprAST>> members;
+
+public:
+  ListExprAST() {}
+
+  void addElement(std::unique_ptr<ExprAST> elem);
+  llvm::Value *codegen(JitState &state) override;
+  std::vector<std::unique_ptr<ExprAST>> &elements() { return members; }
+};
+
 #endif // NUMBEREXPRAST_HPP

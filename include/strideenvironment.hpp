@@ -43,6 +43,25 @@ public:
     TheFPM->add(llvm::createCFGSimplificationPass());
 
     TheFPM->doInitialization();
+
+    // Initialize function map
+    {
+      llvm::FunctionType *FT = llvm::FunctionType::get(
+          llvm::Type::getDoubleTy(*TheContext),
+          {llvm::Type::getDoubleTy(*TheContext)}, false);
+      functionMap["Sine"] = {"sin", FT};
+
+      FT = llvm::FunctionType::get(llvm::Type::getDoubleTy(*TheContext),
+                                   {llvm::Type::getDoubleTy(*TheContext)},
+                                   false);
+      functionMap["Cos"] = {"cos", FT};
+
+      FT = llvm::FunctionType::get(llvm::Type::getDoubleTy(*TheContext),
+                                   {llvm::Type::getDoubleTy(*TheContext),
+                                    llvm::Type::getDoubleTy(*TheContext)},
+                                   false);
+      functionMap["Greater"] = {"__stride_Greater", FT};
+    }
   }
 
   llvm::Function *getFunction(std::string Name) {
@@ -84,6 +103,9 @@ public:
   std::map<char, int> BinopPrecedence;
 
   std::unique_ptr<llvm::legacy::FunctionPassManager> TheFPM;
+
+  std::unordered_map<std::string, std::pair<std::string, llvm::FunctionType *>>
+      functionMap;
 };
 
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
@@ -251,28 +273,6 @@ namespace orc {
 //  }
 
 // private:
-//  static Expected<ThreadSafeModule>
-//  optimizeModule(ThreadSafeModule TSM, const MaterializationResponsibility &R)
-//  {
-//    TSM.withModuleDo([](Module &M) {
-//      // Create a function pass manager.
-//      auto FPM = std::make_unique<legacy::FunctionPassManager>(&M);
-
-//      // Add some optimizations.
-//      FPM->add(createInstructionCombiningPass());
-//      FPM->add(createReassociatePass());
-//      FPM->add(createGVNPass());
-//      FPM->add(createCFGSimplificationPass());
-//      FPM->doInitialization();
-
-//      // Run the optimizations over all functions in the module being added to
-//      // the JIT.
-//      for (auto &F : M)
-//        FPM->run(F);
-//    });
-
-//    return std::move(TSM);
-//  }
 //};
 
 } // end namespace orc

@@ -6,7 +6,13 @@
 #include <iostream>
 
 FunctionAST::FunctionAST(std::unique_ptr<PrototypeAST> Proto,
-                         std::unique_ptr<ExprAST> Body)
+                         std::unique_ptr<ExprAST> Body_)
+    : Proto(std::move(Proto)) {
+  Body.emplace_back(std::move(Body_));
+}
+
+FunctionAST::FunctionAST(std::unique_ptr<PrototypeAST> Proto,
+                         std::vector<std::unique_ptr<ExprAST>> Body)
     : Proto(std::move(Proto)), Body(std::move(Body)) {}
 
 const PrototypeAST &FunctionAST::getProto() const { return *Proto; }
@@ -63,24 +69,27 @@ llvm::Function *FunctionAST::codegen(JitState &state) {
   //  state.NamedValues["Out"] = v;
   // Add arguments to variable symbol table.
 
-  if (llvm::Value *RetVal = Body->codegen(state)) {
-    // Finish off the function.
-    //    state.Builder->CreateRet(RetVal);
-
-    auto *outVal = llvm::ConstantInt::get(state.Builder->getInt32Ty(), 0, true);
-    state.Builder->CreateRet(outVal);
-    // Validate the generated code, checking for consistency.
-    verifyFunction(*TheFunction);
-
-    //    state.TheModule->dump();
-    //    state.TheFPM->run(*TheFunction);
-    return TheFunction;
+  for (const auto &statement : Body) {
+    llvm::Value *RetVal = statement->codegen(state);
+    if (!RetVal) {
+      // Error reading body, remove function.
+      TheFunction->eraseFromParent();
+      if (P.isBinaryOp())
+        state.BinopPrecedence.erase(P.getOperatorName());
+      return nullptr;
+    }
   }
-  // Error reading body, remove function.
-  TheFunction->eraseFromParent();
-  if (P.isBinaryOp())
-    state.BinopPrecedence.erase(P.getOperatorName());
-  return nullptr;
+  // Finish off the function.
+  //    state.Builder->CreateRet(RetVal);
+
+  auto *outVal = llvm::ConstantInt::get(state.Builder->getInt32Ty(), 0, true);
+  state.Builder->CreateRet(outVal);
+  // Validate the generated code, checking for consistency.
+  verifyFunction(*TheFunction);
+
+  //    state.TheModule->dump();
+  //    state.TheFPM->run(*TheFunction);
+  return TheFunction;
 }
 
 llvm::Function *PrototypeAST::codegen(JitState &state) {
@@ -125,19 +134,36 @@ llvm::Value *CallExprAST::codegen(JitState &state) {
 
   std::vector<llvm::Value *> ArgsV;
   for (unsigned i = 0, e = Args.size(); i != e; ++i) {
-    ArgsV.push_back(Args[i]->codegen(state));
-    ArgsV.back()->dump();
-    ArgsV.back()->getType()->dump();
-    if (!ArgsV.back())
-      return nullptr;
+    auto *value = Args[i]->codegen(state);
+    if (value->getType()->isTokenTy()) {
+      auto *list = dynamic_cast<ListExprAST *>(Args[i].get());
+      assert(list);
+      for (const auto &expr : list->elements()) {
+        ArgsV.push_back(expr->codegen(state));
+        if (!ArgsV.back())
+          return nullptr;
+        ArgsV.back()->dump();
+        ArgsV.back()->getType()->dump();
+        if (ArgsV.back()->getType()->isPointerTy() &&
+            !CalleeF->getArg(i)->getType()->isPointerTy()) {
+          ArgsV.back() = state.Builder->CreateLoad(
+              llvm::Type::getDoubleTy(*state.TheContext), ArgsV.back(), "");
+        }
+      }
+
+    } else {
+      ArgsV.push_back(value);
+      if (!ArgsV.back())
+        return nullptr;
+      ArgsV.back()->dump();
+      ArgsV.back()->getType()->dump();
+      if (ArgsV.back()->getType()->isPointerTy() &&
+          !CalleeF->getArg(i)->getType()->isPointerTy()) {
+        ArgsV.back() = state.Builder->CreateLoad(
+            llvm::Type::getDoubleTy(*state.TheContext), ArgsV.back(), "");
+      }
+    }
   }
   CalleeF->dump();
   return state.Builder->CreateCall(CalleeF, ArgsV, CalleeF->getName());
-  //  if (Return) {
-  //      return Return->codegen(state);
-  //  } else {
-  //      // FIXME determine output
-  //      CalleeF->getArg(1)->dump();
-  //      return CalleeF->getArg(1);
-  //  }
 }

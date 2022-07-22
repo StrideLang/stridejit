@@ -87,3 +87,11 @@ llvm::Value *BinaryExprAST::codegen(JitState &state) {
     return state.LogErrorV("invalid binary operator");
   }
 }
+
+void ListExprAST::addElement(std::unique_ptr<ExprAST> elem) {
+  members.emplace_back(std::move(elem));
+}
+
+llvm::Value *ListExprAST::codegen(JitState &state) {
+  return llvm::ConstantTokenNone::get(*state.TheContext);
+}

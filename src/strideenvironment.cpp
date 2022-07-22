@@ -10,6 +10,10 @@ bool StrideEnvironment::compile(std::string path) {
 
   generateCode(tree, state);
 
+  for (auto &F : *state.TheModule) {
+    state.TheFPM->run(F);
+  }
+
   auto JTMB = llvm::orc::JITTargetMachineBuilder::detectHost();
   if (!JTMB) {
     std::cerr << " No machine builder" << std::endl;
@@ -46,6 +50,7 @@ bool StrideEnvironment::compile(std::string path) {
   if (!llvm::sys::DynamicLibrary::LoadLibraryPermanently("m")) {
     std::cerr << "Failed to load m" << std::endl;
   }
+  llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr);
   if (mVerbose) {
     state.TheModule->dump();
   }
@@ -84,110 +89,6 @@ llvm::orc::ThreadSafeModule irgenAndTakeOwnership(FunctionAST &FnAST,
     //        report_fatal_error("Couldn't compile lazily JIT'd function");
   }
 }
-
-// llvm::orc::MaterializationUnit::Interface
-// llvm::orc::StrideASTLayer::getInterface(FunctionAST &F) {
-//  MangleAndInterner Mangle(BaseLayer.getExecutionSession(), DL);
-//  SymbolFlagsMap Symbols;
-//  Symbols[Mangle(F.getName())] =
-//      JITSymbolFlags(JITSymbolFlags::Exported | JITSymbolFlags::Callable);
-//  return MaterializationUnit::Interface(std::move(Symbols), nullptr);
-//}
-
-// llvm::orc::StrideASTLayer::StrideASTLayer(IRLayer &BaseLayer,
-//                                          const DataLayout &DL)
-//    : BaseLayer(BaseLayer), DL(DL) {}
-
-// llvm::Error llvm::orc::StrideASTLayer::add(ResourceTrackerSP RT,
-//                                           std::unique_ptr<FunctionAST> F) {
-//  return RT->getJITDylib().define(
-//      std::make_unique<StrideASTMaterializationUnit>(*this, std::move(F)),
-//      RT);
-//}
-
-// void llvm::orc::StrideASTLayer::emit(
-//    std::unique_ptr<MaterializationResponsibility> MR,
-//    std::unique_ptr<FunctionAST> F) {
-//  // FIXME use actual state
-//  JitState state;
-//  BaseLayer.emit(std::move(MR), irgenAndTakeOwnership(*F, "", state));
-//}
-
-// llvm::orc::StrideASTMaterializationUnit::StrideASTMaterializationUnit(
-//    StrideASTLayer &L, std::unique_ptr<FunctionAST> F)
-//    : MaterializationUnit(L.getInterface(*F)), L(L), F(std::move(F)) {}
-
-// void llvm::orc::StrideASTMaterializationUnit::materialize(
-//    std::unique_ptr<MaterializationResponsibility> R) {
-//  L.emit(std::move(R), std::move(F));
-//}
-
-/// --------------------------
-// llvm::orc::StrideJIT::StrideJIT(
-//    std::unique_ptr<llvm::orc::ExecutionSession> ES,
-//    std::unique_ptr<llvm::orc::EPCIndirectionUtils> EPCIU,
-//    llvm::orc::JITTargetMachineBuilder JTMB, llvm::DataLayout DL)
-//    : ES(std::move(ES)), EPCIU(std::move(EPCIU)), DL(std::move(DL)),
-//      Mangle(*this->ES, this->DL),
-//      ObjectLayer(*this->ES,
-//                  []() { return std::make_unique<SectionMemoryManager>(); }),
-//      CompileLayer(*this->ES, ObjectLayer,
-//                   std::make_unique<ConcurrentIRCompiler>(std::move(JTMB))),
-//      OptimizeLayer(*this->ES, CompileLayer, optimizeModule),
-//      ASTLayer(OptimizeLayer, this->DL),
-//      MainJD(this->ES->createBareJITDylib("<main>")) {
-
-//  LLVMInitializeNativeTarget();
-//  LLVMInitializeNativeAsmPrinter();
-
-//  MainJD.addGenerator(
-//      cantFail(DynamicLibrarySearchGenerator::GetForCurrentProcess(
-//          DL.getGlobalPrefix())));
-//}
-
-// llvm::orc::StrideJIT::~StrideJIT() {
-//  if (auto Err = ES->endSession())
-//    ES->reportError(std::move(Err));
-//  if (auto Err = EPCIU->cleanup())
-//    ES->reportError(std::move(Err));
-//}
-
-// llvm::Expected<std::unique_ptr<llvm::orc::StrideJIT>>
-// llvm::orc::StrideJIT::Create() {
-//  auto EPC = SelfExecutorProcessControl::Create();
-//  if (!EPC)
-//    return EPC.takeError();
-
-//  auto ES = std::make_unique<ExecutionSession>(std::move(*EPC));
-
-//  auto EPCIU =
-//      llvm::orc::EPCIndirectionUtils::Create(ES->getExecutorProcessControl());
-//  if (!EPCIU)
-//    return EPCIU.takeError();
-
-//  (*EPCIU)->createLazyCallThroughManager(
-//      *ES, pointerToJITTargetAddress(&handleLazyCallThroughError));
-
-//  if (auto Err = setUpInProcessLCTMReentryViaEPCIU(**EPCIU))
-//    return std::move(Err);
-
-//  llvm::orc::JITTargetMachineBuilder JTMB(
-//      ES->getExecutorProcessControl().getTargetTriple());
-
-//  auto DL = JTMB.getDefaultDataLayoutForTarget();
-//  if (!DL)
-//    return DL.takeError();
-
-//  return std::make_unique<StrideJIT>(std::move(ES), std::move(*EPCIU),
-//                                     std::move(JTMB), std::move(*DL));
-//}
-
-// llvm::Error llvm::orc::StrideJIT::addAST(std::unique_ptr<FunctionAST> F,
-//                                         ResourceTrackerSP RT) {
-//  if (!RT)
-//    RT = MainJD.getDefaultResourceTracker();
-//  return ASTLayer.add(RT, std::move(F));
-//}
 
 std::unique_ptr<ExprAST> createExpr(ASTNode node) {
   if (node->getNodeType() == AST::Block) {
@@ -229,9 +130,21 @@ std::unique_ptr<ExprAST> createExpr(ASTNode node) {
 
       return std::make_unique<BinaryExprAST>(op, std::move(l), std::move(r));
     }
+  } else if (node->getNodeType() == AST::List) {
+    auto list = std::make_unique<ListExprAST>();
+    for (const auto &elem : node->getChildren()) {
+      list->addElement(createExpr(elem));
+    }
+    return list;
   }
+  std::cerr << " Node type not supported " << std::endl;
   return nullptr;
 }
+
+struct FunctionMapEntry {
+  std::string name;
+  std::vector<llvm::Type *> args;
+};
 
 GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
                                JitState &state) {
@@ -239,9 +152,6 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
   ASTNode prev = nullptr;
   ASTNode next;
   ASTNode current;
-
-  std::unordered_map<std::string, std::string> functionMap = {{"Sine", "sin"},
-                                                              {"Cos", "cos"}};
 
   do {
     if (stream && stream->getNodeType() == AST::Stream) {
@@ -263,38 +173,45 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
       generated.expr = createExpr(current);
     } else if (current->getNodeType() == AST::Block) {
       auto block = createExpr(current);
-      if (prev->getNodeType() == AST::Function) {
+      if (prev && prev->getNodeType() == AST::Function) {
         auto prevFunc = std::static_pointer_cast<FunctionNode>(prev);
-        auto externFunc = functionMap.find(prevFunc->getName());
-        if (externFunc != functionMap.end()) {
+        auto externFunc = state.functionMap.find(prevFunc->getName());
+        if (externFunc != state.functionMap.end()) {
           generated.expr = std::make_unique<BinaryExprAST>(
               '=', std::move(block), std::move(generated.expr));
         } else {
           // Stride Functions pass the output as arguments, so no need to assign
         }
-      } else {
+      } else if (generated.expr) {
         generated.expr = std::make_unique<BinaryExprAST>(
             '=', std::move(block), std::move(generated.expr));
+      } else {
+        generated.expr = std::move(block);
       }
 
     } else if (current->getNodeType() == AST::Function) {
       auto newFunc = std::static_pointer_cast<FunctionNode>(current);
       std::vector<std::unique_ptr<ExprAST>> Args;
       if (prev) { // inputs
-        Args.emplace_back(std::move(generated.expr));
+        if (auto *v = dynamic_cast<ListExprAST *>(generated.expr.get())) {
+          for (auto elem = v->elements().begin(); elem != v->elements().end();
+               elem++) {
+            Args.emplace_back(std::move(*elem));
+          }
+        } else {
+          Args.emplace_back(std::move(generated.expr));
+        }
       }
-      auto externFunc = functionMap.find(newFunc->getName());
-      if (externFunc != functionMap.end()) {
+      auto externFunc = state.functionMap.find(newFunc->getName());
+      if (externFunc != state.functionMap.end()) {
+        if (!state.TheModule->getFunction(externFunc->second.first)) {
+          generated.externalFunctions.push_back(llvm::Function::Create(
+              externFunc->second.second, llvm::Function::ExternalLinkage,
+              externFunc->second.first, *state.TheModule));
+        }
 
-        llvm::FunctionType *FT = llvm::FunctionType::get(
-            llvm::Type::getDoubleTy(*state.TheContext),
-            {llvm::Type::getDoubleTy(*state.TheContext)}, false);
-        generated.externalFunctions.push_back(
-            llvm::Function::Create(FT, llvm::Function::ExternalLinkage,
-                                   externFunc->second, *state.TheModule));
-
-        generated.expr =
-            std::make_unique<CallExprAST>(externFunc->second, std::move(Args));
+        generated.expr = std::make_unique<CallExprAST>(externFunc->second.first,
+                                                       std::move(Args));
       } else {
         if (next) { // outputs
           // FIXME: ensure next node is processed correctly. This will not work
@@ -311,6 +228,8 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
 
     } else if (current->getNodeType() == AST::Int ||
                current->getNodeType() == AST::String) {
+      generated.expr = createExpr(current);
+    } else if (current->getNodeType() == AST::List) {
       generated.expr = createExpr(current);
     }
     prev = current;
@@ -433,6 +352,10 @@ createFunctionDeclaration(std::shared_ptr<FunctionNode> func, ASTNode prev,
 void generateCode(ASTNode tree, JitState &state) {
 
   //  createGlobals(tree, state);
+  std::map<std::string, std::vector<std::unique_ptr<ExprAST>>> domainCode;
+  std::vector<std::string> MainArgs;
+  std::vector<std::string> OutArgs;
+
   for (const auto &node : tree->getChildren()) {
     if (node->getNodeType() == AST::Stream) {
       auto stream = std::static_pointer_cast<StreamNode>(node);
@@ -444,29 +367,33 @@ void generateCode(ASTNode tree, JitState &state) {
         f->codegen(state);
       }
 
-      std::vector<std::string> MainArgs;
-      std::vector<std::string> OutArgs;
-
-      for (const auto &node : tree->getChildren()) {
-        if (node->getNodeType() == AST::Declaration) {
-          auto decl = std::static_pointer_cast<DeclarationNode>(node);
-          if (decl->getObjectType() == "signal" ||
-              decl->getObjectType() == "constant") {
-            OutArgs.push_back(decl->getName());
-          }
-        }
-      }
-
-      auto proto = std::make_unique<PrototypeAST>(std::string("entry"),
-                                                  MainArgs, OutArgs);
-
-      auto newfunc =
-          std::make_unique<FunctionAST>(std::move(proto), std::move(code.expr));
-
-      newfunc->codegen(state);
+      std::string domain = "DefaultDomain";
+      domainCode[domain].emplace_back(std::move(code.expr));
       //      auto *RetVal =
       //          llvm::ConstantInt::get(state.Builder->getInt32Ty(), 0, true);
       //      state.Builder->CreateRet(RetVal);
+    } else if (node->getNodeType() == AST::Declaration) {
+      auto decl = std::static_pointer_cast<DeclarationNode>(node);
+      if (decl->getObjectType() == "signal" ||
+          decl->getObjectType() == "constant") {
+        // Global signals become pointers to domain function
+        OutArgs.push_back(decl->getName());
+      }
     }
   }
+  for (auto it = domainCode.begin(); it != domainCode.end(); it++) {
+    auto proto = std::make_unique<PrototypeAST>(
+        std::string(it->first + "_process"), MainArgs, OutArgs);
+
+    auto newfunc =
+        std::make_unique<FunctionAST>(std::move(proto), std::move(it->second));
+
+    newfunc->codegen(state);
+  }
+}
+
+extern "C" {
+__declspec(dllexport) double __stride_Greater(double a, double b) {
+  return a > b ? 1.0 : 0.0;
+}
 }
