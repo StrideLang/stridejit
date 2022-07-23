@@ -1,0 +1,3 @@
+signal Out {}
+
+0 >> Cos() >> Out;

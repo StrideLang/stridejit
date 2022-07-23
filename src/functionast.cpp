@@ -19,12 +19,12 @@ const PrototypeAST &FunctionAST::getProto() const { return *Proto; }
 
 const std::string &FunctionAST::getName() const { return Proto->getName(); }
 
-llvm::Function *FunctionAST::codegen(JitState &state) {
+llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   // Transfer ownership of the prototype to the FunctionProtos map, but keep a
   // reference to it for use below.
   auto &P = *Proto;
   state.FunctionProtos[Proto->getName()] = std::move(Proto);
-  llvm::Function *TheFunction = state.getFunction(P.getName());
+  llvm::Function *TheFunction = state.getFunctionInModule(P.getName());
   if (!TheFunction) {
     TheFunction = P.codegen(state);
   }
@@ -92,13 +92,13 @@ llvm::Function *FunctionAST::codegen(JitState &state) {
   return TheFunction;
 }
 
-llvm::Function *PrototypeAST::codegen(JitState &state) {
+llvm::Function *PrototypeAST::codegen(StrideCompiler &state) {
   // Make the function type:  double(double,double) etc.
   std::vector<llvm::Type *> Doubles(Args.size(),
                                     llvm::Type::getDoubleTy(*state.TheContext));
 
-  for (int i = 0; i < OutArgs.size(); i++) {
-    Doubles.emplace_back(llvm::Type::getDoublePtrTy(*state.TheContext));
+  for (const auto &arg : OutArgs) {
+    Doubles.emplace_back(arg.llvmType);
   }
   llvm::FunctionType *FT = llvm::FunctionType::get(
       llvm::Type::getInt32Ty(*state.TheContext), Doubles, false);
@@ -112,7 +112,7 @@ llvm::Function *PrototypeAST::codegen(JitState &state) {
     if (Idx < Args.size()) {
       Arg.setName(Args[Idx]);
     } else {
-      Arg.setName(OutArgs[Idx - Args.size()]);
+      Arg.setName(OutArgs[Idx - Args.size()].name);
     }
     Idx++;
   }
@@ -120,10 +120,10 @@ llvm::Function *PrototypeAST::codegen(JitState &state) {
   return F;
 }
 
-llvm::Value *CallExprAST::codegen(JitState &state) {
+llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
   std::cout << "CallExprAST codegen" << std::endl;
   // Look up the name in the global module table.
-  llvm::Function *CalleeF = state.getFunction(Callee);
+  llvm::Function *CalleeF = state.getFunctionInModule(Callee);
   if (!CalleeF) {
     return state.LogErrorV("Unknown function referenced");
   }

@@ -29,6 +29,7 @@ set(STRIDEJIT_SRC
   src/exprast.cpp
   src/numberexprast.cpp
   src/strideenvironment.cpp
+  src/stridecompiler.cpp
   src/functionast.cpp
 )
 
@@ -37,6 +38,7 @@ set(STRIDEJIT_HEADERS
   include/numberexprast.hpp
   include/strideenvironment.hpp
   include/functionast.hpp
+  include/stridecompiler.hpp
 )
 
 add_library(StrideJit 

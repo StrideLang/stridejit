@@ -1,0 +1,5 @@
+signal In {}
+signal Out {}
+
+In >> Cos() >> Out;
+Out >> Cos() >> Out;

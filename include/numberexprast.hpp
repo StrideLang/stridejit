@@ -5,14 +5,14 @@
 
 #include <map>
 
-class JitState;
+class StrideCompiler;
 
 class RealExprAST : public ExprAST {
   double Val;
 
 public:
   RealExprAST(double Val) : Val(Val) {}
-  llvm::Value *codegen(JitState &state) override;
+  llvm::Value *codegen(StrideCompiler &state) override;
 };
 
 class IntExprAST : public ExprAST {
@@ -20,17 +20,19 @@ class IntExprAST : public ExprAST {
 
 public:
   IntExprAST(int64_t Val) : Val(Val) {}
-  llvm::Value *codegen(JitState &state) override;
+  llvm::Value *codegen(StrideCompiler &state) override;
 };
 
 /// VariableExprAST - Expression class for referencing a variable, like "a".
 class VariableExprAST : public ExprAST {
   std::string Name;
+  std::string Type;
 
 public:
-  VariableExprAST(const std::string &Name) : Name(Name) {}
+  VariableExprAST(const std::string &Name, std::string strideType = "_RealType")
+      : Name(Name) {}
 
-  llvm::Value *codegen(JitState &state) override;
+  llvm::Value *codegen(StrideCompiler &state) override;
   const std::string &getName() const { return Name; }
 };
 
@@ -43,7 +45,7 @@ public:
   BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS,
                 std::unique_ptr<ExprAST> RHS);
 
-  llvm::Value *codegen(JitState &state) override;
+  llvm::Value *codegen(StrideCompiler &state) override;
 };
 
 class ListExprAST : public ExprAST {
@@ -53,7 +55,7 @@ public:
   ListExprAST() {}
 
   void addElement(std::unique_ptr<ExprAST> elem);
-  llvm::Value *codegen(JitState &state) override;
+  llvm::Value *codegen(StrideCompiler &state) override;
   std::vector<std::unique_ptr<ExprAST>> &elements() { return members; }
 };
 

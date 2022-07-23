@@ -4,15 +4,15 @@
 
 // ----------------------
 
-llvm::Value *RealExprAST::codegen(JitState &state) {
+llvm::Value *RealExprAST::codegen(StrideCompiler &state) {
   return llvm::ConstantFP::get(*state.TheContext, llvm::APFloat(Val));
 }
 
-llvm::Value *IntExprAST::codegen(JitState &state) {
+llvm::Value *IntExprAST::codegen(StrideCompiler &state) {
   return llvm::ConstantFP::get(*state.TheContext, llvm::APFloat(double(Val)));
 }
 
-llvm::Value *VariableExprAST::codegen(JitState &state) {
+llvm::Value *VariableExprAST::codegen(StrideCompiler &state) {
   // Look this variable up in the function.
   llvm::Value *V = state.NamedValues[Name];
   if (!V)
@@ -27,7 +27,7 @@ BinaryExprAST::BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS,
                              std::unique_ptr<ExprAST> RHS)
     : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
 
-llvm::Value *BinaryExprAST::codegen(JitState &state) {
+llvm::Value *BinaryExprAST::codegen(StrideCompiler &state) {
 
   // Special case '=' because we don't want to emit the LHS as an expression.
   if (Op == '=') {
@@ -92,6 +92,6 @@ void ListExprAST::addElement(std::unique_ptr<ExprAST> elem) {
   members.emplace_back(std::move(elem));
 }
 
-llvm::Value *ListExprAST::codegen(JitState &state) {
+llvm::Value *ListExprAST::codegen(StrideCompiler &state) {
   return llvm::ConstantTokenNone::get(*state.TheContext);
 }

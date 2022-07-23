@@ -15,7 +15,7 @@
 
 #include <map>
 
-class JitState;
+class StrideCompiler;
 
 class ExprAST {
 public:
@@ -23,7 +23,7 @@ public:
 
   virtual ~ExprAST() = default;
 
-  virtual llvm::Value *codegen(JitState &state) = 0;
+  virtual llvm::Value *codegen(StrideCompiler &state) = 0;
 };
 
 #endif // EXPRAST_HPP

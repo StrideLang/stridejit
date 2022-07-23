@@ -38,6 +38,57 @@
 
 using namespace llvm;
 
+TEST(JIT, SwitchOut) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "switchout.stride");
+
+  EXPECT_TRUE(ret);
+
+  auto EntrySym = strenv.JIT->lookup("DefaultDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
+
+  double in = 0;
+  bool out = false;
+
+  Entry(&in, &out);
+  EXPECT_FALSE(out);
+
+  in = 10;
+  Entry(&in, &out);
+  EXPECT_TRUE(out);
+
+  in = 1;
+  Entry(&in, &out);
+  EXPECT_FALSE(out);
+}
+
+TEST(JIT, CreateClass) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
+
+  EXPECT_TRUE(ret);
+
+  auto EntrySym = strenv.JIT->lookup("DefaultDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
+
+  double out;
+
+  Entry(&out);
+  EXPECT_EQ(out, 5);
+}
+
 TEST(JIT, List) {
 
   StrideEnvironment strenv;
@@ -143,27 +194,6 @@ TEST(JIT, MathFunction) {
 
   Entry(&out);
   EXPECT_EQ(out, 1.0);
-}
-
-TEST(JIT, CreateClass) {
-
-  StrideEnvironment strenv;
-
-  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
-
-  EXPECT_TRUE(ret);
-
-  auto EntrySym = strenv.JIT->lookup("DefaultDomain_process");
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = (void (*)(...))EntrySym->getAddress();
-
-  double out;
-
-  Entry(&out);
-  EXPECT_EQ(out, 5);
 }
 
 TEST(JIT, Create) {

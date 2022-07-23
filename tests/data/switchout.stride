@@ -1,0 +1,4 @@
+signal In {}
+switch Out {}
+
+[In, 2] >> Greater() >> Out;

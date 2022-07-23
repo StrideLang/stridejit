@@ -23,25 +23,31 @@
 
 #include "exprast.hpp"
 #include "numberexprast.hpp"
-class JitState;
+class StrideCompiler;
+
+struct PrototypeArg {
+  std::string name;
+  llvm::Type *llvmType;
+};
 
 /// PrototypeAST - This class represents the "prototype" for a function,
 /// which captures its name, and its argument names (thus implicitly the number
 /// of arguments the function takes).
+///
 class PrototypeAST {
   std::string Name;
   std::vector<std::string> Args;
-  std::vector<std::string> OutArgs;
+  std::vector<PrototypeArg> OutArgs;
   bool IsOperator;
   unsigned Precedence; // Precedence if a binary op.
 
 public:
   PrototypeAST(const std::string &Name, std::vector<std::string> Args,
-               std::vector<std::string> OutArgs, bool IsOperator = false,
+               std::vector<PrototypeArg> OutArgs, bool IsOperator = false,
                unsigned Prec = 0)
-      : Name(Name), Args(std::move(Args)), OutArgs(std::move(OutArgs)) {}
+      : Name(Name), Args(std::move(Args)), OutArgs(OutArgs) {}
 
-  llvm::Function *codegen(JitState &state);
+  llvm::Function *codegen(StrideCompiler &state);
   const std::string &getName() const { return Name; }
   bool isUnaryOp() const { return IsOperator && Args.size() == 1; }
   bool isBinaryOp() const { return IsOperator && Args.size() == 2; }
@@ -65,22 +71,22 @@ public:
   const PrototypeAST &getProto() const;
 
   const std::string &getName() const;
-  llvm::Function *codegen(JitState &state);
+  llvm::Function *codegen(StrideCompiler &state);
   std::vector<llvm::Function *> externalFunctions;
 };
 
 /// CallExprAST - Expression class for function calls.
 class CallExprAST : public ExprAST {
   std::string Callee;
-  std::vector<std::unique_ptr<ExprAST>> Args;
 
 public:
   CallExprAST(const std::string &Callee,
               std::vector<std::unique_ptr<ExprAST>> Args)
       : Callee(Callee), Args(std::move(Args)) {}
 
-  llvm::Value *codegen(JitState &state) override;
-  ;
+  llvm::Value *codegen(StrideCompiler &state) override;
+
+  std::vector<std::unique_ptr<ExprAST>> Args;
 };
 
 #endif // FUNCTIONAST_HPP
