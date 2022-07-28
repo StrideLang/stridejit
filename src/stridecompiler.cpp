@@ -37,29 +37,6 @@ StrideCompiler::StrideCompiler() {
 
   TheFPM->doInitialization();
 
-  // Initialize function map
-  {
-    llvm::FunctionType *FT =
-        llvm::FunctionType::get(llvm::Type::getDoubleTy(*TheContext),
-                                {llvm::Type::getDoubleTy(*TheContext)}, false);
-    functionMap["Sine"].push_back({"sin", FT});
-
-    FT = llvm::FunctionType::get(llvm::Type::getDoubleTy(*TheContext),
-                                 {llvm::Type::getDoubleTy(*TheContext)}, false);
-    functionMap["Cos"].push_back({"cos", FT});
-
-    FT = llvm::FunctionType::get(llvm::Type::getDoubleTy(*TheContext),
-                                 {llvm::Type::getDoubleTy(*TheContext),
-                                  llvm::Type::getDoubleTy(*TheContext)},
-                                 false);
-    functionMap["Greater"].push_back({"__stride_Greater_d_dd", FT});
-
-    FT = llvm::FunctionType::get(llvm::Type::getInt1Ty(*TheContext),
-                                 {llvm::Type::getDoubleTy(*TheContext),
-                                  llvm::Type::getDoubleTy(*TheContext)},
-                                 false);
-    functionMap["Greater"].push_back({"__stride_Greater_b_dd", FT});
-  }
   // Initialize types map
   typesMap["_RealType"] = llvm::Type::getDoubleTy(*TheContext);
   typesMap["_SwitchType"] = llvm::Type::getInt1Ty(*TheContext);

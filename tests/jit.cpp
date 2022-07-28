@@ -38,6 +38,19 @@
 
 using namespace llvm;
 
+TEST(JIT, DomainFunctions) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
+
+  EXPECT_TRUE(ret);
+
+  EXPECT_EQ(strenv.state.domainArgs.size(), 1);
+  EXPECT_EQ(strenv.state.domainArgs["RootDomain"].size(), 1);
+  EXPECT_EQ(strenv.state.domainArgs["RootDomain"][0], DataType::DOUBLE);
+}
+
 TEST(JIT, SwitchOut) {
 
   StrideEnvironment strenv;
@@ -46,7 +59,7 @@ TEST(JIT, SwitchOut) {
 
   EXPECT_TRUE(ret);
 
-  auto EntrySym = strenv.JIT->lookup("DefaultDomain_process");
+  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
   }
@@ -76,7 +89,7 @@ TEST(JIT, CreateClass) {
 
   EXPECT_TRUE(ret);
 
-  auto EntrySym = strenv.JIT->lookup("DefaultDomain_process");
+  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
   }
@@ -97,7 +110,7 @@ TEST(JIT, List) {
 
   EXPECT_TRUE(ret);
 
-  auto EntrySym = strenv.JIT->lookup("DefaultDomain_process");
+  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
   }
@@ -123,7 +136,7 @@ TEST(JIT, TwoStreams) {
 
   EXPECT_TRUE(ret);
 
-  auto EntrySym = strenv.JIT->lookup("DefaultDomain_process");
+  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
   }
@@ -153,7 +166,7 @@ TEST(JIT, IO) {
 
   EXPECT_TRUE(ret);
 
-  auto EntrySym = strenv.JIT->lookup("DefaultDomain_process");
+  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
   }
@@ -183,7 +196,7 @@ TEST(JIT, MathFunction) {
 
   EXPECT_TRUE(ret);
 
-  auto EntrySym = strenv.JIT->lookup("DefaultDomain_process");
+  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
   }
@@ -238,7 +251,7 @@ TEST(JIT, Create) {
           llvm::orc::ThreadSafeModule(std::move(strenv.state.TheModule),
                                       std::move(strenv.state.TheContext)))) {
   }
-  auto EntrySym = (*JIT)->lookup("DefaultDomain_process");
+  auto EntrySym = (*JIT)->lookup("RootDomain_process");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
   }

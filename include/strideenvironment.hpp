@@ -8,8 +8,6 @@
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/TargetSelect.h"
 
-#include <iostream>
-
 #include "astfunctions.h"
 #include "strideparser.h"
 
@@ -17,13 +15,16 @@
 
 class StrideEnvironment {
 public:
-  StrideEnvironment();
+  StrideEnvironment(std::string strideroot = std::string());
 
   bool compile(std::string path);
 
   StrideCompiler state;
   std::unique_ptr<llvm::orc::LLJIT> JIT;
   bool mVerbose{true};
+
+private:
+  std::string m_strideRoot;
 };
 
 #include "llvm/ADT/StringRef.h"

@@ -1,12 +1,89 @@
-#include "strideenvironment.hpp"
+#include <iostream>
 
-StrideEnvironment::StrideEnvironment() {}
+#include "astfunctions.h"
+#include "astquery.h"
+#include "strideenvironment.hpp"
+#include "stridelibrary.h"
+
+StrideEnvironment::StrideEnvironment(std::string strideRoot)
+    : m_strideRoot(strideRoot) {
+  if (m_strideRoot.size() == 0) {
+    m_strideRoot = ASTFunctions::getDefaultStrideRoot();
+  }
+  std::cout << "Using STRIDEROOT = " << m_strideRoot << std::endl;
+}
 
 bool StrideEnvironment::compile(std::string path) {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
   ASTNode tree;
   tree = ASTFunctions::parseFile(path.c_str());
+  auto systemNodes = ASTQuery::getSystemNodes(tree);
+  if (systemNodes.size() == 0) {
+    auto systemNode =
+        std::make_shared<SystemNode>("JIT", 1, 0, __FILE__, __LINE__);
+    tree->addChild(systemNode);
+  }
+
+  {
+    //    StrideLibrary library;
+    //    library.initializeLibrary(m_strideRoot);
+
+    std::vector<ASTNode> platformlib = ASTFunctions::loadAllInDirectory(
+        m_strideRoot + "/frameworks/JIT/1.0/platformlib");
+
+    for (const auto &member : platformlib) {
+      if (member->getNodeType() == AST::Declaration ||
+          member->getNodeType() == AST::BundleDeclaration) {
+        auto decl = std::static_pointer_cast<DeclarationNode>(member);
+        if (decl->getObjectType() == "platformModule") {
+          std::cout << "Loaded: " << decl->getName() << std::endl;
+          std::vector<llvm::Type *> parameters;
+          llvm::Type *retType = nullptr;
+          auto inputList = decl->getPropertyValue("inputs");
+          auto outputList = decl->getPropertyValue("outputs");
+          auto functionNameNode = decl->getPropertyValue("processing");
+          if (inputList && outputList && functionNameNode) {
+            for (const auto &input : inputList->getChildren()) {
+              if (input->getNodeType() == AST::Block) {
+                auto inputBlock = std::static_pointer_cast<BlockNode>(input);
+                auto inputType = inputBlock->getName();
+                if (state.typesMap.find(inputType) != state.typesMap.end()) {
+                  parameters.push_back(state.typesMap[inputType]);
+                } else {
+                  std::cerr << "Type not mapped: " << inputType << std::endl;
+                }
+              }
+            }
+            assert(outputList->getChildren().size() < 2);
+            if (outputList->getChildren().size() != 0) {
+              auto outputBlock = outputList->getChildren()[0];
+              if (outputBlock->getNodeType() == AST::Block) {
+                auto outputType =
+                    std::static_pointer_cast<BlockNode>(outputBlock)->getName();
+                if (state.typesMap.find(outputType) != state.typesMap.end()) {
+                  retType = state.typesMap[outputType];
+                } else {
+                  std::cerr << " Output Type not mapped: " << outputType
+                            << std::endl;
+                }
+              }
+            }
+            auto name = std::static_pointer_cast<ValueNode>(functionNameNode)
+                            ->getStringValue();
+            llvm::FunctionType *FT =
+                llvm::FunctionType::get(retType, parameters, false);
+            state.functionMap[decl->getName()].push_back(
+                ExternalFunction{name, FT});
+          }
+        }
+      }
+    }
+  }
+
+  if (!ASTFunctions::preprocess(tree)) {
+    return false;
+  }
 
   generateCode(tree, state);
 
@@ -373,6 +450,8 @@ void generateCode(ASTNode tree, StrideCompiler &state) {
   std::vector<std::string> MainArgs;
   std::vector<PrototypeArg> OutArgs;
 
+  std::vector<DataType> domainArgs;
+
   for (const auto &node : tree->getChildren()) {
     if (node->getNodeType() == AST::Stream) {
       auto stream = std::static_pointer_cast<StreamNode>(node);
@@ -384,7 +463,7 @@ void generateCode(ASTNode tree, StrideCompiler &state) {
         f->codegen(state);
       }
 
-      std::string domain = "DefaultDomain";
+      std::string domain = "RootDomain";
       domainCode[domain].emplace_back(std::move(code.expr));
       //      auto *RetVal =
       //          llvm::ConstantInt::get(state.Builder->getInt32Ty(), 0, true);
@@ -394,12 +473,22 @@ void generateCode(ASTNode tree, StrideCompiler &state) {
       if (decl->getObjectType() == "signal" ||
           decl->getObjectType() == "constant") {
         // Global signals become pointers to domain function
-        OutArgs.push_back({decl->getName(),
-                           llvm::PointerType::get(state.getLLVMType(decl), 0)});
+        auto *type = state.getLLVMType(decl);
+        OutArgs.push_back({decl->getName(), llvm::PointerType::get(type, 0)});
+        if (type->isDoubleTy()) {
+          domainArgs.push_back(DataType::DOUBLE);
+        } else if (type->isIntegerTy(1)) {
+          domainArgs.push_back(DataType::BOOL);
+        } else {
+          assert(0 == 1);
+        }
       } else if (decl->getObjectType() == "switch") {
         OutArgs.push_back(
             PrototypeArg{decl->getName(),
                          llvm::PointerType::get(state.getLLVMType(decl), 0)});
+        domainArgs.push_back(DataType::BOOL);
+      } else {
+        continue;
       }
     }
   }
@@ -411,5 +500,6 @@ void generateCode(ASTNode tree, StrideCompiler &state) {
         std::make_unique<FunctionAST>(std::move(proto), std::move(it->second));
 
     newfunc->codegen(state);
+    state.domainArgs[it->first] = domainArgs;
   }
 }
