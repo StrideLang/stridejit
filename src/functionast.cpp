@@ -1,5 +1,4 @@
 #include "functionast.hpp"
-
 #include "exprast.hpp"
 #include "strideenvironment.hpp"
 
@@ -60,6 +59,31 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     //      // state.NamedValues[std::string(Arg.getName())]);
     //    }
   }
+  for (const auto &v : internalVariables) {
+    // TODO avoid namespace clashes
+
+    if (v->getNodeType() == AST::Declaration) {
+      auto decl = std::static_pointer_cast<DeclarationNode>(v);
+      if (state.NamedValues.find(std::string(decl->getName())) ==
+          state.NamedValues.end()) {
+        // Create an alloca for this variable.
+        llvm::AllocaInst *Alloca =
+            state.CreateEntryBlockAlloca(TheFunction, decl->getName());
+        //        //      // Add arguments to variable symbol table.
+        //                        state.Builder->CreateStore(&Arg, Alloca);
+        //        //      // Store the initial value into the alloca.
+        //        auto argLoad =
+        //        state.Builder->CreateLoad(state.getLLVMType(decl),
+        //                                                 Alloca,
+        //                                                 decl->getName());
+        state.NamedValues[decl->getName()] = Alloca;
+      } else {
+      }
+    } else {
+      std::cerr << " Unsupported block declaration: " << AST::toText(v)
+                << std::endl;
+    }
+  }
   //  state.TheModule->dump();
 
   //  auto *out = state.TheModule->getGlobalVariable("Out");
@@ -86,9 +110,6 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   state.Builder->CreateRet(outVal);
   // Validate the generated code, checking for consistency.
   verifyFunction(*TheFunction);
-
-  //    state.TheModule->dump();
-  //    state.TheFPM->run(*TheFunction);
   return TheFunction;
 }
 

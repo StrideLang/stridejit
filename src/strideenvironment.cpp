@@ -87,8 +87,10 @@ bool StrideEnvironment::compile(std::string path) {
 
   generateCode(tree, state);
 
-  for (auto &F : *state.TheModule) {
-    state.TheFPM->run(F);
+  if (m_optimizeCode) {
+    for (auto &F : *state.TheModule) {
+      state.TheFPM->run(F);
+    }
   }
 
   auto JTMB = llvm::orc::JITTargetMachineBuilder::detectHost();
@@ -331,6 +333,7 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
       }
 
     } else if (current->getNodeType() == AST::Int ||
+               current->getNodeType() == AST::Real ||
                current->getNodeType() == AST::String) {
       generated.expr = createExpr(current);
     } else if (current->getNodeType() == AST::List) {
@@ -404,15 +407,19 @@ createFunctionDecl(std::shared_ptr<FunctionNode> func, ASTNode prev,
     }
   }
 
+  auto blocks = funcDecl->getPropertyValue("blocks");
+  std::vector<ASTNode> internalVariables = blocks->getChildren();
+
   auto streams = funcDecl->getPropertyValue("streams");
 
-  std::unique_ptr<ExprAST> collected, out;
+  std::vector<std::unique_ptr<ExprAST>> collected;
+  std::unique_ptr<ExprAST> out;
   std::vector<llvm::Function *> externalFunctions;
   for (const auto &streamNode : streams->getChildren()) {
     if (streamNode->getNodeType() == AST::Stream) {
       auto stream = std::static_pointer_cast<StreamNode>(streamNode);
       auto code = createStreamCode(stream, tree, state);
-      collected = std::move(code.expr);
+      collected.emplace_back(std::move(code.expr));
       externalFunctions.insert(externalFunctions.end(),
                                code.externalFunctions.begin(),
                                code.externalFunctions.end());
@@ -431,6 +438,7 @@ createFunctionDecl(std::shared_ptr<FunctionNode> func, ASTNode prev,
   auto newfunc =
       std::make_unique<FunctionAST>(std::move(proto), std::move(collected));
   newfunc->externalFunctions = std::move(externalFunctions);
+  newfunc->internalVariables = std::move(internalVariables);
   return newfunc;
 }
 

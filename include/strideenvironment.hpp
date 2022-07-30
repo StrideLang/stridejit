@@ -25,6 +25,7 @@ public:
 
 private:
   std::string m_strideRoot;
+  bool m_optimizeCode{true};
 };
 
 #include "llvm/ADT/StringRef.h"

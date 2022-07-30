@@ -23,6 +23,10 @@
 
 #include "exprast.hpp"
 #include "numberexprast.hpp"
+
+// From stride parser
+#include "ast.h"
+
 class StrideCompiler;
 
 struct PrototypeArg {
@@ -72,7 +76,9 @@ public:
 
   const std::string &getName() const;
   llvm::Function *codegen(StrideCompiler &state);
+
   std::vector<llvm::Function *> externalFunctions;
+  std::vector<ASTNode> internalVariables;
 };
 
 /// CallExprAST - Expression class for function calls.

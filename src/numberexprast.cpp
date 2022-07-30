@@ -49,17 +49,15 @@ llvm::Value *BinaryExprAST::codegen(StrideCompiler &state) {
           ("Unknown variable name: " + LHSE->getName()).c_str());
     Val->dump();
     Variable->dump();
-    //    auto global = state.TheModule->getGlobalVariable(Variable->getName());
-    //    if (const llvm::GlobalValue *G =
-    //            dynamic_cast<llvm::GlobalValue *>(global)) {
-    //      //      llvm::LoadInst *load =
-    //      state.Builder->CreateLoad(Val->getType(),
-    //      //      global);
+    if (Val->getType()->isPointerTy()) {
+      Val = state.Builder->CreateLoad(Val->getType(), Val);
+    }
 
-    //      //      state.Builder->CreateStore(Val, load);
-    //    } else {
-    //    }
     state.Builder->CreateStore(Val, Variable);
+    // This might be unnecessary if variable is not read further, but should
+    // be removed by optimization pass
+    //    state.NamedValues[LHSE->getName()] =
+    //        state.Builder->CreateLoad(Val->getType(), Variable);
 
     return Val;
   }
@@ -70,7 +68,16 @@ llvm::Value *BinaryExprAST::codegen(StrideCompiler &state) {
   //  R->dump();
   if (!L || !R)
     return nullptr;
-
+  L->dump();
+  R->dump();
+  if (L->getType()->isPointerTy()) {
+    L = state.Builder->CreateLoad(llvm::Type::getDoubleTy(*state.TheContext),
+                                  L);
+  }
+  if (R->getType()->isPointerTy()) {
+    R = state.Builder->CreateLoad(llvm::Type::getDoubleTy(*state.TheContext),
+                                  R);
+  }
   switch (Op) {
   case '+':
     return state.Builder->CreateFAdd(L, R, "addtmp");

@@ -1,0 +1,24 @@
+module AddTwo {
+    ports: [
+        mainInputPort {
+            block: Input
+        }
+        mainOutputPort {
+            block: Output
+        }
+    ]
+    blocks: [
+        signal Input {}
+        signal Output {}
+        signal Internal {}
+    ]
+    streams: [
+        2.0 >> Internal;
+        Internal + Input >> Output;
+    ]
+}
+
+
+signal Out {}
+
+3 >> AddTwo() >> Out;
