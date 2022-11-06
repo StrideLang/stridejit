@@ -4,10 +4,10 @@
 #include "stridecompiler.hpp"
 
 extern "C" {
-__declspec(dllexport) double __stride_Greater_d_dd(double a, double b) {
+EXPORT double __stride_Greater_d_dd(double a, double b) {
   return a > b ? 1.0 : 0.0;
 }
-__declspec(dllexport) bool __stride_Greater_b_dd(double a, double b) {
+EXPORT bool __stride_Greater_b_dd(double a, double b) {
   // TODO should be removed and llvm functions for this should be used instead
   return a > b;
 }

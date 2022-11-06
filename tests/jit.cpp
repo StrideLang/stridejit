@@ -72,36 +72,6 @@ TEST(JIT, DomainFunctions) {
   EXPECT_EQ(strenv.state.domainArgs["RootDomain"][0], DataType::DOUBLE);
 }
 
-TEST(JIT, SwitchOut) {
-
-  StrideEnvironment strenv;
-
-  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "switchout.stride");
-
-  EXPECT_TRUE(ret);
-
-  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = (void (*)(...))EntrySym->getAddress();
-
-  double in = 0;
-  bool out = false;
-
-  Entry(&in, &out);
-  EXPECT_FALSE(out);
-
-  in = 10;
-  Entry(&in, &out);
-  EXPECT_TRUE(out);
-
-  in = 1;
-  Entry(&in, &out);
-  EXPECT_FALSE(out);
-}
-
 TEST(JIT, CreateClass) {
 
   StrideEnvironment strenv;
@@ -123,61 +93,7 @@ TEST(JIT, CreateClass) {
   EXPECT_EQ(out, 5);
 }
 
-TEST(JIT, List) {
-
-  StrideEnvironment strenv;
-
-  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "listinput.stride");
-
-  EXPECT_TRUE(ret);
-
-  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = (void (*)(...))EntrySym->getAddress();
-
-  double in = 0;
-  double out = 0;
-
-  Entry(&in, &out);
-  EXPECT_EQ(out, 0.0);
-
-  in = 10;
-  Entry(&in, &out);
-  EXPECT_EQ(out, 1.0);
-}
-
-TEST(JIT, TwoStreams) {
-
-  StrideEnvironment strenv;
-
-  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "twostreams.stride");
-
-  EXPECT_TRUE(ret);
-
-  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = (void (*)(...))EntrySym->getAddress();
-
-  double in = 0;
-  double out = 0;
-
-  Entry(&in, &out);
-  EXPECT_EQ(out, cos(cos(in)));
-
-  in = 3.14159;
-  Entry(&in, &out);
-  EXPECT_FLOAT_EQ(out, cos(cos(in)));
-
-  in = 1.0;
-  Entry(&in, &out);
-  EXPECT_FLOAT_EQ(out, cos(cos(in)));
-}
+// TwoStreams, IO, MathFunction Failing with can't find declaration
 
 TEST(JIT, IO) {
 
@@ -283,4 +199,90 @@ TEST(JIT, Create) {
 
   Entry(&out);
   EXPECT_EQ(out, 5);
+}
+
+TEST(JIT, TwoStreams) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "twostreams.stride");
+
+  EXPECT_TRUE(ret);
+
+  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
+
+  double in = 0;
+  double out = 0;
+
+  Entry(&in, &out);
+  EXPECT_EQ(out, cos(cos(in)));
+
+  in = 3.14159;
+  Entry(&in, &out);
+  EXPECT_FLOAT_EQ(out, cos(cos(in)));
+
+  in = 1.0;
+  Entry(&in, &out);
+  EXPECT_FLOAT_EQ(out, cos(cos(in)));
+}
+
+TEST(JIT, SwitchOut) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "switchout.stride");
+
+  EXPECT_TRUE(ret);
+
+  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
+
+  double in = 0;
+  bool out = false;
+
+  Entry(&in, &out);
+  EXPECT_FALSE(out);
+
+  in = 10;
+  Entry(&in, &out);
+  EXPECT_TRUE(out);
+
+  in = 1;
+  Entry(&in, &out);
+  EXPECT_FALSE(out);
+}
+
+TEST(JIT, List) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "listinput.stride");
+
+  EXPECT_TRUE(ret);
+
+  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
+
+  double in = 0;
+  double out = 0;
+
+  Entry(&in, &out);
+  EXPECT_EQ(out, 0.0);
+
+  in = 10;
+  Entry(&in, &out);
+  EXPECT_EQ(out, 1.0);
 }

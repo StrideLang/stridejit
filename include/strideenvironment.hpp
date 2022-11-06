@@ -24,6 +24,8 @@ public:
   bool mVerbose{true};
 
 private:
+  bool loadLibrary(const char *libName, std::string &err);
+
   std::string m_strideRoot;
   bool m_optimizeCode{true};
 };

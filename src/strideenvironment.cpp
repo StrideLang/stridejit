@@ -1,9 +1,9 @@
+#include <filesystem>
 #include <iostream>
 
 #include "astfunctions.h"
 #include "astquery.h"
 #include "strideenvironment.hpp"
-#include "stridelibrary.h"
 
 StrideEnvironment::StrideEnvironment(std::string strideRoot)
     : m_strideRoot(strideRoot) {
@@ -75,6 +75,9 @@ bool StrideEnvironment::compile(std::string path) {
                 llvm::FunctionType::get(retType, parameters, false);
             state.functionMap[decl->getName()].push_back(
                 ExternalFunction{name, FT});
+
+            std::cout << "Loaded platform module: " << decl->getName()
+                      << std::endl;
           }
         }
       }
@@ -126,10 +129,31 @@ bool StrideEnvironment::compile(std::string path) {
   }
   JIT->getMainJITDylib().addGenerator(std::move(*librarySearch));
   // TODO only load required libraries
-  if (!llvm::sys::DynamicLibrary::LoadLibraryPermanently("m")) {
-    std::cerr << "Failed to load m" << std::endl;
+  std::string err;
+  if (!loadLibrary("m", err)) {
+    std::cerr << "Failed to load m: " << err << std::endl;
   }
-  llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr);
+  if (!loadLibrary("StrideLib", err)) {
+    std::cerr << "Failed to load StrideLib: " << err << std::endl;
+  }
+  if (!llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr, &err)) {
+    std::cerr << "Failed to load current symbols: " << err << std::endl;
+  }
+  //  if (!llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr, &err)) {
+  //    std::cerr << "Failed to load current symbols: " << err << std::endl;
+  //  }
+  JIT->getMainJITDylib().addGenerator(llvm::cantFail(
+      llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess('a')));
+  llvm::orc::SymbolMap M;
+  llvm::orc::MangleAndInterner Mangle(JIT->getExecutionSession(),
+                                      JIT->getDataLayout());
+  M[Mangle("__stride_Greater_b_dd")] = llvm::JITEvaluatedSymbol(
+      llvm::pointerToJITTargetAddress(&__stride_Greater_b_dd),
+      llvm::JITSymbolFlags());
+  M[Mangle("__stride_Greater_d_dd")] = llvm::JITEvaluatedSymbol(
+      llvm::pointerToJITTargetAddress(&__stride_Greater_d_dd),
+      llvm::JITSymbolFlags());
+  llvm::cantFail(JIT->getMainJITDylib().define(llvm::orc::absoluteSymbols(M)));
   if (mVerbose) {
     state.TheModule->dump();
   }
@@ -138,6 +162,40 @@ bool StrideEnvironment::compile(std::string path) {
     return false;
   }
   return true;
+}
+
+bool StrideEnvironment::loadLibrary(const char *libName, std::string &err) {
+  // TODO Do a proper comprehensive search for libs and fix for other systems
+  // On windows, just using the librery name seems to work, no need to add path.
+  std::vector<std::string> libPath = {"/lib/x86_64-linux-gnu/",
+                                      "/usr/lib/x86_64-linux-gnu/"};
+  for (const auto &path : libPath) {
+#ifdef WIN32
+    std::string libToLoad = libName;
+#else
+    //    auto libToLoad = path + "/lib" + libName + ".so";
+    //    if (!std::filesystem::exists(libToLoad)) {
+    //      continue;
+    //    }
+    //    if (std::filesystem::is_symlink(libToLoad)) {
+    //      libToLoad = std::filesystem::read_symlink(libToLoad).string();
+    //    }
+
+    std::string libToLoad = libName;
+    if (llvm::sys::DynamicLibrary::LoadLibraryPermanently(libToLoad.c_str(),
+                                                          &err)) {
+      std::cout << " Loaded lib: " << libToLoad << std::endl;
+      return true;
+    }
+    std::cout << " Trying: " << libToLoad << std::endl;
+#endif
+    if (llvm::sys::DynamicLibrary::LoadLibraryPermanently(libToLoad.c_str(),
+                                                          &err)) {
+      std::cout << " Loaded lib: " << libToLoad << std::endl;
+      return true;
+    }
+  }
+  return false;
 }
 
 ///////// -----------------------
@@ -164,8 +222,7 @@ llvm::orc::ThreadSafeModule irgenAndTakeOwnership(FunctionAST &FnAST,
     //        InitializeModule();
     return TSM;
   } else {
-
-    //        report_fatal_error("Couldn't compile lazily JIT'd function");
+    return llvm::orc::ThreadSafeModule();
   }
 }
 
@@ -231,6 +288,7 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
   ASTNode prev = nullptr;
   ASTNode next;
   ASTNode current;
+  std::shared_ptr<StreamNode> inputStream = stream;
 
   do {
     if (stream && stream->getNodeType() == AST::Stream) {
@@ -254,13 +312,18 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
       auto block = createExpr(current);
       if (prev && prev->getNodeType() == AST::Function) {
         auto prevFunc = std::static_pointer_cast<FunctionNode>(prev);
-        auto retType = llvm::Type::getDoubleTy(*state.TheContext);
         auto decl = ASTQuery::findDeclarationByName(
             ASTQuery::getNodeName(current), {}, tree);
-        if (decl) {
-          retType = state.getLLVMType(decl);
+        if (!decl) {
+          std::cerr << "No declaration for: " << ASTQuery::getNodeName(current)
+                    << " in " << AST::toText(inputStream) << " in "
+                    << inputStream->getFilename() << ":"
+                    << inputStream->getLine() << std::endl;
+          return generated;
         }
+        auto retType = state.getLLVMType(decl);
         auto &args = static_cast<CallExprAST *>(generated.expr.get())->Args;
+        assert(dynamic_cast<CallExprAST *>(generated.expr.get()));
         std::vector<llvm::Type *> argTypes;
         for (auto it = args.begin(); it != args.end(); it++) {
           argTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));

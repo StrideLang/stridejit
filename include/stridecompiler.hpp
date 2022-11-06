@@ -21,6 +21,26 @@
 #include "declarationnode.h"
 #include "functionast.hpp"
 
+#if defined(_MSC_VER)
+//  Microsoft
+#define EXPORT __declspec(dllexport)
+#define IMPORT __declspec(dllimport)
+#elif defined(__GNUC__)
+//  GCC
+#define EXPORT __attribute__((visibility("default")))
+#define IMPORT
+#else
+//  do nothing and hope for the best?
+#define EXPORT
+#define IMPORT
+#pragma warning Unknown dynamic link import / export semantics.
+#endif
+
+extern "C" {
+EXPORT double __stride_Greater_d_dd(double a, double b);
+EXPORT bool __stride_Greater_b_dd(double a, double b);
+}
+
 enum class DataType { DOUBLE, BOOL };
 
 struct ExternalFunction {
