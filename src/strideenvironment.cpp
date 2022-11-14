@@ -3,6 +3,7 @@
 
 #include "astfunctions.h"
 #include "astquery.h"
+#include "coderesolver.h"
 #include "strideenvironment.hpp"
 
 StrideEnvironment::StrideEnvironment(std::string strideRoot)
@@ -24,6 +25,9 @@ bool StrideEnvironment::compile(std::string path) {
         std::make_shared<SystemNode>("JIT", 1, 0, __FILE__, __LINE__);
     tree->addChild(systemNode);
   }
+
+  CodeResolver resolver(tree, ASTFunctions::getDefaultStrideRoot());
+  resolver.process();
   ScopeStack globalScope;
   {
     //    StrideLibrary library;

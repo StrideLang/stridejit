@@ -46,7 +46,7 @@ add_library(StrideJit
 )
 
 target_compile_options(StrideJit PRIVATE -fPIC)
-target_link_libraries(StrideJit PUBLIC StrideParser )
+target_link_libraries(StrideJit PUBLIC StrideParser StrideCodegen)
 target_include_directories(StrideJit PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 #add_dependencies(StrideJit llvm)
 
@@ -66,6 +66,19 @@ llvm_map_components_to_libnames(llvm_libs support core irreader orcjit
     #[[native]])
 target_link_libraries(StrideJit PUBLIC ${llvm_libs})
 
+set(STRIDELIB_SRC
+  src/libcompare.cpp
+)
+
+set(STRIDELIB_HEADERS
+  include/libcompare.hpp
+)
+
+add_library(StrideLib SHARED
+  ${STRIDELIB_SRC} ${STRIDELIB_HEADERS}
+)
+
+target_compile_options(StrideLib PUBLIC "-rdynamic")
 target_include_directories(StrideLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_definitions(StrideLib PUBLIC
   "-DSTRIDELIB_PATH=\"${CMAKE_CURRENT_BINARY_DIR}\"")
