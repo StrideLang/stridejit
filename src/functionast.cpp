@@ -94,6 +94,9 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   // Add arguments to variable symbol table.
 
   for (const auto &statement : Body) {
+    if (!statement) {
+      return nullptr;
+    }
     llvm::Value *RetVal = statement->codegen(state);
     if (!RetVal) {
       // Error reading body, remove function.

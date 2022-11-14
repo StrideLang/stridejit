@@ -24,26 +24,29 @@ bool StrideEnvironment::compile(std::string path) {
         std::make_shared<SystemNode>("JIT", 1, 0, __FILE__, __LINE__);
     tree->addChild(systemNode);
   }
-
+  ScopeStack globalScope;
   {
     //    StrideLibrary library;
     //    library.initializeLibrary(m_strideRoot);
 
+    globalScope.push_back({nullptr, {}});
     std::vector<ASTNode> platformlib = ASTFunctions::loadAllInDirectory(
         m_strideRoot + "/frameworks/JIT/1.0/platformlib");
+    auto &frameworkScope = globalScope.back().second;
 
     for (const auto &member : platformlib) {
       if (member->getNodeType() == AST::Declaration ||
           member->getNodeType() == AST::BundleDeclaration) {
         auto decl = std::static_pointer_cast<DeclarationNode>(member);
         if (decl->getObjectType() == "platformModule") {
-          std::cout << "Loaded: " << decl->getName() << std::endl;
           std::vector<llvm::Type *> parameters;
           llvm::Type *retType = nullptr;
           auto inputList = decl->getPropertyValue("inputs");
           auto outputList = decl->getPropertyValue("outputs");
           auto functionNameNode = decl->getPropertyValue("processing");
           if (inputList && outputList && functionNameNode) {
+            std::cout << "Loaded: " << decl->getName() << std::endl;
+            frameworkScope.push_back(decl);
             for (const auto &input : inputList->getChildren()) {
               if (input->getNodeType() == AST::Block) {
                 auto inputBlock = std::static_pointer_cast<BlockNode>(input);
@@ -84,11 +87,11 @@ bool StrideEnvironment::compile(std::string path) {
     }
   }
 
-  if (!ASTFunctions::preprocess(tree)) {
+  if (!ASTFunctions::preprocess(tree, &globalScope)) {
     return false;
   }
 
-  generateCode(tree, state);
+  generateCode(tree, &globalScope, state);
 
   if (m_optimizeCode) {
     for (auto &F : *state.TheModule) {
@@ -283,7 +286,7 @@ struct FunctionMapEntry {
 };
 
 GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
-                               StrideCompiler &state) {
+                               ScopeStack *scope, StrideCompiler &state) {
   GeneratedCode generated;
   ASTNode prev = nullptr;
   ASTNode next;
@@ -313,7 +316,7 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
       if (prev && prev->getNodeType() == AST::Function) {
         auto prevFunc = std::static_pointer_cast<FunctionNode>(prev);
         auto decl = ASTQuery::findDeclarationByName(
-            ASTQuery::getNodeName(current), {}, tree);
+            ASTQuery::getNodeName(current), *scope, tree);
         if (!decl) {
           std::cerr << "No declaration for: " << ASTQuery::getNodeName(current)
                     << " in " << AST::toText(inputStream) << " in "
@@ -362,11 +365,12 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
           ArgTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));
         }
       }
-      auto decl = ASTQuery::findDeclarationByName(ASTQuery::getNodeName(next),
-                                                  {}, tree);
-      if (decl) {
+
+      auto nextDecl = ASTQuery::findDeclarationByName(
+          ASTQuery::getNodeName(next), *scope, tree);
+      if (nextDecl) {
         auto externFunc = state.getExternalFunction(
-            newFunc->getName(), state.getLLVMType(decl), ArgTypes);
+            newFunc->getName(), state.getLLVMType(nextDecl), ArgTypes);
         if (externFunc) {
           if (!state.TheModule->getFunction(externFunc->name)) {
             generated.externalFunctions.push_back(llvm::Function::Create(
@@ -383,8 +387,13 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
             auto nextExpr = createExpr(next);
             Args.emplace_back(createExpr(next));
           }
-          generated.functions.push_back(
-              createFunctionDeclaration(newFunc, prev, next, tree, state));
+          auto newFuncDecl = createFunctionDeclaration(newFunc, prev, next,
+                                                       tree, scope, state);
+          if (newFuncDecl) {
+            generated.functions.push_back(std::move(newFuncDecl));
+          } else {
+            // Function already declared
+          }
 
           generated.expr = std::make_unique<CallExprAST>(
               std::string(newFunc->getName()), std::move(Args));
@@ -409,8 +418,9 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
 }
 
 std::unique_ptr<FunctionAST>
-createFunctionDecl(std::shared_ptr<FunctionNode> func, ASTNode prev,
-                   ASTNode next, ASTNode tree, StrideCompiler &state) {
+createFunctionDeclaration(std::shared_ptr<FunctionNode> func, ASTNode prev,
+                          ASTNode next, ASTNode tree, ScopeStack *scope,
+                          StrideCompiler &state) {
 
   auto funcDecl = ASTQuery::findDeclarationByName(func->getName(), {}, tree);
   if (!funcDecl) {
@@ -470,7 +480,17 @@ createFunctionDecl(std::shared_ptr<FunctionNode> func, ASTNode prev,
     }
   }
 
+  auto ports = funcDecl->getPropertyValue("ports");
   auto blocks = funcDecl->getPropertyValue("blocks");
+  auto functionScope = *scope;
+  for (const auto &blockDecl : blocks->getChildren()) {
+    for (auto &scopeHead : functionScope) {
+      if (scopeHead.first == nullptr) {
+        scopeHead.second.push_back(blockDecl);
+      }
+    }
+  }
+
   std::vector<ASTNode> internalVariables = blocks->getChildren();
 
   auto streams = funcDecl->getPropertyValue("streams");
@@ -481,7 +501,7 @@ createFunctionDecl(std::shared_ptr<FunctionNode> func, ASTNode prev,
   for (const auto &streamNode : streams->getChildren()) {
     if (streamNode->getNodeType() == AST::Stream) {
       auto stream = std::static_pointer_cast<StreamNode>(streamNode);
-      auto code = createStreamCode(stream, tree, state);
+      auto code = createStreamCode(stream, tree, &functionScope, state);
       collected.emplace_back(std::move(code.expr));
       externalFunctions.insert(externalFunctions.end(),
                                code.externalFunctions.begin(),
@@ -505,16 +525,7 @@ createFunctionDecl(std::shared_ptr<FunctionNode> func, ASTNode prev,
   return newfunc;
 }
 
-std::unique_ptr<FunctionAST>
-createFunctionDeclaration(std::shared_ptr<FunctionNode> func, ASTNode prev,
-                          ASTNode next, ASTNode tree, StrideCompiler &state) {
-
-  auto funcDecl = createFunctionDecl(func, prev, next, tree, state);
-
-  return funcDecl;
-}
-
-void generateCode(ASTNode tree, StrideCompiler &state) {
+void generateCode(ASTNode tree, ScopeStack *scope, StrideCompiler &state) {
 
   //  createGlobals(tree, state);
   std::map<std::string, std::vector<std::unique_ptr<ExprAST>>> domainCode;
@@ -528,7 +539,7 @@ void generateCode(ASTNode tree, StrideCompiler &state) {
       auto stream = std::static_pointer_cast<StreamNode>(node);
       std::vector<std::unique_ptr<ExprAST>> Args;
 
-      auto code = createStreamCode(stream, tree, state);
+      auto code = createStreamCode(stream, tree, scope, state);
 
       for (const auto &f : code.functions) {
         f->codegen(state);

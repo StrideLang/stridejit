@@ -8,27 +8,10 @@
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/TargetSelect.h"
 
-#include "astfunctions.h"
+//#include "astfunctions.h"
 #include "strideparser.h"
 
 #include "stridecompiler.hpp"
-
-class StrideEnvironment {
-public:
-  StrideEnvironment(std::string strideroot = std::string());
-
-  bool compile(std::string path);
-
-  StrideCompiler state;
-  std::unique_ptr<llvm::orc::LLJIT> JIT;
-  bool mVerbose{true};
-
-private:
-  bool loadLibrary(const char *libName, std::string &err);
-
-  std::string m_strideRoot;
-  bool m_optimizeCode{true};
-};
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
@@ -51,6 +34,23 @@ private:
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
 
+class StrideEnvironment {
+public:
+  StrideEnvironment(std::string strideroot = std::string());
+
+  bool compile(std::string path);
+
+  StrideCompiler state;
+  std::unique_ptr<llvm::orc::LLJIT> JIT;
+  bool mVerbose{true};
+
+private:
+  bool loadLibrary(const char *libName, std::string &err);
+
+  std::string m_strideRoot;
+  bool m_optimizeCode{true};
+};
+
 /// This will compile FnAST to IR, rename the function to add the given
 /// suffix (needed to prevent a name-clash with the function's stub),
 /// and then take ownership of the module that the function was compiled
@@ -58,8 +58,6 @@ private:
 llvm::orc::ThreadSafeModule irgenAndTakeOwnership(FunctionAST &FnAST,
                                                   const std::string &Suffix,
                                                   StrideCompiler &state);
-
-#include "strideparser.h"
 
 struct GeneratedCode {
   std::unique_ptr<ExprAST> expr;
@@ -70,18 +68,14 @@ struct GeneratedCode {
 std::unique_ptr<ExprAST> createExpr(ASTNode node);
 
 GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
-                               StrideCompiler &state);
-
-std::unique_ptr<FunctionAST>
-createFunctionDecl(std::shared_ptr<FunctionNode> func, ASTNode prev,
-                   ASTNode next, ASTNode tree, StrideCompiler &state);
-
+                               ScopeStack *scope, StrideCompiler &state);
 std::unique_ptr<FunctionAST>
 createFunctionDeclaration(std::shared_ptr<FunctionNode> func, ASTNode prev,
-                          ASTNode next, ASTNode tree, StrideCompiler &state);
+                          ASTNode next, ASTNode tree, ScopeStack *scope,
+                          StrideCompiler &state);
 
 // void createGlobals(ASTNode tree, JitState &state);
 
-void generateCode(ASTNode tree, StrideCompiler &state);
+void generateCode(ASTNode tree, ScopeStack *scope, StrideCompiler &state);
 
 #endif // STRIDEENVIRONMENT_HPP

@@ -27,8 +27,10 @@ TEST(Function, Simple) {
   auto next = std::static_pointer_cast<StreamNode>(
                   std::static_pointer_cast<StreamNode>(stream)->getRight())
                   ->getRight();
-  auto func =
-      createFunctionDeclaration(addFunc, prev, next, tree, strenv.state);
+
+  ScopeStack scope;
+  auto func = createFunctionDeclaration(addFunc, prev, next, tree, &scope,
+                                        strenv.state);
   auto *v = func->codegen(strenv.state);
   EXPECT_NE(v, nullptr);
 
@@ -126,7 +128,8 @@ TEST(Function, FunctionCall) {
 
   StrideEnvironment strenv;
 
-  generateCode(tree, strenv.state);
+  ScopeStack scope;
+  generateCode(tree, &scope, strenv.state);
 
   strenv.state.TheModule->dump();
 
