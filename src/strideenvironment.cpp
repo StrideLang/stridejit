@@ -3,6 +3,7 @@
 
 #include "astfunctions.h"
 #include "astquery.h"
+#include "codeanalysis.hpp"
 #include "coderesolver.h"
 #include "strideenvironment.hpp"
 
@@ -312,9 +313,27 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
       next = nullptr;
       stream = nullptr;
     }
+    auto domainName = CodeAnalysis::getNodeDomainName(current, *scope, tree);
+    if (domainName.size() == 0) {
+      auto streamPtr = stream;
+      // FIXME resolve downstream domains correctly
+      auto connection =
+          CodeAnalysis::resolveConnectionBlock(next, *scope, tree, true);
+      if (connection) {
+        domainName = CodeAnalysis::getNodeDomainName(connection, *scope, tree);
+      } else {
+        domainName = "RootDomain";
+      }
+    }
+    if (generated.find(domainName) != generated.end()) {
+      if (generated[domainName].expr) {
+        std::cout << "ERROR. Overwriting expr" << std::endl;
+        //        assert(false);
+      }
+    }
     if (current->getNodeType() == AST::Expression) {
       assert(prev == nullptr);
-      generated.expr = createExpr(current);
+      generated[domainName].expr = createExpr(current);
     } else if (current->getNodeType() == AST::Block) {
       auto block = createExpr(current);
       if (prev && prev->getNodeType() == AST::Function) {
@@ -329,8 +348,9 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
           return generated;
         }
         auto retType = state.getLLVMType(decl);
-        auto &args = static_cast<CallExprAST *>(generated.expr.get())->Args;
-        assert(dynamic_cast<CallExprAST *>(generated.expr.get()));
+        auto &args =
+            static_cast<CallExprAST *>(generated[domainName].expr.get())->Args;
+        assert(dynamic_cast<CallExprAST *>(generated[domainName].expr.get()));
         std::vector<llvm::Type *> argTypes;
         for (auto it = args.begin(); it != args.end(); it++) {
           argTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));
@@ -341,16 +361,16 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
         auto externFunc =
             state.getExternalFunction(prevFunc->getName(), retType, argTypes);
         if (externFunc) {
-          generated.expr = std::make_unique<BinaryExprAST>(
-              '=', std::move(block), std::move(generated.expr));
+          generated[domainName].expr = std::make_unique<BinaryExprAST>(
+              '=', std::move(block), std::move(generated[domainName].expr));
         } else {
           // Stride Functions pass the output as arguments, so no need to assign
         }
-      } else if (generated.expr) {
-        generated.expr = std::make_unique<BinaryExprAST>(
-            '=', std::move(block), std::move(generated.expr));
+      } else if (generated[domainName].expr) {
+        generated[domainName].expr = std::make_unique<BinaryExprAST>(
+            '=', std::move(block), std::move(generated[domainName].expr));
       } else {
-        generated.expr = std::move(block);
+        generated[domainName].expr = std::move(block);
       }
 
     } else if (current->getNodeType() == AST::Function) {
@@ -358,14 +378,15 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
       std::vector<std::unique_ptr<ExprAST>> Args;
       std::vector<llvm::Type *> ArgTypes;
       if (prev) { // inputs
-        if (auto *v = dynamic_cast<ListExprAST *>(generated.expr.get())) {
+        if (auto *v =
+                dynamic_cast<ListExprAST *>(generated[domainName].expr.get())) {
           for (auto elem = v->elements().begin(); elem != v->elements().end();
                elem++) {
             Args.emplace_back(std::move(*elem));
             ArgTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));
           }
         } else {
-          Args.emplace_back(std::move(generated.expr));
+          Args.emplace_back(std::move(generated[domainName].expr));
           ArgTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));
         }
       }
@@ -377,12 +398,13 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
             newFunc->getName(), state.getLLVMType(nextDecl), ArgTypes);
         if (externFunc) {
           if (!state.TheModule->getFunction(externFunc->name)) {
-            generated.externalFunctions.push_back(llvm::Function::Create(
-                externFunc->llvmFunctionType, llvm::Function::ExternalLinkage,
-                externFunc->name, *state.TheModule));
+            generated[domainName].externalFunctions.push_back(
+                llvm::Function::Create(externFunc->llvmFunctionType,
+                                       llvm::Function::ExternalLinkage,
+                                       externFunc->name, *state.TheModule));
           }
 
-          generated.expr =
+          generated[domainName].expr =
               std::make_unique<CallExprAST>(externFunc->name, std::move(Args));
         } else {
           if (next) { // outputs
@@ -394,12 +416,12 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
           auto newFuncDecl = createFunctionDeclaration(newFunc, prev, next,
                                                        tree, scope, state);
           if (newFuncDecl) {
-            generated.functions.push_back(std::move(newFuncDecl));
+            generated[domainName].functions.push_back(std::move(newFuncDecl));
           } else {
             // Function already declared
           }
 
-          generated.expr = std::make_unique<CallExprAST>(
+          generated[domainName].expr = std::make_unique<CallExprAST>(
               std::string(newFunc->getName()), std::move(Args));
         }
 
@@ -411,9 +433,9 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
     } else if (current->getNodeType() == AST::Int ||
                current->getNodeType() == AST::Real ||
                current->getNodeType() == AST::String) {
-      generated.expr = createExpr(current);
+      generated[domainName].expr = createExpr(current);
     } else if (current->getNodeType() == AST::List) {
-      generated.expr = createExpr(current);
+      generated[domainName].expr = createExpr(current);
     }
     prev = current;
     current = next;
@@ -506,10 +528,12 @@ createFunctionDeclaration(std::shared_ptr<FunctionNode> func, ASTNode prev,
     if (streamNode->getNodeType() == AST::Stream) {
       auto stream = std::static_pointer_cast<StreamNode>(streamNode);
       auto code = createStreamCode(stream, tree, &functionScope, state);
-      collected.emplace_back(std::move(code.expr));
-      externalFunctions.insert(externalFunctions.end(),
-                               code.externalFunctions.begin(),
-                               code.externalFunctions.end());
+      for (auto &domainCode : code) {
+        collected.emplace_back(std::move(domainCode.second.expr));
+        externalFunctions.insert(externalFunctions.end(),
+                                 domainCode.second.externalFunctions.begin(),
+                                 domainCode.second.externalFunctions.end());
+      }
     } else {
     }
   }
@@ -532,7 +556,8 @@ createFunctionDeclaration(std::shared_ptr<FunctionNode> func, ASTNode prev,
 void generateCode(ASTNode tree, ScopeStack *scope, StrideCompiler &state) {
 
   //  createGlobals(tree, state);
-  std::map<std::string, std::vector<std::unique_ptr<ExprAST>>> domainCode;
+  std::map<std::string, std::vector<std::unique_ptr<ExprAST>>>
+      domainGeneratedCode;
   std::vector<std::string> MainArgs;
   std::vector<PrototypeArg> OutArgs;
 
@@ -544,13 +569,14 @@ void generateCode(ASTNode tree, ScopeStack *scope, StrideCompiler &state) {
       std::vector<std::unique_ptr<ExprAST>> Args;
 
       auto code = createStreamCode(stream, tree, scope, state);
-
-      for (const auto &f : code.functions) {
-        f->codegen(state);
+      for (auto &domainCode : code) {
+        for (const auto &f : domainCode.second.functions) {
+          f->codegen(state);
+        }
+        domainGeneratedCode[domainCode.first].emplace_back(
+            std::move(domainCode.second.expr));
       }
 
-      std::string domain = "RootDomain";
-      domainCode[domain].emplace_back(std::move(code.expr));
       //      auto *RetVal =
       //          llvm::ConstantInt::get(state.Builder->getInt32Ty(), 0, true);
       //      state.Builder->CreateRet(RetVal);
@@ -578,7 +604,8 @@ void generateCode(ASTNode tree, ScopeStack *scope, StrideCompiler &state) {
       }
     }
   }
-  for (auto it = domainCode.begin(); it != domainCode.end(); it++) {
+  for (auto it = domainGeneratedCode.begin(); it != domainGeneratedCode.end();
+       it++) {
     auto proto = std::make_unique<PrototypeAST>(
         std::string(it->first + "_process"), MainArgs, OutArgs);
 

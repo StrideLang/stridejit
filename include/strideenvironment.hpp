@@ -59,11 +59,13 @@ llvm::orc::ThreadSafeModule irgenAndTakeOwnership(FunctionAST &FnAST,
                                                   const std::string &Suffix,
                                                   StrideCompiler &state);
 
-struct GeneratedCode {
+struct DomainCode {
   std::unique_ptr<ExprAST> expr;
   std::vector<std::unique_ptr<FunctionAST>> functions;
   std::vector<llvm::Function *> externalFunctions;
 };
+
+using GeneratedCode = std::map<std::string, DomainCode>;
 
 std::unique_ptr<ExprAST> createExpr(ASTNode node);
 
