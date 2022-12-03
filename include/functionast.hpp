@@ -62,6 +62,8 @@ public:
   unsigned getBinaryPrecedence() const { return Precedence; }
 };
 
+enum class CallableType { Module, Reaction, Loop };
+
 class FunctionAST {
   std::unique_ptr<PrototypeAST> Proto;
   std::vector<std::unique_ptr<ExprAST>> Body;
@@ -79,20 +81,27 @@ public:
 
   std::vector<llvm::Function *> externalFunctions;
   std::vector<ASTNode> internalVariables;
+
+  CallableType callType;
 };
 
 /// CallExprAST - Expression class for function calls.
 class CallExprAST : public ExprAST {
+protected:
   std::string Callee;
 
 public:
   CallExprAST(const std::string &Callee,
-              std::vector<std::unique_ptr<ExprAST>> Args)
-      : Callee(Callee), Args(std::move(Args)) {}
+              std::vector<std::unique_ptr<ExprAST>> Args, int mainArgInCount)
+      : Callee(Callee), Args(std::move(Args)), ArgInCount(mainArgInCount) {}
 
   llvm::Value *codegen(StrideCompiler &state) override;
 
+  CallableType callType;
+
   std::vector<std::unique_ptr<ExprAST>> Args;
+  int ArgInCount;
+  bool isExternal{false};
 };
 
 #endif // FUNCTIONAST_HPP

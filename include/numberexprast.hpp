@@ -23,6 +23,14 @@ public:
   llvm::Value *codegen(StrideCompiler &state) override;
 };
 
+class BoolExprAST : public ExprAST {
+  bool Val;
+
+public:
+  BoolExprAST(int64_t Val) : Val(Val) {}
+  llvm::Value *codegen(StrideCompiler &state) override;
+};
+
 /// VariableExprAST - Expression class for referencing a variable, like "a".
 class VariableExprAST : public ExprAST {
   std::string Name;

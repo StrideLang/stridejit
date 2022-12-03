@@ -1,0 +1,4 @@
+
+
+signal S { domain: RootDomain}
+on >> reaction { S + 3 >> S;};

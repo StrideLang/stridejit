@@ -39,7 +39,10 @@ StrideCompiler::StrideCompiler() {
 
   // Initialize types map
   typesMap["_RealType"] = llvm::Type::getDoubleTy(*TheContext);
+  typesMap["_DoubleType"] = llvm::Type::getDoubleTy(*TheContext);
   typesMap["_SwitchType"] = llvm::Type::getInt1Ty(*TheContext);
+
+  typesMap[""] = llvm::Type::getVoidTy(*TheContext);
 }
 
 std::optional<ExternalFunction> StrideCompiler::getExternalFunction(
@@ -50,6 +53,7 @@ std::optional<ExternalFunction> StrideCompiler::getExternalFunction(
     if (externFunc.first == strideName) {
       for (const auto &candidate : externFunc.second) {
         llvm::FunctionType *llvmFType = candidate.llvmFunctionType;
+        std::cout << llvmFType->getReturnType() << std::endl;
         if (llvmFType->getReturnType() == returnType) {
           if (argTypes.size() == llvmFType->getNumParams()) {
             for (int i = 0; i < argTypes.size(); i++) {
@@ -90,6 +94,9 @@ StrideCompiler::CreateEntryBlockAlloca(llvm::Function *TheFunction,
 }
 
 llvm::Type *StrideCompiler::getLLVMType(std::shared_ptr<DeclarationNode> decl) {
+  if (!decl) {
+    return typesMap[""];
+  }
   auto typePropNode = decl->getPropertyValue("type");
   std::string type = "_RealType";
   if (decl->getObjectType() == "switch") {

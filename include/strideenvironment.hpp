@@ -63,6 +63,8 @@ struct DomainCode {
   std::unique_ptr<ExprAST> expr;
   std::vector<std::unique_ptr<FunctionAST>> functions;
   std::vector<llvm::Function *> externalFunctions;
+  std::vector<ASTNode> readVariables;
+  std::vector<ASTNode> writeVariables;
 };
 
 using GeneratedCode = std::map<std::string, DomainCode>;

@@ -153,11 +153,17 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
   }
 
   // If argument mismatch error.
-  if (CalleeF->arg_size() != Args.size())
-    return state.LogErrorV("Incorrect # arguments passed");
+  auto argSize = Args.size();
+  if (isExternal) {
+    argSize--;
+  }
+  //  if (CalleeF->arg_size() != argSize) {
+  //    argSize++;
+  //  }
+  //    return state.LogErrorV("Incorrect # arguments passed");
 
   std::vector<llvm::Value *> ArgsV;
-  for (unsigned i = 0, e = Args.size(); i != e; ++i) {
+  for (unsigned i = 0, e = argSize; i != e; ++i) {
     auto *value = Args[i]->codegen(state);
     if (value->getType()->isTokenTy()) {
       auto *list = dynamic_cast<ListExprAST *>(Args[i].get());

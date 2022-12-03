@@ -44,9 +44,14 @@ llvm::Value *BinaryExprAST::codegen(StrideCompiler &state) {
       return nullptr;
     // Look up the name.
     llvm::Value *Variable = state.NamedValues[LHSE->getName()];
-    if (!Variable)
-      return state.LogErrorV(
-          ("Unknown variable name: " + LHSE->getName()).c_str());
+    if (!Variable) {
+      auto global = state.TheModule->getNamedGlobal(LHSE->getName());
+      Variable = global;
+      if (!Variable) {
+        return state.LogErrorV(
+            ("Unknown variable name: " + LHSE->getName()).c_str());
+      }
+    }
     Val->dump();
     Variable->dump();
     if (Val->getType()->isPointerTy()) {
@@ -101,4 +106,8 @@ void ListExprAST::addElement(std::unique_ptr<ExprAST> elem) {
 
 llvm::Value *ListExprAST::codegen(StrideCompiler &state) {
   return llvm::ConstantTokenNone::get(*state.TheContext);
+}
+
+llvm::Value *BoolExprAST::codegen(StrideCompiler &state) {
+  return llvm::ConstantInt::get(*state.TheContext, llvm::APSInt(Val ? 1 : 0));
 }
