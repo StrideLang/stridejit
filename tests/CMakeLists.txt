@@ -18,7 +18,7 @@ if (STRIDEJIT_BUILD_TESTS)
     endif()
     set(TEST_SOURCES main.cpp
       jit.cpp
-      basic.cpp
+#      basic.cpp
     )
     add_executable(stridejit_tests ${TEST_SOURCES})
 

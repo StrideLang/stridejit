@@ -69,13 +69,6 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
         // Create an alloca for this variable.
         llvm::AllocaInst *Alloca =
             state.CreateEntryBlockAlloca(TheFunction, decl->getName());
-        //        //      // Add arguments to variable symbol table.
-        //                        state.Builder->CreateStore(&Arg, Alloca);
-        //        //      // Store the initial value into the alloca.
-        //        auto argLoad =
-        //        state.Builder->CreateLoad(state.getLLVMType(decl),
-        //                                                 Alloca,
-        //                                                 decl->getName());
         state.NamedValues[decl->getName()] = Alloca;
       } else {
       }
@@ -118,10 +111,12 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
 
 llvm::Function *PrototypeAST::codegen(StrideCompiler &state) {
   // Make the function type:  double(double,double) etc.
-  std::vector<llvm::Type *> Doubles(Args.size(),
-                                    llvm::Type::getDoubleTy(*state.TheContext));
+  std::vector<llvm::Type *> Doubles;
 
   for (const auto &arg : OutArgs) {
+    Doubles.emplace_back(arg.llvmType);
+  }
+  for (const auto &arg : Args) {
     Doubles.emplace_back(arg.llvmType);
   }
   llvm::FunctionType *FT = llvm::FunctionType::get(
@@ -133,10 +128,10 @@ llvm::Function *PrototypeAST::codegen(StrideCompiler &state) {
   // Set names for all arguments.
   unsigned Idx = 0;
   for (auto &Arg : F->args()) {
-    if (Idx < Args.size()) {
-      Arg.setName(Args[Idx]);
+    if (Idx < OutArgs.size()) {
+      Arg.setName(OutArgs[Idx].name);
     } else {
-      Arg.setName(OutArgs[Idx - Args.size()].name);
+      Arg.setName(Args[Idx - Args.size()].name);
     }
     Idx++;
   }
@@ -152,48 +147,115 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
     return state.LogErrorV("Unknown function referenced");
   }
 
-  // If argument mismatch error.
-  auto argSize = Args.size();
-  if (isExternal) {
-    argSize--;
-  }
-  //  if (CalleeF->arg_size() != argSize) {
-  //    argSize++;
-  //  }
-  //    return state.LogErrorV("Incorrect # arguments passed");
+  auto func = [](llvm::Value *value, llvm::Argument *arg,
+                 StrideCompiler &state) {
+    llvm::Value *ArgsV = value;
+    if (value->getType()->isPointerTy() && !arg->getType()->isPointerTy()) {
+      ArgsV = state.Builder->CreateLoad(
+          llvm::Type::getDoubleTy(*state.TheContext), value, "");
+    }
+    if (!value->getType()->isPointerTy() && arg->getType()->isPointerTy()) {
+      ArgsV = state.Builder->CreateAlloca(
+          llvm::Type::getDoubleTy(*state.TheContext), nullptr, "Temp");
+      state.Builder->CreateStore(value, ArgsV);
+    }
+    //    ArgsV->dump();
+    //    ArgsV->getType()->dump();
+    return ArgsV;
+  };
 
-  std::vector<llvm::Value *> ArgsV;
-  for (unsigned i = 0, e = argSize; i != e; ++i) {
-    auto *value = Args[i]->codegen(state);
+  std::vector<llvm::Value *> CallArgs;
+
+  for (unsigned i = 0, e = OutArgs.size(); i != e; ++i) {
+    llvm::Value *value = OutArgs[i]->codegen(state);
     if (value->getType()->isTokenTy()) {
-      auto *list = dynamic_cast<ListExprAST *>(Args[i].get());
+      auto *list = dynamic_cast<ListExprAST *>(OutArgs[i].get());
       assert(list);
       for (const auto &expr : list->elements()) {
-        ArgsV.push_back(expr->codegen(state));
-        if (!ArgsV.back())
+        auto newArg = func(expr->codegen(state), CalleeF->getArg(i), state);
+        if (!newArg)
           return nullptr;
-        ArgsV.back()->dump();
-        ArgsV.back()->getType()->dump();
-        if (ArgsV.back()->getType()->isPointerTy() &&
+        CallArgs.push_back(std::move(newArg));
+        if (CallArgs.back()->getType()->isPointerTy() &&
             !CalleeF->getArg(i)->getType()->isPointerTy()) {
-          ArgsV.back() = state.Builder->CreateLoad(
-              llvm::Type::getDoubleTy(*state.TheContext), ArgsV.back(), "");
+          CallArgs.back() = state.Builder->CreateLoad(
+              llvm::Type::getDoubleTy(*state.TheContext), CallArgs.back(), "");
         }
       }
 
     } else {
-      ArgsV.push_back(value);
-      if (!ArgsV.back())
+      auto newArg = func(value, CalleeF->getArg(i), state);
+      if (!newArg)
         return nullptr;
-      ArgsV.back()->dump();
-      ArgsV.back()->getType()->dump();
-      if (ArgsV.back()->getType()->isPointerTy() &&
+      CallArgs.push_back(std::move(newArg));
+      if (CallArgs.back()->getType()->isPointerTy() &&
           !CalleeF->getArg(i)->getType()->isPointerTy()) {
-        ArgsV.back() = state.Builder->CreateLoad(
-            llvm::Type::getDoubleTy(*state.TheContext), ArgsV.back(), "");
+        CallArgs.back() = state.Builder->CreateLoad(
+            llvm::Type::getDoubleTy(*state.TheContext), CallArgs.back(), "");
       }
     }
   }
+
+  for (unsigned i = 0, e = InArgs.size(); i != e; ++i) {
+    llvm::Value *value = InArgs[i]->codegen(state);
+    if (value->getType()->isTokenTy()) {
+      auto *list = dynamic_cast<ListExprAST *>(InArgs[i].get());
+      assert(list);
+      for (const auto &expr : list->elements()) {
+        auto newArg = func(expr->codegen(state), CalleeF->getArg(i), state);
+        if (!newArg)
+          return nullptr;
+        CallArgs.push_back(std::move(newArg));
+        if (CallArgs.back()->getType()->isPointerTy() &&
+            !CalleeF->getArg(i)->getType()->isPointerTy()) {
+          CallArgs.back() = state.Builder->CreateLoad(
+              llvm::Type::getDoubleTy(*state.TheContext), CallArgs.back(), "");
+        }
+      }
+    } else {
+      auto newArg = func(value, CalleeF->getArg(i), state);
+      if (!newArg)
+        return nullptr;
+      CallArgs.push_back(std::move(newArg));
+      if (CallArgs.back()->getType()->isPointerTy() &&
+          !CalleeF->getArg(i)->getType()->isPointerTy()) {
+        CallArgs.back() = state.Builder->CreateLoad(
+            llvm::Type::getDoubleTy(*state.TheContext), CallArgs.back(), "");
+      }
+    }
+  }
+
   CalleeF->dump();
-  return state.Builder->CreateCall(CalleeF, ArgsV, CalleeF->getName());
+  llvm::CallInst *call =
+      state.Builder->CreateCall(CalleeF, CallArgs, CalleeF->getName());
+
+  // Write to output
+  for (unsigned i = 0, e = OutArgs.size(); i != e; ++i) {
+    llvm::Value *argValue = CallArgs[i];
+    if (CalleeF->getArg(i)->getType()->isTokenTy()) {
+      //      auto *list = dynamic_cast<ListExprAST *>(InArgs[i].get());
+      //      assert(list);
+      //      for (const auto &expr : list->elements()) {
+      //        if (CallArgs.back()->getType()->isPointerTy() &&
+      //            !CalleeF->getArg(i)->getType()->isPointerTy()) {
+      //          CallArgs.back() = state.Builder->CreateStore(
+      //              llvm::Type::getDoubleTy(*state.TheContext),
+      //              CallArgs.back(), "");
+      //        }
+      //      }
+    } else {
+      if (CalleeF->getArg(i)->getType()->isPointerTy()) {
+        if (argValue->getType()->isPointerTy()) {
+          //          auto loadInst = state.Builder->CreateLoad(
+          //              argValue->getType()->getNonOpaquePointerElementType(),
+          //              argValue);
+          //          state.Builder->CreateStore(loadInst, CalleeF->getArg(i));
+        } else {
+          state.Builder->CreateStore(argValue, CalleeF->getArg(i));
+        }
+      }
+    }
+  }
+
+  return call;
 }

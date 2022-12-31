@@ -55,10 +55,21 @@ llvm::Value *BinaryExprAST::codegen(StrideCompiler &state) {
     Val->dump();
     Variable->dump();
     if (Val->getType()->isPointerTy()) {
-      Val = state.Builder->CreateLoad(Val->getType(), Val);
+      if (Val->getType()->isPointerTy()) {
+        Val = state.Builder->CreateLoad(
+            Val->getType()->getNonOpaquePointerElementType(), Val);
+      } else {
+        Val = state.Builder->CreateLoad(Val->getType(), Val);
+      }
     }
 
-    state.Builder->CreateStore(Val, Variable);
+    if (Val->getType()->isPointerTy()) {
+      auto loadInst = state.Builder->CreateLoad(
+          Val->getType()->getNonOpaquePointerElementType(), Val);
+      state.Builder->CreateStore(loadInst, Variable);
+    } else {
+      state.Builder->CreateStore(Val, Variable);
+    }
     // This might be unnecessary if variable is not read further, but should
     // be removed by optimization pass
     //    state.NamedValues[LHSE->getName()] =

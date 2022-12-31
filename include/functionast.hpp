@@ -40,16 +40,16 @@ struct PrototypeArg {
 ///
 class PrototypeAST {
   std::string Name;
-  std::vector<std::string> Args;
+  std::vector<PrototypeArg> Args;
   std::vector<PrototypeArg> OutArgs;
   bool IsOperator;
   unsigned Precedence; // Precedence if a binary op.
 
 public:
-  PrototypeAST(const std::string &Name, std::vector<std::string> Args,
-               std::vector<PrototypeArg> OutArgs, bool IsOperator = false,
+  PrototypeAST(const std::string &Name, std::vector<PrototypeArg> OutArgs,
+               std::vector<PrototypeArg> Args, bool IsOperator = false,
                unsigned Prec = 0)
-      : Name(Name), Args(std::move(Args)), OutArgs(OutArgs) {}
+      : Name(Name), Args(Args), OutArgs(OutArgs) {}
 
   llvm::Function *codegen(StrideCompiler &state);
   const std::string &getName() const { return Name; }
@@ -92,15 +92,19 @@ protected:
 
 public:
   CallExprAST(const std::string &Callee,
-              std::vector<std::unique_ptr<ExprAST>> Args, int mainArgInCount)
-      : Callee(Callee), Args(std::move(Args)), ArgInCount(mainArgInCount) {}
+              std::vector<std::unique_ptr<ExprAST>> OutArgs,
+              std::vector<std::unique_ptr<ExprAST>> InArgs)
+      : Callee(Callee), InArgs(std::move(InArgs)), OutArgs(std::move(OutArgs)) {
+  }
 
   llvm::Value *codegen(StrideCompiler &state) override;
 
   CallableType callType;
 
-  std::vector<std::unique_ptr<ExprAST>> Args;
-  int ArgInCount;
+  std::vector<std::unique_ptr<ExprAST>> InArgs;
+  std::vector<std::unique_ptr<ExprAST>> OutArgs;
+  std::unique_ptr<ExprAST> ret;
+
   bool isExternal{false};
 };
 

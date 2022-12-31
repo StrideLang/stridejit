@@ -36,6 +36,8 @@ TEST(Function, Simple) {
 
   EXPECT_TRUE(v->getType()->isPointerTy());
   //  v->dump();
+
+  strenv.state.TheModule->dump();
 }
 
 //%Input3 = load double, double* %Input1, align 8
@@ -118,22 +120,4 @@ TEST(Expressions, FloatLiterals) {
   llvm::ConstantFP *CFP = llvm::dyn_cast<llvm::ConstantFP>(v);
   EXPECT_NE(CFP, nullptr);
   EXPECT_EQ(CFP->getValue().convertToDouble(), 8.1);
-}
-
-TEST(Function, FunctionCall) {
-
-  ASTNode tree;
-  tree = ASTFunctions::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
-  EXPECT_NE(tree, nullptr);
-
-  StrideEnvironment strenv;
-
-  ScopeStack scope;
-  generateCode(tree, &scope, strenv.state);
-
-  strenv.state.TheModule->dump();
-
-  //  EXPECT_NE(v, nullptr);
-  //  EXPECT_TRUE(v->getType()->isPointerTy());
-  //  v->dump();
 }
