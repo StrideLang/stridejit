@@ -26,6 +26,7 @@
 
 // From stride parser
 #include "ast.h"
+#include "declarationnode.h"
 
 class StrideCompiler;
 
@@ -42,14 +43,17 @@ class PrototypeAST {
   std::string Name;
   std::vector<PrototypeArg> Args;
   std::vector<PrototypeArg> OutArgs;
+  std::vector<PrototypeArg>
+      ExternalArgs; // For upper scope in reactions and loops
   bool IsOperator;
   unsigned Precedence; // Precedence if a binary op.
 
 public:
   PrototypeAST(const std::string &Name, std::vector<PrototypeArg> OutArgs,
-               std::vector<PrototypeArg> Args, bool IsOperator = false,
+               std::vector<PrototypeArg> Args,
+               std::vector<PrototypeArg> ExternalArgs, bool IsOperator = false,
                unsigned Prec = 0)
-      : Name(Name), Args(Args), OutArgs(OutArgs) {}
+      : Name(Name), Args(Args), OutArgs(OutArgs), ExternalArgs(ExternalArgs) {}
 
   llvm::Function *codegen(StrideCompiler &state);
   const std::string &getName() const { return Name; }
@@ -60,9 +64,10 @@ public:
     return Name[Name.size() - 1];
   }
   unsigned getBinaryPrecedence() const { return Precedence; }
+  std::vector<PrototypeArg> getExternalArgs() const;
 };
 
-enum class CallableType { Module, Reaction, Loop };
+enum class CallableType { Module, Reaction, Loop, External };
 
 class FunctionAST {
   std::unique_ptr<PrototypeAST> Proto;
@@ -80,7 +85,7 @@ public:
   llvm::Function *codegen(StrideCompiler &state);
 
   std::vector<llvm::Function *> externalFunctions;
-  std::vector<ASTNode> internalVariables;
+  std::vector<std::shared_ptr<DeclarationNode>> internalVariables;
 
   CallableType callType;
 };
@@ -93,9 +98,10 @@ protected:
 public:
   CallExprAST(const std::string &Callee,
               std::vector<std::unique_ptr<ExprAST>> OutArgs,
-              std::vector<std::unique_ptr<ExprAST>> InArgs)
-      : Callee(Callee), InArgs(std::move(InArgs)), OutArgs(std::move(OutArgs)) {
-  }
+              std::vector<std::unique_ptr<ExprAST>> InArgs,
+              std::vector<std::unique_ptr<ExprAST>> ExternalArgs)
+      : Callee(Callee), InArgs(std::move(InArgs)), OutArgs(std::move(OutArgs)),
+        ExternalArgs(std::move(ExternalArgs)) {}
 
   llvm::Value *codegen(StrideCompiler &state) override;
 
@@ -103,9 +109,8 @@ public:
 
   std::vector<std::unique_ptr<ExprAST>> InArgs;
   std::vector<std::unique_ptr<ExprAST>> OutArgs;
+  std::vector<std::unique_ptr<ExprAST>> ExternalArgs;
   std::unique_ptr<ExprAST> ret;
-
-  bool isExternal{false};
 };
 
 #endif // FUNCTIONAST_HPP

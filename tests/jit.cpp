@@ -60,36 +60,36 @@ TEST(JIT, PassThru) {
   EXPECT_FLOAT_EQ(out, 1.0);
 }
 
-// TEST(JIT, Reaction) {
+TEST(JIT, Reaction) {
 
-//  StrideEnvironment strenv;
+  StrideEnvironment strenv;
 
-//  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "reaction.stride");
+  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "reaction.stride");
 
-//  EXPECT_TRUE(ret);
+  EXPECT_TRUE(ret);
 
-//  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
-//  if (!EntrySym) {
-//    std::cerr << "No entry" << std::endl;
-//  }
+  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
 
-//  auto *Entry = (void (*)(...))EntrySym->getAddress();
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
 
-//  EXPECT_NE(Entry, nullptr);
-//  //  double in = 0;
-//  //  double out = 0;
-//  double S = 0;
-//  Entry(&S);
+  EXPECT_NE(Entry, nullptr);
+  //  double in = 0;
+  //  double out = 0;
+  double S = 0;
+  Entry(&S);
 
-//  EXPECT_EQ(S, 3);
+  EXPECT_EQ(S, 3);
 
-//  //  EntrySym = strenv.JIT->lookup("S");
-//  //  if (!EntrySym) {
-//  //    std::cerr << "No entry" << std::endl;
-//  //  }
-//  //  double v = *((double *)EntrySym->getAddress());
-//  //  EXPECT_EQ(Entry, nullptr);
-//}
+  //  EntrySym = strenv.JIT->lookup("S");
+  //  if (!EntrySym) {
+  //    std::cerr << "No entry" << std::endl;
+  //  }
+  //  double v = *((double *)EntrySym->getAddress());
+  //  EXPECT_EQ(Entry, nullptr);
+}
 
 TEST(JIT, Stream) {
 

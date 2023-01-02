@@ -59,22 +59,15 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     //      // state.NamedValues[std::string(Arg.getName())]);
     //    }
   }
-  for (const auto &v : internalVariables) {
+  for (const auto &decl : internalVariables) {
     // TODO avoid namespace clashes
-
-    if (v->getNodeType() == AST::Declaration) {
-      auto decl = std::static_pointer_cast<DeclarationNode>(v);
-      if (state.NamedValues.find(std::string(decl->getName())) ==
-          state.NamedValues.end()) {
-        // Create an alloca for this variable.
-        llvm::AllocaInst *Alloca =
-            state.CreateEntryBlockAlloca(TheFunction, decl->getName());
-        state.NamedValues[decl->getName()] = Alloca;
-      } else {
-      }
+    if (state.NamedValues.find(std::string(decl->getName())) ==
+        state.NamedValues.end()) {
+      // Create an alloca for this variable.
+      llvm::AllocaInst *Alloca =
+          state.CreateEntryBlockAlloca(TheFunction, decl->getName());
+      state.NamedValues[decl->getName()] = Alloca;
     } else {
-      std::cerr << " Unsupported block declaration: " << AST::toText(v)
-                << std::endl;
     }
   }
   //  state.TheModule->dump();
@@ -109,18 +102,25 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   return TheFunction;
 }
 
+std::vector<PrototypeArg> PrototypeAST::getExternalArgs() const {
+  return ExternalArgs;
+}
+
 llvm::Function *PrototypeAST::codegen(StrideCompiler &state) {
   // Make the function type:  double(double,double) etc.
-  std::vector<llvm::Type *> Doubles;
+  std::vector<llvm::Type *> ProtoArguments;
 
   for (const auto &arg : OutArgs) {
-    Doubles.emplace_back(arg.llvmType);
+    ProtoArguments.emplace_back(arg.llvmType);
   }
   for (const auto &arg : Args) {
-    Doubles.emplace_back(arg.llvmType);
+    ProtoArguments.emplace_back(arg.llvmType);
+  }
+  for (const auto &arg : ExternalArgs) {
+    ProtoArguments.emplace_back(arg.llvmType);
   }
   llvm::FunctionType *FT = llvm::FunctionType::get(
-      llvm::Type::getInt32Ty(*state.TheContext), Doubles, false);
+      llvm::Type::getInt32Ty(*state.TheContext), ProtoArguments, false);
 
   llvm::Function *F = llvm::Function::Create(
       FT, llvm::Function::ExternalLinkage, Name, state.TheModule.get());
@@ -130,8 +130,10 @@ llvm::Function *PrototypeAST::codegen(StrideCompiler &state) {
   for (auto &Arg : F->args()) {
     if (Idx < OutArgs.size()) {
       Arg.setName(OutArgs[Idx].name);
-    } else {
+    } else if (Idx < (OutArgs.size() + Args.size())) {
       Arg.setName(Args[Idx - Args.size()].name);
+    } else {
+      Arg.setName(ExternalArgs[Idx - (OutArgs.size() + Args.size())].name);
     }
     Idx++;
   }
@@ -196,13 +198,26 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
     }
   }
 
-  for (unsigned i = 0, e = InArgs.size(); i != e; ++i) {
-    llvm::Value *value = InArgs[i]->codegen(state);
-    if (value->getType()->isTokenTy()) {
-      auto *list = dynamic_cast<ListExprAST *>(InArgs[i].get());
-      assert(list);
-      for (const auto &expr : list->elements()) {
-        auto newArg = func(expr->codegen(state), CalleeF->getArg(i), state);
+  if (callType == CallableType::Module || callType == CallableType::External) {
+    for (unsigned i = 0, e = InArgs.size(); i != e; ++i) {
+      llvm::Value *value = InArgs[i]->codegen(state);
+      if (value->getType()->isTokenTy()) {
+        auto *list = dynamic_cast<ListExprAST *>(InArgs[i].get());
+        assert(list);
+        for (const auto &expr : list->elements()) {
+          auto newArg = func(expr->codegen(state), CalleeF->getArg(i), state);
+          if (!newArg)
+            return nullptr;
+          CallArgs.push_back(std::move(newArg));
+          if (CallArgs.back()->getType()->isPointerTy() &&
+              !CalleeF->getArg(i)->getType()->isPointerTy()) {
+            CallArgs.back() = state.Builder->CreateLoad(
+                llvm::Type::getDoubleTy(*state.TheContext), CallArgs.back(),
+                "");
+          }
+        }
+      } else {
+        auto newArg = func(value, CalleeF->getArg(i), state);
         if (!newArg)
           return nullptr;
         CallArgs.push_back(std::move(newArg));
@@ -212,6 +227,32 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
               llvm::Type::getDoubleTy(*state.TheContext), CallArgs.back(), "");
         }
       }
+    }
+  } else if (callType == CallableType::Reaction) {
+
+  } else {
+    //    assert(0 == 1);
+  }
+
+  for (unsigned i = 0, e = ExternalArgs.size(); i != e; ++i) {
+    llvm::Value *value = ExternalArgs[i]->codegen(state);
+    if (value->getType()->isTokenTy()) {
+      assert(0 == 1); // TODO implement
+      //      auto *list = dynamic_cast<ListExprAST *>(OutArgs[i].get());
+      //      assert(list);
+      //      for (const auto &expr : list->elements()) {
+      //        auto newArg = func(expr->codegen(state), CalleeF->getArg(i),
+      //        state); if (!newArg)
+      //          return nullptr;
+      //        CallArgs.push_back(std::move(newArg));
+      //        if (CallArgs.back()->getType()->isPointerTy() &&
+      //            !CalleeF->getArg(i)->getType()->isPointerTy()) {
+      //          CallArgs.back() = state.Builder->CreateLoad(
+      //              llvm::Type::getDoubleTy(*state.TheContext),
+      //              CallArgs.back(), "");
+      //        }
+      //      }
+
     } else {
       auto newArg = func(value, CalleeF->getArg(i), state);
       if (!newArg)

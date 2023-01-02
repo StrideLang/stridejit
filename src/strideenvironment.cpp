@@ -451,31 +451,44 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
           generated[domainName].externalFunctions.push_back(newFunc);
         }
         auto newCall = std::make_unique<CallExprAST>(
-            externFunc->name, std::move(mainOutArgs), std::move(mainInArgs));
-        newCall->isExternal = true;
+            externFunc->name, std::move(mainOutArgs), std::move(mainInArgs),
+            std::vector<std::unique_ptr<ExprAST>>{});
+        newCall->callType = CallableType::External;
         generated[domainName].expr = std::move(newCall);
         std::cerr << " Using external function:" << externFunc->name
                   << std::endl;
       } else {
         auto newFuncDecl =
             createFunctionDeclaration(newFunc, prev, next, tree, scope, state);
-
+        std::vector<std::unique_ptr<ExprAST>> ExternalArgs;
+        if (newFuncDecl) {
+          for (const auto &arg : newFuncDecl->getProto().getExternalArgs()) {
+            ExternalArgs.push_back(std::make_unique<VariableExprAST>(arg.name));
+          }
+        }
         auto callexpr = std::make_unique<CallExprAST>(
             std::string(newFunc->getName()), std::move(mainOutArgs),
-            std::move(mainInArgs));
-        callexpr->isExternal = false;
+            std::move(mainInArgs), std::move(ExternalArgs));
         if (newFuncDecl) {
           callexpr->callType = newFuncDecl->callType;
           generated[domainName].functions.push_back(std::move(newFuncDecl));
         } else {
           // Function already declared
-          //          for (const auto &f : generated[domainName].functions) {
-          //            // TODO scope and mangling
-          //            if (f->getName() == newFunc->getName()) {
-          //              callexpr->callType = f->callType;
-          //              break;
-          //            }
-          //          }
+          auto funcDecl =
+              ASTQuery::findDeclarationByName(newFunc->getName(), {}, tree);
+          if (funcDecl) {
+            if (funcDecl->getObjectType() == "module") {
+              callexpr->callType = CallableType::Module;
+            } else if (funcDecl->getObjectType() == "reaction") {
+              callexpr->callType = CallableType::Reaction;
+            } else if (funcDecl->getObjectType() == "loop") {
+              callexpr->callType = CallableType::Loop;
+            } else {
+              std::cout << " ERROR: Can't set callable type" << std::endl;
+            }
+          } else {
+            std::cout << " ERROR: Can't set callable type" << std::endl;
+          }
         }
 
         generated[domainName].expr = std::move(callexpr);
@@ -509,6 +522,7 @@ createFunctionDeclaration(std::shared_ptr<FunctionNode> func, ASTNode prev,
   }
   std::vector<PrototypeArg> Args;
   std::vector<PrototypeArg> OutArgs;
+  std::vector<PrototypeArg> ExternalArgs;
 
   auto portsNode = funcDecl->getPropertyValue("ports");
   std::string portBlockName;
@@ -601,7 +615,8 @@ createFunctionDeclaration(std::shared_ptr<FunctionNode> func, ASTNode prev,
   }
 
   auto streams = funcDecl->getPropertyValue("streams");
-  std::vector<ASTNode> usedInternalVariables;
+  std::vector<std::shared_ptr<DeclarationNode>> usedInternalVariables;
+  std::vector<std::shared_ptr<DeclarationNode>> usedExternalVariables;
   std::vector<std::unique_ptr<ExprAST>> collected;
   std::unique_ptr<ExprAST> out;
   std::vector<llvm::Function *> externalFunctions;
@@ -615,7 +630,6 @@ createFunctionDeclaration(std::shared_ptr<FunctionNode> func, ASTNode prev,
                                  domainCode.second.externalFunctions.begin(),
                                  domainCode.second.externalFunctions.end());
         for (const auto &readVar : domainCode.second.readVariables) {
-          // FIXME complete
           if (readVar->getNodeType() == AST::Block) {
             auto block = std::static_pointer_cast<BlockNode>(readVar);
             std::string blockName = block->getName();
@@ -633,6 +647,14 @@ createFunctionDeclaration(std::shared_ptr<FunctionNode> func, ASTNode prev,
                     blocks);
                 if (decl) {
                   usedInternalVariables.push_back(decl);
+                } else if (funcDecl->getObjectType() == "reaction" ||
+                           funcDecl->getObjectType() == "loop") {
+                  decl = ASTQuery::findDeclarationByName(
+                      std::static_pointer_cast<BlockNode>(readVar)->getName(),
+                      *scope, tree);
+                  if (decl) {
+                    usedExternalVariables.push_back(decl);
+                  }
                 }
               }
             }
@@ -644,8 +666,13 @@ createFunctionDeclaration(std::shared_ptr<FunctionNode> func, ASTNode prev,
     } else {
     }
   }
+  for (const auto &decl : usedExternalVariables) {
+    ExternalArgs.push_back(PrototypeArg{
+        decl->getName(), llvm::PointerType::get(state.getLLVMType(decl), 0)});
+  }
 
-  auto proto = std::make_unique<PrototypeAST>(func->getName(), OutArgs, Args);
+  auto proto = std::make_unique<PrototypeAST>(func->getName(), OutArgs, Args,
+                                              ExternalArgs);
   llvm::Function *TheFunction = state.getFunctionInModule(func->getName());
   if (TheFunction) {
     // TODO should check if current function is the same
@@ -675,6 +702,7 @@ void generateCode(ASTNode tree, ScopeStack *scope, StrideCompiler &state) {
       domainGeneratedCode;
   std::vector<PrototypeArg> MainArgs;
   std::vector<PrototypeArg> OutArgs;
+  std::vector<PrototypeArg> ExternalArgs;
 
   std::vector<DataType> domainArgs;
 
@@ -704,7 +732,8 @@ void generateCode(ASTNode tree, ScopeStack *scope, StrideCompiler &state) {
         // TODO for now all global signals are arguments to the domain function
         // but this should be defined somewhere with more control, to choose
         // what is external and the order of arguments to the function
-        OutArgs.push_back({decl->getName(), llvm::PointerType::get(type, 0)});
+        ExternalArgs.push_back(
+            {decl->getName(), llvm::PointerType::get(type, 0)});
         if (type->isDoubleTy()) {
           domainArgs.push_back(DataType::DOUBLE);
         } else if (type->isIntegerTy(1)) {
@@ -713,7 +742,7 @@ void generateCode(ASTNode tree, ScopeStack *scope, StrideCompiler &state) {
           assert(0 == 1);
         }
       } else if (decl->getObjectType() == "switch") {
-        OutArgs.push_back(
+        ExternalArgs.push_back(
             PrototypeArg{decl->getName(),
                          llvm::PointerType::get(state.getLLVMType(decl), 0)});
         domainArgs.push_back(DataType::BOOL);
@@ -725,7 +754,7 @@ void generateCode(ASTNode tree, ScopeStack *scope, StrideCompiler &state) {
   for (auto it = domainGeneratedCode.begin(); it != domainGeneratedCode.end();
        it++) {
     auto proto = std::make_unique<PrototypeAST>(
-        std::string(it->first + "_process"), OutArgs, MainArgs);
+        std::string(it->first + "_process"), OutArgs, MainArgs, ExternalArgs);
 
     auto newfunc =
         std::make_unique<FunctionAST>(std::move(proto), std::move(it->second));
