@@ -267,8 +267,32 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
   }
 
   CalleeF->dump();
-  llvm::CallInst *call =
-      state.Builder->CreateCall(CalleeF, CallArgs, CalleeF->getName());
+  llvm::CallInst *call;
+
+  if (callType == CallableType::Reaction) {
+    llvm::Value *CondV = InArgs[0]->codegen(state);
+    CondV->dump();
+    // Convert condition to a bool by comparing non-equal to 0.0.
+    CondV = state.Builder->CreateICmpNE(
+        CondV, llvm::ConstantInt::get(*state.TheContext, llvm::APInt(1, 0)),
+        "ifcond");
+    llvm::Function *TheFunction = state.Builder->GetInsertBlock()->getParent();
+    llvm::BasicBlock *ThenBB =
+        llvm::BasicBlock::Create(*state.TheContext, "then", TheFunction);
+    llvm::BasicBlock *MergeBB =
+        llvm::BasicBlock::Create(*state.TheContext, "ifcont", TheFunction);
+
+    state.Builder->CreateCondBr(CondV, ThenBB, MergeBB);
+
+    state.Builder->SetInsertPoint(ThenBB);
+    call = state.Builder->CreateCall(CalleeF, CallArgs, CalleeF->getName());
+
+    state.Builder->CreateBr(MergeBB);
+    ThenBB = state.Builder->GetInsertBlock();
+    state.Builder->SetInsertPoint(MergeBB);
+  } else {
+    call = state.Builder->CreateCall(CalleeF, CallArgs, CalleeF->getName());
+  }
 
   // Write to output
   for (unsigned i = 0, e = OutArgs.size(); i != e; ++i) {

@@ -120,5 +120,5 @@ llvm::Value *ListExprAST::codegen(StrideCompiler &state) {
 }
 
 llvm::Value *BoolExprAST::codegen(StrideCompiler &state) {
-  return llvm::ConstantInt::get(*state.TheContext, llvm::APSInt(Val ? 1 : 0));
+  return llvm::ConstantInt::get(*state.TheContext, llvm::APInt(1, Val ? 1 : 0));
 }

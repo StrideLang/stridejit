@@ -97,11 +97,16 @@ bool StrideEnvironment::compile(std::string path) {
   }
 
   generateCode(tree, &globalScope, state);
-
+  //  if (mVerbose) {
+  //    state.TheModule->dump();
+  //  }
   if (m_optimizeCode) {
     for (auto &F : *state.TheModule) {
       state.TheFPM->run(F);
     }
+  }
+  if (mVerbose) {
+    state.TheModule->dump();
   }
 
   auto JTMB = llvm::orc::JITTargetMachineBuilder::detectHost();
@@ -162,9 +167,7 @@ bool StrideEnvironment::compile(std::string path) {
       llvm::pointerToJITTargetAddress(&__stride_Greater_d_dd),
       llvm::JITSymbolFlags());
   llvm::cantFail(JIT->getMainJITDylib().define(llvm::orc::absoluteSymbols(M)));
-  if (mVerbose) {
-    state.TheModule->dump();
-  }
+
   if (auto Err = JIT->addIRModule(llvm::orc::ThreadSafeModule(
           std::move(state.TheModule), std::move(state.TheContext)))) {
     return false;
