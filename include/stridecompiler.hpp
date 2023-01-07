@@ -48,6 +48,11 @@ struct ExternalFunction {
   llvm::FunctionType *llvmFunctionType;
 };
 
+struct DomainArg {
+  std::string name;
+  DataType type;
+};
+
 class StrideCompiler {
 public:
   StrideCompiler();
@@ -85,7 +90,7 @@ public:
   std::unordered_map<std::string, std::vector<ExternalFunction>> functionMap;
   std::unordered_map<std::string, llvm::Type *> typesMap;
 
-  std::unordered_map<std::string, std::vector<DataType>> domainArgs;
+  std::unordered_map<std::string, std::vector<DomainArg>> domainArgs;
 
 private:
 };

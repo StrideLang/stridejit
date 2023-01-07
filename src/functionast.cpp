@@ -146,7 +146,7 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
   // Look up the name in the global module table.
   llvm::Function *CalleeF = state.getFunctionInModule(Callee);
   if (!CalleeF) {
-    return state.LogErrorV("Unknown function referenced");
+    return state.LogErrorV(("Unknown function referenced: " + Callee).c_str());
   }
 
   auto func = [](llvm::Value *value, llvm::Argument *arg,
@@ -273,9 +273,17 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
     llvm::Value *CondV = InArgs[0]->codegen(state);
     CondV->dump();
     // Convert condition to a bool by comparing non-equal to 0.0.
-    CondV = state.Builder->CreateICmpNE(
-        CondV, llvm::ConstantInt::get(*state.TheContext, llvm::APInt(1, 0)),
-        "ifcond");
+    if (CondV->getType()->isDoubleTy()) {
+
+      CondV = state.Builder->CreateFCmpONE(
+          CondV, llvm::ConstantFP::get(*state.TheContext, llvm::APFloat(0.0)),
+          "ifcond");
+
+    } else if (CondV->getType()->isIntegerTy()) {
+      CondV = state.Builder->CreateICmpNE(
+          CondV, llvm::ConstantInt::get(*state.TheContext, llvm::APInt(1, 0)),
+          "ifcond");
+    }
     llvm::Function *TheFunction = state.Builder->GetInsertBlock()->getParent();
     llvm::BasicBlock *ThenBB =
         llvm::BasicBlock::Create(*state.TheContext, "then", TheFunction);

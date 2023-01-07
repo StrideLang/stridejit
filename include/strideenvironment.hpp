@@ -34,11 +34,17 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
 
+struct StrideExternalVariable {
+  std::string name;
+  llvm::Type *type;
+};
+
 class StrideEnvironment {
 public:
   StrideEnvironment(std::string strideroot = std::string());
 
-  bool compile(std::string path);
+  bool generateIr(std::string path);
+  bool compile();
 
   StrideCompiler state;
   std::unique_ptr<llvm::orc::LLJIT> JIT;
@@ -51,16 +57,8 @@ private:
   bool m_optimizeCode{true};
 };
 
-/// This will compile FnAST to IR, rename the function to add the given
-/// suffix (needed to prevent a name-clash with the function's stub),
-/// and then take ownership of the module that the function was compiled
-/// into.
-llvm::orc::ThreadSafeModule irgenAndTakeOwnership(FunctionAST &FnAST,
-                                                  const std::string &Suffix,
-                                                  StrideCompiler &state);
-
 struct DomainCode {
-  std::unique_ptr<ExprAST> expr;
+  std::vector<std::unique_ptr<ExprAST>> expr;
   std::vector<std::unique_ptr<FunctionAST>> functions;
   std::vector<llvm::Function *> externalFunctions;
   std::vector<ASTNode> readVariables;

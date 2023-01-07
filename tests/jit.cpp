@@ -38,13 +38,52 @@
 
 using namespace llvm;
 
+TEST(JIT, ReactionCondition) {
+
+  StrideEnvironment strenv;
+
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "reactioncondition.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compile();
+  EXPECT_TRUE(ret);
+
+  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
+
+  EXPECT_NE(Entry, nullptr);
+  //  double in = 0;
+  //  double out = 0;
+  double S = 0;
+  double Val = 0;
+  Entry(&S, &Val);
+
+  EXPECT_EQ(S, 0);
+
+  Entry(&S, &Val);
+  EXPECT_EQ(S, 3);
+
+  //  EntrySym = strenv.JIT->lookup("S");
+  //  if (!EntrySym) {
+  //    std::cerr << "No entry" << std::endl;
+  //  }
+  //  double v = *((double *)EntrySym->getAddress());
+  //  EXPECT_EQ(Entry, nullptr);
+}
+
 TEST(JIT, PassThru) {
 
   StrideEnvironment strenv;
 
-  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
-
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
   EXPECT_TRUE(ret);
+  ret = strenv.compile();
+  EXPECT_TRUE(ret);
+
   auto EntrySym = strenv.JIT->lookup("RootDomain_process");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
@@ -64,8 +103,9 @@ TEST(JIT, Reaction) {
 
   StrideEnvironment strenv;
 
-  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "reaction.stride");
-
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "reaction.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compile();
   EXPECT_TRUE(ret);
 
   auto EntrySym = strenv.JIT->lookup("RootDomain_process");
@@ -95,8 +135,9 @@ TEST(JIT, Stream) {
 
   StrideEnvironment strenv;
 
-  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "stream.stride");
-
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "stream.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compile();
   EXPECT_TRUE(ret);
 
   auto EntrySym = strenv.JIT->lookup("Out");
@@ -110,23 +151,26 @@ TEST(JIT, DomainFunctions) {
 
   StrideEnvironment strenv;
 
-  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
-
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compile();
   EXPECT_TRUE(ret);
 
   EXPECT_EQ(strenv.state.domainArgs.size(), 1);
   EXPECT_EQ(strenv.state.domainArgs["RootDomain"].size(), 1);
-  EXPECT_EQ(strenv.state.domainArgs["RootDomain"][0], DataType::DOUBLE);
+  EXPECT_EQ(strenv.state.domainArgs["RootDomain"][0].name, "Out");
+  EXPECT_EQ(strenv.state.domainArgs["RootDomain"][0].type, DataType::DOUBLE);
 }
 
 TEST(JIT, ModuleInternal) {
 
   StrideEnvironment strenv;
-
   auto ret =
-      strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "module_internal.stride");
-
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "module_internal.stride");
   EXPECT_TRUE(ret);
+  ret = strenv.compile();
+  EXPECT_TRUE(ret);
+
   auto EntrySym = strenv.JIT->lookup("RootDomain_process");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
@@ -144,8 +188,9 @@ TEST(JIT, CreateClass) {
 
   StrideEnvironment strenv;
 
-  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
-
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compile();
   EXPECT_TRUE(ret);
 
   auto EntrySym = strenv.JIT->lookup("RootDomain_process");
@@ -165,8 +210,9 @@ TEST(JIT, MathFunction) {
 
   StrideEnvironment strenv;
 
-  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "functions.stride");
-
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "functions.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compile();
   EXPECT_TRUE(ret);
 
   auto EntrySym = strenv.JIT->lookup("RootDomain_process");
@@ -242,8 +288,9 @@ TEST(JIT, TwoStreams) {
 
   StrideEnvironment strenv;
 
-  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "twostreams.stride");
-
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "twostreams.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compile();
   EXPECT_TRUE(ret);
 
   auto EntrySym = strenv.JIT->lookup("RootDomain_process");
@@ -271,9 +318,9 @@ TEST(JIT, TwoStreams) {
 TEST(JIT, SwitchOut) {
 
   StrideEnvironment strenv;
-
-  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "switchout.stride");
-
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "switchout.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compile();
   EXPECT_TRUE(ret);
 
   auto EntrySym = strenv.JIT->lookup("RootDomain_process");
@@ -301,9 +348,9 @@ TEST(JIT, SwitchOut) {
 TEST(JIT, List) {
 
   StrideEnvironment strenv;
-
-  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "listinput.stride");
-
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "listinput.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compile();
   EXPECT_TRUE(ret);
 
   auto EntrySym = strenv.JIT->lookup("RootDomain_process");
@@ -328,8 +375,9 @@ TEST(JIT, Domains) {
 
   StrideEnvironment strenv;
 
-  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "domains.stride");
-
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "domains.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compile();
   EXPECT_TRUE(ret);
 
   auto EntrySym = strenv.JIT->lookup("TestDomain_process");
@@ -348,8 +396,9 @@ TEST(JIT, IO) {
 
   StrideEnvironment strenv;
 
-  auto ret = strenv.compile(STRIDEJIT_TESTS_SOURCE_DIR "io.stride");
-
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "io.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compile();
   EXPECT_TRUE(ret);
 
   auto EntrySym = strenv.JIT->lookup("RootDomain_process");
