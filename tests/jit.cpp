@@ -38,6 +38,44 @@
 
 using namespace llvm;
 
+TEST(JIT, PackDomainExternalPointer) {
+
+  StrideEnvironment strenv;
+  strenv.state.setConfiguration(StrideConfig::PACK_DOMAIN_FUNCTION_EXTERNAL);
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compile();
+  EXPECT_TRUE(ret);
+
+  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = (void (*)(void *))EntrySym->getAddress();
+
+  auto args = strenv.state.domainArgs["RootDomain"];
+
+  std::map<std::string, double> doubleArgs;
+  size_t memsize = 0;
+
+  for (const auto &arg : args) {
+    doubleArgs[arg.name] = 0.0;
+    memsize += sizeof(double *);
+  }
+  uint8_t *domainArgs = (uint8_t *)malloc(memsize);
+  double *in = &doubleArgs["In"];
+  memcpy(domainArgs, &in, sizeof(double *));
+  double *out = &doubleArgs["Out"];
+  memcpy(domainArgs + sizeof(double *), &out, sizeof(double *));
+
+  doubleArgs["In"] = 1.0;
+
+  Entry(domainArgs);
+
+  EXPECT_FLOAT_EQ(doubleArgs["Out"], 1.0);
+}
+
 TEST(JIT, PackDomainExternal) {
 
   StrideEnvironment strenv;
