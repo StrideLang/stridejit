@@ -93,6 +93,18 @@ StrideCompiler::CreateEntryBlockAlloca(llvm::Function *TheFunction,
                            VarName);
 }
 
+void StrideCompiler::setConfiguration(StrideConfig option, bool enable) {
+  if (enable) {
+    m_configuration |= option;
+  } else {
+    m_configuration &= (UINT64_MAX & ~option);
+  }
+}
+
+bool StrideCompiler::hasConfiguration(StrideConfig option) {
+  return (m_configuration & option) == option;
+}
+
 llvm::Type *StrideCompiler::getLLVMType(std::shared_ptr<DeclarationNode> decl) {
   if (!decl) {
     return typesMap[""];

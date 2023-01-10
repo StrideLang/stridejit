@@ -35,6 +35,8 @@ struct PrototypeArg {
   llvm::Type *llvmType;
 };
 
+enum class CallableType { Module, Reaction, Loop, External, DomainFunction };
+
 /// PrototypeAST - This class represents the "prototype" for a function,
 /// which captures its name, and its argument names (thus implicitly the number
 /// of arguments the function takes).
@@ -65,9 +67,9 @@ public:
   }
   unsigned getBinaryPrecedence() const { return Precedence; }
   std::vector<PrototypeArg> getExternalArgs() const;
-};
 
-enum class CallableType { Module, Reaction, Loop, External };
+  CallableType callType; // Set by parent FunctionAST before codegen()
+};
 
 class FunctionAST {
   std::unique_ptr<PrototypeAST> Proto;

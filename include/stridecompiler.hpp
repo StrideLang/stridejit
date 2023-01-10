@@ -53,6 +53,11 @@ struct DomainArg {
   DataType type;
 };
 
+enum StrideConfig {
+  NO_OPTIONS = 0x0,
+  PACK_DOMAIN_FUNCTION_EXTERNAL = 0x1,
+};
+
 class StrideCompiler {
 public:
   StrideCompiler();
@@ -79,6 +84,9 @@ public:
     return nullptr;
   }
 
+  void setConfiguration(StrideConfig option, bool enable = true);
+  bool hasConfiguration(StrideConfig option);
+
   std::unique_ptr<llvm::LLVMContext> TheContext;
   std::unique_ptr<llvm::Module> TheModule;
   std::unique_ptr<llvm::IRBuilder<>> Builder;
@@ -93,6 +101,7 @@ public:
   std::unordered_map<std::string, std::vector<DomainArg>> domainArgs;
 
 private:
+  uint64_t m_configuration{NO_OPTIONS};
 };
 
 #endif // STRIDECOMPILER_HPP

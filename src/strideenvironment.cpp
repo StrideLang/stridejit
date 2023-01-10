@@ -759,9 +759,9 @@ void generateCode(ASTNode tree, ScopeStack *scope, StrideCompiler &state) {
     auto proto = std::make_unique<PrototypeAST>(
         std::string(it->first + "_process"), std::vector<PrototypeArg>{},
         std::vector<PrototypeArg>{}, ExternalArgs);
-
     auto newfunc =
         std::make_unique<FunctionAST>(std::move(proto), std::move(it->second));
+    newfunc->callType = CallableType::DomainFunction;
 
     newfunc->codegen(state);
     state.domainArgs[it->first] = domainArgs;

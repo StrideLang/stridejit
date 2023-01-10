@@ -22,13 +22,13 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   // Transfer ownership of the prototype to the FunctionProtos map, but keep a
   // reference to it for use below.
   auto &P = *Proto;
-  state.FunctionProtos[Proto->getName()] = std::move(Proto);
   llvm::Function *TheFunction = state.getFunctionInModule(P.getName());
   if (!TheFunction) {
+    P.callType = callType;
     TheFunction = P.codegen(state);
+    TheFunction->dump();
+    state.FunctionProtos[Proto->getName()] = std::move(Proto);
   }
-  if (!TheFunction)
-    return nullptr;
   // If this is an operator, install it.
   if (P.isBinaryOp())
     state.BinopPrecedence[P.getOperatorName()] = P.getBinaryPrecedence();
@@ -38,6 +38,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   state.Builder->SetInsertPoint(BB);
   // Record the function arguments in the NamedValues map.
   state.NamedValues.clear();
+
   for (auto &Arg : TheFunction->args()) {
     state.NamedValues[std::string(Arg.getName())] = &Arg;
 
@@ -59,6 +60,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     //      // state.NamedValues[std::string(Arg.getName())]);
     //    }
   }
+
   for (const auto &decl : internalVariables) {
     // TODO avoid namespace clashes
     if (state.NamedValues.find(std::string(decl->getName())) ==
@@ -79,26 +81,57 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   //  state.NamedValues["Out"] = v;
   // Add arguments to variable symbol table.
 
+  // Finish off the function.
+  //    state.Builder->CreateRet(RetVal);
+  if (callType == CallableType::DomainFunction) {
+    if (state.hasConfiguration(StrideConfig::PACK_DOMAIN_FUNCTION_EXTERNAL)) {
+
+      llvm::BasicBlock *EntryBB = &TheFunction->getEntryBlock();
+      state.Builder->SetInsertPoint(EntryBB);
+      EntryBB->dump();
+      auto arg = TheFunction->getArg(TheFunction->arg_size() - 1);
+      arg->dump();
+      arg->getType()->dump();
+      int argCounter = 0;
+      for (const auto &externalArg : P.getExternalArgs()) {
+        //        auto alloca =
+        //        state.Builder->CreateAlloca(externalArg.llvmType, nullptr,
+        //                                                  externalArg.name);
+        std::vector<llvm::Value *> idxList;
+        idxList.push_back(
+            llvm::ConstantInt::get(*state.TheContext, llvm::APInt(64, 0)));
+        idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
+                                                 llvm::APInt(32, argCounter)));
+        auto out = state.Builder->CreateGEP(
+            arg->getType()->getNonOpaquePointerElementType(), arg, idxList);
+        out = state.Builder->CreateLoad(externalArg.llvmType, out,
+                                        externalArg.name);
+
+        state.NamedValues[externalArg.name] = out;
+        argCounter++;
+      }
+    }
+  }
+
   for (const auto &statement : Body) {
     if (!statement) {
       return nullptr;
     }
     llvm::Value *RetVal = statement->codegen(state);
-    if (!RetVal) {
-      // Error reading body, remove function.
-      TheFunction->eraseFromParent();
-      if (P.isBinaryOp())
-        state.BinopPrecedence.erase(P.getOperatorName());
-      return nullptr;
-    }
+    //    if (!RetVal) {
+    //      // Error reading body, remove function.
+    //      TheFunction->eraseFromParent();
+    //      if (P.isBinaryOp())
+    //        state.BinopPrecedence.erase(P.getOperatorName());
+    //      return nullptr;
+    //    }
   }
-  // Finish off the function.
-  //    state.Builder->CreateRet(RetVal);
 
   auto *outVal = llvm::ConstantInt::get(state.Builder->getInt32Ty(), 0, true);
   state.Builder->CreateRet(outVal);
   // Validate the generated code, checking for consistency.
   verifyFunction(*TheFunction);
+  TheFunction->dump();
   return TheFunction;
 }
 
@@ -109,16 +142,34 @@ std::vector<PrototypeArg> PrototypeAST::getExternalArgs() const {
 llvm::Function *PrototypeAST::codegen(StrideCompiler &state) {
   // Make the function type:  double(double,double) etc.
   std::vector<llvm::Type *> ProtoArguments;
+  if (callType == CallableType::DomainFunction &&
+      state.hasConfiguration(StrideConfig::PACK_DOMAIN_FUNCTION_EXTERNAL)) {
+    auto structType =
+        llvm::StructType::create(*state.TheContext, "DomainInStructType");
+    std::vector<llvm::Type *> elements;
+    for (const auto &arg : ExternalArgs) {
+      elements.push_back(arg.llvmType);
+      //      auto out = state.Builder->CreateGEP(ptr, idxList, name);
+      //      state.Builder->CreateLoad(arg.llvmType, out, arg.name);
+    }
+    structType->setBody(elements);
 
-  for (const auto &arg : OutArgs) {
-    ProtoArguments.emplace_back(arg.llvmType);
+    //    ExternalArgs.push_back(
+    //        PrototypeArg{"DomainArgs", llvm::PointerType::get(structType,
+    //        0)});
+    ProtoArguments.emplace_back(llvm::PointerType::get(structType, 0));
+  } else {
+    for (const auto &arg : OutArgs) {
+      ProtoArguments.emplace_back(arg.llvmType);
+    }
+    for (const auto &arg : Args) {
+      ProtoArguments.emplace_back(arg.llvmType);
+    }
+    for (const auto &arg : ExternalArgs) {
+      ProtoArguments.emplace_back(arg.llvmType);
+    }
   }
-  for (const auto &arg : Args) {
-    ProtoArguments.emplace_back(arg.llvmType);
-  }
-  for (const auto &arg : ExternalArgs) {
-    ProtoArguments.emplace_back(arg.llvmType);
-  }
+
   llvm::FunctionType *FT = llvm::FunctionType::get(
       llvm::Type::getInt32Ty(*state.TheContext), ProtoArguments, false);
 
@@ -128,7 +179,10 @@ llvm::Function *PrototypeAST::codegen(StrideCompiler &state) {
   // Set names for all arguments.
   unsigned Idx = 0;
   for (auto &Arg : F->args()) {
-    if (Idx < OutArgs.size()) {
+    if (callType == CallableType::DomainFunction &&
+        state.hasConfiguration(StrideConfig::PACK_DOMAIN_FUNCTION_EXTERNAL)) {
+      Arg.setName("DomainPackedArgs");
+    } else if (Idx < OutArgs.size()) {
       Arg.setName(OutArgs[Idx].name);
     } else if (Idx < (OutArgs.size() + Args.size())) {
       Arg.setName(Args[Idx - Args.size()].name);
@@ -322,7 +376,8 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
           //          auto loadInst = state.Builder->CreateLoad(
           //              argValue->getType()->getNonOpaquePointerElementType(),
           //              argValue);
-          //          state.Builder->CreateStore(loadInst, CalleeF->getArg(i));
+          //          state.Builder->CreateStore(loadInst,
+          //          CalleeF->getArg(i));
         } else {
           state.Builder->CreateStore(argValue, CalleeF->getArg(i));
         }
