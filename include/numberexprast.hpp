@@ -35,13 +35,16 @@ public:
 class VariableExprAST : public ExprAST {
   std::string Name;
   std::string Type;
+  std::vector<size_t> Indeces;
 
 public:
-  VariableExprAST(const std::string &Name, std::string strideType = "_RealType")
-      : Name(Name) {}
+  VariableExprAST(const std::string &Name,
+                  const std::vector<size_t> &&Indeces = std::vector<size_t>{})
+      : Name(Name), Indeces(Indeces) {}
 
   llvm::Value *codegen(StrideCompiler &state) override;
   const std::string &getName() const { return Name; }
+  std::vector<size_t> getIndeces() const;
 };
 
 /// BinaryExprAST - Expression class for a binary operator.

@@ -230,6 +230,11 @@ std::unique_ptr<ExprAST> createExpr(ASTNode node) {
   if (node->getNodeType() == AST::Block) {
     return std::make_unique<VariableExprAST>(
         std::static_pointer_cast<BlockNode>(node)->getName());
+  } else if (node->getNodeType() == AST::Bundle) {
+    std::vector<size_t> indeces;
+    auto bundleNode = std::static_pointer_cast<BundleNode>(node);
+    return std::make_unique<VariableExprAST>(bundleNode->getName(),
+                                             bundleNode->getIndeces());
   } else if (node->getNodeType() == AST::Real) {
     // TODO separate float types
     return std::make_unique<RealExprAST>(
@@ -324,10 +329,11 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
     if (current->getNodeType() == AST::Expression) {
       assert(prev == nullptr);
       generated[domainName].expr.push_back(createExpr(current));
-    } else if (current->getNodeType() == AST::Block) {
+    } else if (current->getNodeType() == AST::Block ||
+               current->getNodeType() == AST::Bundle) {
       auto block = createExpr(current);
-      // TODO accumulate read and write variables for switch, expressions, lists
-      // and function arguments
+      // TODO accumulate read and write variables for switch, expressions,
+      // lists and function arguments
       if (ASTQuery::findDeclarationByName(ASTQuery::getNodeName(current),
                                           *scope, tree)) {
         // If on root namespace
@@ -336,6 +342,7 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
         } else {
           generated[domainName].writeVariables.push_back(current);
           if (!next) {
+            // TODO needed?
             generated[domainName].readVariables.push_back(current);
           }
         }

@@ -12,6 +12,8 @@ llvm::Value *IntExprAST::codegen(StrideCompiler &state) {
   return llvm::ConstantFP::get(*state.TheContext, llvm::APFloat(double(Val)));
 }
 
+std::vector<size_t> VariableExprAST::getIndeces() const { return Indeces; }
+
 llvm::Value *VariableExprAST::codegen(StrideCompiler &state) {
   // Look this variable up in the function.
   llvm::Value *V = state.NamedValues[Name];
