@@ -58,12 +58,26 @@ target_include_directories(StrideJit PUBLIC ${LLVM_INCLUDE_DIRS})
 separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
 #target_compile_definitions(StrideJit PUBLIC ${LLVM_DEFINITIONS_LIST})
 
-llvm_map_components_to_libnames(llvm_libs support core irreader orcjit
-    Support
+llvm_map_components_to_libnames(llvm_libs
+    support core irreader orcjit
     nativecodegen
     executionengine
     jitlink
-    #[[native]])
+    #[[native]]
+    # For object generation
+    #aarch64
+    aarch64asmparser
+    aarch64codegen #aarch64desc aarch64disassembler aarch64info aarch64utils
+    #x86
+    x86asmparser
+    x86codegen #x86desc x86disassembler x86info x86targetmca
+    #arm
+    armasmparser
+    armcodegen #armdesc armdisassembler arminfo armutils
+    #webassembly
+    webassemblyasmparser
+    webassemblycodegen #webassemblydesc webassemblydisassembler webassemblyinfo webassemblyutils
+)
 target_link_libraries(StrideJit PUBLIC ${llvm_libs})
 
 set(STRIDELIB_SRC

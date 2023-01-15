@@ -44,7 +44,8 @@ public:
   StrideEnvironment(std::string strideroot = std::string());
 
   bool generateIr(std::string path);
-  bool compile();
+  bool compileInMemory();
+  bool compileObjectToDisk(std::string path);
 
   StrideCompiler state;
   std::unique_ptr<llvm::orc::LLJIT> JIT;
@@ -55,6 +56,7 @@ private:
 
   std::string m_strideRoot;
   bool m_optimizeCode{true};
+  bool generateCompiledObject(std::string path, std::string TargetTriple);
 };
 
 struct DomainCode {

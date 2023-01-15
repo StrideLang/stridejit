@@ -38,6 +38,38 @@
 
 using namespace llvm;
 
+TEST(JIT, Bundles) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "bundles.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
+
+  double In[16] = {0};
+  double Out[16] = {0};
+  Entry(In, Out);
+
+  EXPECT_DOUBLE_EQ(In[1], Out[2]);
+}
+
+TEST(JIT, CompileToDisk) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileObjectToDisk("out");
+  EXPECT_TRUE(ret);
+}
+
 TEST(JIT, PackDomainExternalPointer) {
 
   StrideEnvironment strenv;
