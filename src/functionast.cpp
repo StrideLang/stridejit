@@ -66,8 +66,23 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     if (state.NamedValues.find(std::string(decl->getName())) ==
         state.NamedValues.end()) {
       // Create an alloca for this variable.
+      llvm::Type *type;
+      auto typeNode = decl->getPropertyValue("type");
+      if (typeNode && typeNode->getNodeType() == AST::Block) {
+        auto typeBlockName =
+            std::static_pointer_cast<BlockNode>(typeNode)->getName();
+        if (state.typesMap.find(typeBlockName) != state.typesMap.end()) {
+          type = state.typesMap[typeBlockName];
+        } else {
+          std::cerr << "Unknown type " << typeBlockName
+                    << " . Falling back on double" << std::endl;
+        }
+      } else {
+        std::cerr << "Undefined type. Falling back on double" << std::endl;
+        type = llvm::Type::getDoubleTy(*state.TheContext);
+      }
       llvm::AllocaInst *Alloca =
-          state.CreateEntryBlockAlloca(TheFunction, decl->getName());
+          state.CreateEntryBlockAlloca(TheFunction, decl->getName(), type);
       state.NamedValues[decl->getName()] = Alloca;
     } else {
     }
@@ -208,11 +223,10 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
     llvm::Value *ArgsV = value;
     if (value->getType()->isPointerTy() && !arg->getType()->isPointerTy()) {
       ArgsV = state.Builder->CreateLoad(
-          llvm::Type::getDoubleTy(*state.TheContext), value, "");
+          value->getType()->getNonOpaquePointerElementType(), value, "");
     }
     if (!value->getType()->isPointerTy() && arg->getType()->isPointerTy()) {
-      ArgsV = state.Builder->CreateAlloca(
-          llvm::Type::getDoubleTy(*state.TheContext), nullptr, "Temp");
+      ArgsV = state.Builder->CreateAlloca(value->getType(), nullptr, "Temp");
       state.Builder->CreateStore(value, ArgsV);
     }
     //    ArgsV->dump();

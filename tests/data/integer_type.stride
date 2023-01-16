@@ -1,0 +1,7 @@
+
+
+signal S { domain: RootDomain type: _RealType}
+signal Counter { domain: RootDomain type: _IntType}
+
+[Counter, 0] >> Greater() >> reaction { S + 3.0 >> S;};
+Counter + 1 >> Counter;

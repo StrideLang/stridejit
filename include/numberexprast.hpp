@@ -17,6 +17,7 @@ public:
 
 class IntExprAST : public ExprAST {
   int64_t Val;
+  uint8_t NumBits{32};
 
 public:
   IntExprAST(int64_t Val) : Val(Val) {}

@@ -39,9 +39,10 @@
 extern "C" {
 EXPORT double __stride_Greater_d_dd(double a, double b);
 EXPORT bool __stride_Greater_b_dd(double a, double b);
+EXPORT bool __stride_Greater_b_ii(int32_t a, int32_t b);
 }
 
-enum class DataType { DOUBLE, BOOL };
+enum class DataType { DOUBLE, BOOL, INT32 };
 
 struct ExternalFunction {
   std::string name;
@@ -72,7 +73,8 @@ public:
   llvm::Function *getFunctionInModule(std::string Name);
 
   llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
-                                           llvm::StringRef VarName);
+                                           llvm::StringRef VarName,
+                                           llvm::Type *dataType);
 
   std::unique_ptr<ExprAST> LogError(const char *Str) {
     fprintf(stderr, "Error: %s\n", Str);

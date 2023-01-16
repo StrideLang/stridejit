@@ -3,5 +3,5 @@
 signal S { domain: RootDomain}
 signal Counter { domain: RootDomain}
 
-[Counter, 0] >> Greater() >> reaction { S + 3 >> S;};
-Counter + 1 >> Counter;
+[Counter, 0.0] >> Greater() >> reaction { S + 3.0 >> S;};
+Counter + 1.0 >> Counter;

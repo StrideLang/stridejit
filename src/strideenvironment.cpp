@@ -171,6 +171,9 @@ bool StrideEnvironment::compileInMemory() {
   M[Mangle("__stride_Greater_d_dd")] = llvm::JITEvaluatedSymbol(
       llvm::pointerToJITTargetAddress(&__stride_Greater_d_dd),
       llvm::JITSymbolFlags());
+  M[Mangle("__stride_Greater_b_ii")] = llvm::JITEvaluatedSymbol(
+      llvm::pointerToJITTargetAddress(&__stride_Greater_b_ii),
+      llvm::JITSymbolFlags());
   llvm::cantFail(JIT->getMainJITDylib().define(llvm::orc::absoluteSymbols(M)));
 
   if (auto Err = JIT->addIRModule(llvm::orc::ThreadSafeModule(
@@ -566,16 +569,35 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
         if (auto prevFunc = std::dynamic_pointer_cast<FunctionNode>(prev)) {
           mainInArgs.emplace_back(std::move(generated[domainName].expr.back()));
           generated[domainName].expr.pop_back();
-          // FIXME set correct type
+          // FIXME do automatic type casting int ->float
           mainInArgTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));
-        } else if (auto prevFunc = std::dynamic_pointer_cast<ListNode>(prev)) {
+        } else if (auto prevList = std::dynamic_pointer_cast<ListNode>(prev)) {
           auto *v = dynamic_cast<ListExprAST *>(
               generated[domainName].expr.back().get());
+          auto listNodes = prevList->getChildren();
+          auto nodeIt = listNodes.begin();
           for (auto elem = v->elements().begin(); elem != v->elements().end();
                elem++) {
             mainInArgs.emplace_back(std::move(*elem));
-            mainInArgTypes.push_back(
-                llvm::Type::getDoubleTy(*state.TheContext));
+            auto elemDecl = ASTQuery::findDeclarationByName(
+                ASTQuery::getNodeName(*nodeIt), *scope, tree);
+            if (elemDecl) {
+              mainInArgTypes.push_back(state.getLLVMType(elemDecl));
+            } else if ((*nodeIt)->getNodeType() == AST::Int) {
+              mainInArgTypes.push_back(
+                  llvm::Type::getInt32Ty(*state.TheContext));
+
+            } else if ((*nodeIt)->getNodeType() == AST::Real) {
+              mainInArgTypes.push_back(
+                  llvm::Type::getDoubleTy(*state.TheContext));
+            } else {
+              // Fallback. We shouldn't get here when things are fully
+              // implemented
+              mainInArgTypes.push_back(
+                  llvm::Type::getDoubleTy(*state.TheContext));
+            }
+
+            nodeIt++;
           }
           generated[domainName].expr.pop_back();
 
@@ -655,7 +677,6 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
 
         generated[domainName].expr.push_back(std::move(callexpr));
       }
-
     } else if (current->getNodeType() == AST::Int ||
                current->getNodeType() == AST::Real ||
                current->getNodeType() == AST::String) {

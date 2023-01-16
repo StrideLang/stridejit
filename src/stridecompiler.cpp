@@ -11,6 +11,11 @@ EXPORT bool __stride_Greater_b_dd(double a, double b) {
   // TODO should be removed and llvm functions for this should be used instead
   return a > b;
 }
+
+EXPORT bool __stride_Greater_b_ii(int32_t a, int32_t b) {
+  // TODO should be removed and llvm functions for this should be used instead
+  return a > b;
+}
 }
 
 StrideCompiler::StrideCompiler() {
@@ -40,6 +45,7 @@ StrideCompiler::StrideCompiler() {
   // Initialize types map
   typesMap["_RealType"] = llvm::Type::getDoubleTy(*TheContext);
   typesMap["_DoubleType"] = llvm::Type::getDoubleTy(*TheContext);
+  typesMap["_IntType"] = llvm::Type::getInt32Ty(*TheContext);
   typesMap["_SwitchType"] = llvm::Type::getInt1Ty(*TheContext);
 
   typesMap[""] = llvm::Type::getVoidTy(*TheContext);
@@ -53,15 +59,25 @@ std::optional<ExternalFunction> StrideCompiler::getExternalFunction(
     if (externFunc.first == strideName) {
       for (const auto &candidate : externFunc.second) {
         llvm::FunctionType *llvmFType = candidate.llvmFunctionType;
-        std::cout << llvmFType->getReturnType() << std::endl;
+        //        std::cout << llvmFType->getReturnType() << std::endl;
         if (llvmFType->getReturnType() == returnType) {
           if (argTypes.size() == llvmFType->getNumParams()) {
+            bool allTypesMatch = true;
             for (int i = 0; i < argTypes.size(); i++) {
               if (argTypes[i] != llvmFType->getParamType(i)) {
-                return out;
+                allTypesMatch = false;
+                break;
               }
             }
-            out = candidate;
+            if (allTypesMatch) {
+              return candidate;
+            }
+            if (!out) {
+              // for now remember first function that matches output type
+              // This should be evaluated to find the best match according to
+              // type casting
+              out = candidate;
+            }
           }
         }
       }
@@ -86,11 +102,11 @@ llvm::Function *StrideCompiler::getFunctionInModule(std::string Name) {
 
 llvm::AllocaInst *
 StrideCompiler::CreateEntryBlockAlloca(llvm::Function *TheFunction,
-                                       llvm::StringRef VarName) {
+                                       llvm::StringRef VarName,
+                                       llvm::Type *dataType) {
   llvm::IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
                          TheFunction->getEntryBlock().begin());
-  return TmpB.CreateAlloca(llvm::Type::getDoubleTy(*TheContext), nullptr,
-                           VarName);
+  return TmpB.CreateAlloca(dataType, nullptr, VarName);
 }
 
 void StrideCompiler::setConfiguration(StrideConfig option, bool enable) {
@@ -121,6 +137,9 @@ llvm::Type *StrideCompiler::getLLVMType(std::shared_ptr<DeclarationNode> decl) {
       std::cout << __FILE__ << ":" << __LINE__ << "unsupported type"
                 << std::endl;
     }
+  }
+  if (decl->getObjectType() == "reaction") {
+    return typesMap["_SwitchType"];
   }
   return typesMap[type];
 }

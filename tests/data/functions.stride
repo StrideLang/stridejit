@@ -1,3 +1,3 @@
 signal Out {}
 
-0 >> Cos() >> Out;
+0.0 >> Cos() >> Out;

@@ -1,4 +1,4 @@
 signal In {}
 switch Out {}
 
-[In, 2] >> Greater() >> Out;
+[In, 2.0] >> Greater() >> Out;
