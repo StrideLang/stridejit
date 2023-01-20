@@ -174,6 +174,9 @@ bool StrideEnvironment::compileInMemory() {
   M[Mangle("__stride_Greater_b_ii")] = llvm::JITEvaluatedSymbol(
       llvm::pointerToJITTargetAddress(&__stride_Greater_b_ii),
       llvm::JITSymbolFlags());
+  M[Mangle("__stride_Equal_b_dd")] = llvm::JITEvaluatedSymbol(
+      llvm::pointerToJITTargetAddress(&__stride_Equal_b_dd),
+      llvm::JITSymbolFlags());
   llvm::cantFail(JIT->getMainJITDylib().define(llvm::orc::absoluteSymbols(M)));
 
   if (auto Err = JIT->addIRModule(llvm::orc::ThreadSafeModule(
@@ -188,6 +191,9 @@ bool StrideEnvironment::compileInMemory() {
 
 bool StrideEnvironment::compileObjectToDisk(std::string path) {
   auto fspath = std::filesystem::path(path);
+  if (!std::filesystem::exists(fspath)) {
+    std::filesystem::create_directories(fspath);
+  }
   { // Write header file
     auto headerFile = fspath.append("stride_include.h");
     std::ofstream f(headerFile.string());
@@ -385,27 +391,46 @@ bool StrideEnvironment::loadLibrary(const char *libName, std::string &err) {
 //#include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 
+void setTypeCastMetadata(ASTNode node, ExprAST *V) {
+  if (auto typecastNode = node->getCompilerProperty("typecast")) {
+    if (typecastNode->getNodeType() == AST::String) {
+      V->typecast =
+          std::static_pointer_cast<ValueNode>(typecastNode)->getStringValue();
+    }
+  }
+}
+
 std::unique_ptr<ExprAST> createExpr(ASTNode node) {
   if (node->getNodeType() == AST::Block) {
-    return std::make_unique<VariableExprAST>(
+    std::unique_ptr<ExprAST> V = std::make_unique<VariableExprAST>(
         std::static_pointer_cast<BlockNode>(node)->getName());
+    setTypeCastMetadata(node, V.get());
+    return V;
   } else if (node->getNodeType() == AST::Bundle) {
     std::vector<size_t> indeces;
     auto bundleNode = std::static_pointer_cast<BundleNode>(node);
-    return std::make_unique<VariableExprAST>(bundleNode->getName(),
-                                             bundleNode->getIndeces());
+    auto V = std::make_unique<VariableExprAST>(bundleNode->getName(),
+                                               bundleNode->getIndeces());
+    setTypeCastMetadata(node, V.get());
+    return V;
   } else if (node->getNodeType() == AST::Real) {
     // TODO separate float types
-    return std::make_unique<RealExprAST>(
+    auto V = std::make_unique<RealExprAST>(
         std::static_pointer_cast<ValueNode>(node)->getRealValue());
+    setTypeCastMetadata(node, V.get());
+    return V;
   } else if (node->getNodeType() == AST::Int) {
     // TODO separate int types
-    return std::make_unique<IntExprAST>(
+    auto V = std::make_unique<IntExprAST>(
         std::static_pointer_cast<ValueNode>(node)->getIntValue());
+    setTypeCastMetadata(node, V.get());
+    return V;
   } else if (node->getNodeType() == AST::Switch) {
     // TODO separate int types
-    return std::make_unique<BoolExprAST>(
+    auto V = std::make_unique<BoolExprAST>(
         std::static_pointer_cast<ValueNode>(node)->getSwitchValue());
+    setTypeCastMetadata(node, V.get());
+    return V;
   } else if (node->getNodeType() == AST::Expression) {
     auto expr = std::static_pointer_cast<ExpressionNode>(node);
     if (expr->isUnary()) {
@@ -432,9 +457,17 @@ std::unique_ptr<ExprAST> createExpr(ASTNode node) {
         return nullptr;
       }
 
-      return std::make_unique<BinaryExprAST>(op, std::move(l), std::move(r));
+      auto V = std::make_unique<BinaryExprAST>(op, std::move(l), std::move(r));
+      setTypeCastMetadata(node, V.get());
+      return V;
     }
   } else if (node->getNodeType() == AST::List) {
+    auto list = std::make_unique<ListExprAST>();
+    for (const auto &elem : node->getChildren()) {
+      list->addElement(createExpr(elem));
+    }
+    return list;
+  } else if (node->getNodeType() == AST::PortProperty) {
     auto list = std::make_unique<ListExprAST>();
     for (const auto &elem : node->getChildren()) {
       list->addElement(createExpr(elem));

@@ -5,12 +5,23 @@
 // ----------------------
 
 llvm::Value *RealExprAST::codegen(StrideCompiler &state) {
+
+  if (typecast.size() > 0) {
+    if (typecast == "_IntType") {
+      return llvm::ConstantInt::get(*state.TheContext, llvm::APInt(32, Val));
+    }
+  }
   return llvm::ConstantFP::get(*state.TheContext, llvm::APFloat(Val));
 }
 
 llvm::Value *IntExprAST::codegen(StrideCompiler &state) {
-  return llvm::ConstantInt::get(*state.TheContext,
-                                llvm::APInt(NumBits, double(Val)));
+  if (typecast.size() > 0) {
+    if (typecast == "_RealType") {
+      return llvm::ConstantFP::get(*state.TheContext,
+                                   llvm::APFloat(double(Val)));
+    }
+  }
+  return llvm::ConstantInt::get(*state.TheContext, llvm::APInt(NumBits, Val));
 }
 
 std::vector<size_t> VariableExprAST::getIndeces() const { return Indeces; }
@@ -23,6 +34,15 @@ llvm::Value *VariableExprAST::codegen(StrideCompiler &state) {
   //  return
   //  state.Builder->CreateLoad(llvm::Type::getDoubleTy(*state.TheContext),
   //                                   V, Name.c_str());
+  if (typecast.size() > 0) {
+    if (V->getType()->isIntegerTy() && typecast == "_RealType") {
+      V = state.Builder->CreateSIToFP(
+          V, llvm::Type::getDoubleTy(*state.TheContext));
+    } else if (V->getType()->isDoubleTy() && typecast == "_IntType") {
+      V = state.Builder->CreateFPToSI(
+          V, llvm::Type::getInt32Ty(*state.TheContext));
+    }
+  }
   return V;
 }
 
@@ -79,13 +99,50 @@ llvm::Value *BinaryExprAST::codegen(StrideCompiler &state) {
             Val->getType()->getNonOpaquePointerElementType(), Val);
       }
     }
+    // Assigning to bundle
+    if (Variable->getType()->isPointerTy()) {
+      if (auto *varExpr = dynamic_cast<VariableExprAST *>(LHS.get())) {
+        auto indeces = varExpr->getIndeces();
+        if (indeces.size() > 0) {
+          // FIXME support ranges
+          std::vector<llvm::Value *> idxList;
+          idxList.push_back(llvm::ConstantInt::get(
+              *state.TheContext, llvm::APInt(64, indeces[0])));
+          Variable = state.Builder->CreateGEP(
+              Variable->getType()->getNonOpaquePointerElementType(), Variable,
+              idxList);
+          //          Variable = state.Builder->CreateLoad(
+          //              Variable->getType()->getNonOpaquePointerElementType(),
+          //              GEP, varExpr->getName());
+        } /*else {
+          Variable = state.Builder->CreateLoad(
+              Variable->getType()->getNonOpaquePointerElementType(), Val);
+        }*/
+      }
+    }
 
     if (Val->getType()->isPointerTy()) {
       auto loadInst = state.Builder->CreateLoad(
           Val->getType()->getNonOpaquePointerElementType(), Val);
-      state.Builder->CreateStore(loadInst, Variable);
+
+      if (loadInst->getType()->isDoubleTy() &&
+          Variable->getType()
+              ->getNonOpaquePointerElementType()
+              ->isIntegerTy()) {
+      } else
+        state.Builder->CreateStore(loadInst, Variable);
     } else {
       state.Builder->CreateStore(Val, Variable);
+    }
+
+    if (typecast.size() > 0) {
+      if (Val->getType()->isIntegerTy() && typecast == "_RealType") {
+        Val = state.Builder->CreateSIToFP(
+            Val, llvm::Type::getDoubleTy(*state.TheContext));
+      } else if (Val->getType()->isDoubleTy() && typecast == "_IntType") {
+        Val = state.Builder->CreateFPToSI(
+            Val, llvm::Type::getInt32Ty(*state.TheContext));
+      }
     }
     // This might be unnecessary if variable is not read further, but should
     // be removed by optimization pass
@@ -104,34 +161,78 @@ llvm::Value *BinaryExprAST::codegen(StrideCompiler &state) {
   L->dump();
   R->dump();
   if (L->getType()->isPointerTy()) {
-    L = state.Builder->CreateLoad(
-        L->getType()->getNonOpaquePointerElementType(), L);
+    if (auto *varExpr = dynamic_cast<VariableExprAST *>(LHS.get())) {
+      auto indeces = varExpr->getIndeces();
+      if (indeces.size() > 0) {
+        // FIXME support ranges
+        std::vector<llvm::Value *> idxList;
+        idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
+                                                 llvm::APInt(64, indeces[0])));
+        auto GEP = state.Builder->CreateGEP(
+            L->getType()->getNonOpaquePointerElementType(), L, idxList);
+        L = state.Builder->CreateLoad(
+            L->getType()->getNonOpaquePointerElementType(), GEP,
+            varExpr->getName());
+      } else {
+        L = state.Builder->CreateLoad(
+            L->getType()->getNonOpaquePointerElementType(), L);
+      }
+    } else {
+      L = state.Builder->CreateLoad(
+          L->getType()->getNonOpaquePointerElementType(), L);
+    }
   }
+
   if (R->getType()->isPointerTy()) {
-    R = state.Builder->CreateLoad(
-        R->getType()->getNonOpaquePointerElementType(), R);
+    if (auto *varExpr = dynamic_cast<VariableExprAST *>(RHS.get())) {
+      auto indeces = varExpr->getIndeces();
+      if (indeces.size() > 0) {
+        // FIXME support ranges
+        std::vector<llvm::Value *> idxList;
+        idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
+                                                 llvm::APInt(64, indeces[0])));
+        auto GEP = state.Builder->CreateGEP(
+            R->getType()->getNonOpaquePointerElementType(), R, idxList);
+        R = state.Builder->CreateLoad(
+            R->getType()->getNonOpaquePointerElementType(), GEP,
+            varExpr->getName());
+        //          Variable = state.Builder->CreateLoad(
+        //              Variable->getType()->getNonOpaquePointerElementType(),
+        //              GEP, varExpr->getName());
+      } else {
+        R = state.Builder->CreateLoad(
+            R->getType()->getNonOpaquePointerElementType(), R);
+      }
+    } else {
+      R = state.Builder->CreateLoad(
+          R->getType()->getNonOpaquePointerElementType(), R);
+    }
   }
+  llvm::Value *Val{nullptr};
   switch (Op) {
   case '+': {
     if (L->getType()->isDoubleTy() && R->getType()->isDoubleTy()) {
-      return state.Builder->CreateFAdd(L, R, "addtmp");
+      Val = state.Builder->CreateFAdd(L, R, "addtmp");
     } else if (L->getType()->isIntegerTy() && R->getType()->isIntegerTy()) {
-      return state.Builder->CreateAdd(L, R, "addtmp");
+      Val = state.Builder->CreateAdd(L, R, "addtmp");
     }
+    break;
   }
   case '-': {
     if (L->getType()->isDoubleTy() && R->getType()->isDoubleTy()) {
-      return state.Builder->CreateFSub(L, R, "subtmp");
+      Val = state.Builder->CreateFSub(L, R, "subtmp");
     } else if (L->getType()->isIntegerTy() && R->getType()->isIntegerTy()) {
-      return state.Builder->CreateSub(L, R, "subtmp");
+      Val = state.Builder->CreateSub(L, R, "subtmp");
     }
+    break;
   }
   case '*': {
     if (L->getType()->isDoubleTy() && R->getType()->isDoubleTy()) {
-      return state.Builder->CreateFMul(L, R, "multmp");
+      Val = state.Builder->CreateFMul(L, R, "multmp");
     } else if (L->getType()->isIntegerTy() && R->getType()->isIntegerTy()) {
-      return state.Builder->CreateMul(L, R, "multmp");
+      Val = state.Builder->CreateMul(L, R, "multmp");
     }
+    break;
   }
   case '<': {
     if (L->getType()->isDoubleTy() && R->getType()->isDoubleTy()) {
@@ -140,12 +241,28 @@ llvm::Value *BinaryExprAST::codegen(StrideCompiler &state) {
       L = state.Builder->CreateICmpULT(L, R, "cmptmp");
     }
     // Convert bool 0/1 to double 0.0 or 1.0
-    return state.Builder->CreateUIToFP(
+    Val = state.Builder->CreateUIToFP(
         L, llvm::Type::getDoubleTy(*state.TheContext), "booltmp");
+
+    break;
   }
   default:
-    return state.LogErrorV("invalid binary operator");
+    break;
   }
+  if (Val) {
+    if (typecast.size() > 0) {
+      if (Val->getType()->isIntegerTy() && typecast == "_RealType") {
+        Val = state.Builder->CreateSIToFP(
+            Val, llvm::Type::getDoubleTy(*state.TheContext));
+      } else if (Val->getType()->isDoubleTy() && typecast == "_IntType") {
+        Val = state.Builder->CreateFPToSI(
+            Val, llvm::Type::getInt32Ty(*state.TheContext));
+      }
+    }
+    return Val;
+  }
+
+  return state.LogErrorV("invalid binary operator");
 }
 
 void ListExprAST::addElement(std::unique_ptr<ExprAST> elem) {

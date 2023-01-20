@@ -2,3 +2,4 @@ signal In[16] {}
 signal Out[16] {}
 
 In[1] >> Out[2];
+In[2] + 1.2 >> Out[3];

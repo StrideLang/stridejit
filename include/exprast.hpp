@@ -24,6 +24,8 @@ public:
   virtual ~ExprAST() = default;
 
   virtual llvm::Value *codegen(StrideCompiler &state) = 0;
+
+  std::string typecast;
 };
 
 #endif // EXPRAST_HPP

@@ -16,6 +16,10 @@ EXPORT bool __stride_Greater_b_ii(int32_t a, int32_t b) {
   // TODO should be removed and llvm functions for this should be used instead
   return a > b;
 }
+EXPORT bool __stride_Equal_b_dd(double a, double b) {
+  // TODO should be removed and llvm functions for this should be used instead
+  return a == b;
+}
 }
 
 StrideCompiler::StrideCompiler() {

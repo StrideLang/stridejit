@@ -38,6 +38,38 @@
 
 using namespace llvm;
 
+
+TEST(JIT, TypecastStream) {
+
+  StrideEnvironment strenv;
+
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "typecast_stream.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
+
+  //    EXPECT_NE(Entry, nullptr);
+  //    //  double in = 0;
+  //    //  double out = 0;
+  int32_t Int[2] = {0};
+  double Float[2] = {0};
+  Entry(Int, Float);
+
+  EXPECT_EQ(Int[0], 1);
+  EXPECT_EQ(Int[1], 4);
+
+  EXPECT_DOUBLE_EQ(Float[0], 3.0);
+  EXPECT_DOUBLE_EQ(Float[1], 5.0);
+}
+
 TEST(JIT, IntegerType) {
 
   StrideEnvironment strenv;
@@ -85,9 +117,13 @@ TEST(JIT, Bundles) {
 
   double In[16] = {0};
   double Out[16] = {0};
+  In[2] = 0.4;
+
   Entry(In, Out);
 
   EXPECT_DOUBLE_EQ(In[1], Out[2]);
+  // Stride code:  In[2] + 1.2 >> Out[3];
+  EXPECT_DOUBLE_EQ(Out[3], 0.4 + 1.2);
 }
 
 TEST(JIT, CompileToDisk) {
