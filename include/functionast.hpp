@@ -33,6 +33,7 @@ class StrideCompiler;
 struct PrototypeArg {
   std::string name;
   llvm::Type *llvmType;
+  std::string property; // If port property, this is not empty
 };
 
 enum class CallableType { Module, Reaction, Loop, External, DomainFunction };
@@ -47,15 +48,18 @@ class PrototypeAST {
   std::vector<PrototypeArg> OutArgs;
   std::vector<PrototypeArg>
       ExternalArgs; // For upper scope in reactions and loops
+  std::vector<PrototypeArg> UsedPortProperties;
   bool IsOperator;
   unsigned Precedence; // Precedence if a binary op.
 
 public:
   PrototypeAST(const std::string &Name, std::vector<PrototypeArg> OutArgs,
                std::vector<PrototypeArg> Args,
-               std::vector<PrototypeArg> ExternalArgs, bool IsOperator = false,
-               unsigned Prec = 0)
-      : Name(Name), Args(Args), OutArgs(OutArgs), ExternalArgs(ExternalArgs) {}
+               std::vector<PrototypeArg> ExternalArgs,
+               std::vector<PrototypeArg> UsedPortProperties,
+               bool IsOperator = false, unsigned Prec = 0)
+      : Name(Name), Args(Args), OutArgs(OutArgs), ExternalArgs(ExternalArgs),
+        UsedPortProperties(UsedPortProperties) {}
 
   llvm::Function *codegen(StrideCompiler &state);
   const std::string &getName() const { return Name; }
@@ -69,6 +73,7 @@ public:
   std::vector<PrototypeArg> getExternalArgs() const;
 
   CallableType callType; // Set by parent FunctionAST before codegen()
+  std::vector<PrototypeArg> getUsedPortProperties() const;
 };
 
 class FunctionAST {
@@ -101,9 +106,11 @@ public:
   CallExprAST(const std::string &Callee,
               std::vector<std::unique_ptr<ExprAST>> OutArgs,
               std::vector<std::unique_ptr<ExprAST>> InArgs,
-              std::vector<std::unique_ptr<ExprAST>> ExternalArgs)
+              std::vector<std::unique_ptr<ExprAST>> ExternalArgs,
+              std::vector<std::unique_ptr<ExprAST>> PortPropArgs)
       : Callee(Callee), InArgs(std::move(InArgs)), OutArgs(std::move(OutArgs)),
-        ExternalArgs(std::move(ExternalArgs)) {}
+        ExternalArgs(std::move(ExternalArgs)),
+        PortPropArgs(std::move(PortPropArgs)) {}
 
   llvm::Value *codegen(StrideCompiler &state) override;
 
@@ -112,6 +119,7 @@ public:
   std::vector<std::unique_ptr<ExprAST>> InArgs;
   std::vector<std::unique_ptr<ExprAST>> OutArgs;
   std::vector<std::unique_ptr<ExprAST>> ExternalArgs;
+  std::vector<std::unique_ptr<ExprAST>> PortPropArgs;
   std::unique_ptr<ExprAST> ret;
 };
 

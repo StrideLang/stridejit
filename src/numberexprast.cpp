@@ -265,14 +265,26 @@ llvm::Value *BinaryExprAST::codegen(StrideCompiler &state) {
   return state.LogErrorV("invalid binary operator");
 }
 
-void ListExprAST::addElement(std::unique_ptr<ExprAST> elem) {
-  members.emplace_back(std::move(elem));
-}
-
-llvm::Value *ListExprAST::codegen(StrideCompiler &state) {
-  return llvm::ConstantTokenNone::get(*state.TheContext);
-}
-
 llvm::Value *BoolExprAST::codegen(StrideCompiler &state) {
   return llvm::ConstantInt::get(*state.TheContext, llvm::APInt(1, Val ? 1 : 0));
+}
+
+llvm::Value *PortPropertyAST::codegen(StrideCompiler &state) {
+
+  std::string portToken = Name + "_" + Property;
+  if (state.NamedValues.find(portToken) == state.NamedValues.end()) {
+    return state.LogErrorV(
+        ("Unknown port property name: " + portToken).c_str());
+  }
+  llvm::Value *V = state.NamedValues[portToken];
+  if (typecast.size() > 0) {
+    if (V->getType()->isIntegerTy() && typecast == "_RealType") {
+      V = state.Builder->CreateSIToFP(
+          V, llvm::Type::getDoubleTy(*state.TheContext));
+    } else if (V->getType()->isDoubleTy() && typecast == "_IntType") {
+      V = state.Builder->CreateFPToSI(
+          V, llvm::Type::getInt32Ty(*state.TheContext));
+    }
+  }
+  return V;
 }

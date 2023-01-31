@@ -1,5 +1,6 @@
 #include "functionast.hpp"
 #include "exprast.hpp"
+#include "listexprast.hpp"
 #include "strideenvironment.hpp"
 
 #include <iostream>
@@ -38,6 +39,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   state.Builder->SetInsertPoint(BB);
   // Record the function arguments in the NamedValues map.
   state.NamedValues.clear();
+  state.PortBlockMap.clear();
 
   for (auto &Arg : TheFunction->args()) {
     state.NamedValues[std::string(Arg.getName())] = &Arg;
@@ -154,6 +156,10 @@ std::vector<PrototypeArg> PrototypeAST::getExternalArgs() const {
   return ExternalArgs;
 }
 
+std::vector<PrototypeArg> PrototypeAST::getUsedPortProperties() const {
+  return UsedPortProperties;
+}
+
 llvm::Function *PrototypeAST::codegen(StrideCompiler &state) {
   // Make the function type:  double(double,double) etc.
   std::vector<llvm::Type *> ProtoArguments;
@@ -183,6 +189,9 @@ llvm::Function *PrototypeAST::codegen(StrideCompiler &state) {
     for (const auto &arg : ExternalArgs) {
       ProtoArguments.emplace_back(arg.llvmType);
     }
+    for (const auto &arg : UsedPortProperties) {
+      ProtoArguments.emplace_back(arg.llvmType);
+    }
   }
 
   llvm::FunctionType *FT = llvm::FunctionType::get(
@@ -200,13 +209,16 @@ llvm::Function *PrototypeAST::codegen(StrideCompiler &state) {
     } else if (Idx < OutArgs.size()) {
       Arg.setName(OutArgs[Idx].name);
     } else if (Idx < (OutArgs.size() + Args.size())) {
-      Arg.setName(Args[Idx - Args.size()].name);
-    } else {
+      Arg.setName(Args[Idx - OutArgs.size()].name);
+    } else if (Idx < (OutArgs.size() + Args.size() + ExternalArgs.size())) {
       Arg.setName(ExternalArgs[Idx - (OutArgs.size() + Args.size())].name);
+    } else {
+      Arg.setName(UsedPortProperties[Idx - (OutArgs.size() + Args.size() +
+                                            ExternalArgs.size())]
+                      .name);
     }
     Idx++;
   }
-
   return F;
 }
 
@@ -229,6 +241,8 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
       ArgsV = state.Builder->CreateAlloca(value->getType(), nullptr, "Temp");
       state.Builder->CreateStore(value, ArgsV);
     }
+    //    value->dump();
+    //    arg->dump();
     //    ArgsV->dump();
     //    ArgsV->getType()->dump();
     return ArgsV;
@@ -252,12 +266,34 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
               llvm::Type::getDoubleTy(*state.TheContext), CallArgs.back(), "");
         }
       }
-
     } else {
-      auto newArg = func(value, CalleeF->getArg(i), state);
-      if (!newArg)
+      llvm::Value *newArgVal = nullptr;
+      if (auto varExpr = dynamic_cast<VariableExprAST *>(OutArgs[i].get())) {
+        auto indeces = varExpr->getIndeces();
+        if (indeces.size() > 0) {
+          // FIXME support ranges
+          std::vector<llvm::Value *> idxList;
+          idxList.push_back(llvm::ConstantInt::get(
+              *state.TheContext, llvm::APInt(64, indeces[0])));
+          auto *GEP = state.Builder->CreateGEP(
+              value->getType()->getNonOpaquePointerElementType(), value,
+              idxList);
+          value = GEP;
+          //          value = state.Builder->CreateLoad(
+          //              value->getType()->getNonOpaquePointerElementType(),
+          //              GEP, varExpr->getName());
+        } else {
+          //          value = state.Builder->CreateLoad(
+          //              value->getType()->getNonOpaquePointerElementType(),
+          //              value);
+        }
+        newArgVal = value;
+      } else {
+        newArgVal = func(value, CalleeF->getArg(i), state);
+      }
+      if (!newArgVal)
         return nullptr;
-      CallArgs.push_back(std::move(newArg));
+      CallArgs.push_back(std::move(newArgVal));
       if (CallArgs.back()->getType()->isPointerTy() &&
           !CalleeF->getArg(i)->getType()->isPointerTy()) {
         CallArgs.back() = state.Builder->CreateLoad(
@@ -280,19 +316,43 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
           if (CallArgs.back()->getType()->isPointerTy() &&
               !CalleeF->getArg(i)->getType()->isPointerTy()) {
             CallArgs.back() = state.Builder->CreateLoad(
-                llvm::Type::getDoubleTy(*state.TheContext), CallArgs.back(),
-                "");
+                CallArgs.back()->getType()->getNonOpaquePointerElementType(),
+                CallArgs.back(), "");
           }
         }
       } else {
-        auto newArg = func(value, CalleeF->getArg(i), state);
-        if (!newArg)
+        llvm::Value *newArgVal = nullptr;
+        if (auto varExpr = dynamic_cast<VariableExprAST *>(InArgs[i].get())) {
+          auto indeces = varExpr->getIndeces();
+          if (indeces.size() > 0) {
+            // FIXME support ranges
+            std::vector<llvm::Value *> idxList;
+            idxList.push_back(llvm::ConstantInt::get(
+                *state.TheContext, llvm::APInt(64, indeces[0])));
+            auto *GEP = state.Builder->CreateGEP(
+                value->getType()->getNonOpaquePointerElementType(), value,
+                idxList);
+            value = GEP;
+            //            value = state.Builder->CreateLoad(
+            //                value->getType()->getNonOpaquePointerElementType(),
+            //                GEP, varExpr->getName());
+          } else {
+            //            value = state.Builder->CreateLoad(
+            //                value->getType()->getNonOpaquePointerElementType(),
+            //                value);
+          }
+          newArgVal = value;
+        } else {
+          newArgVal = func(value, CalleeF->getArg(i), state);
+        }
+        if (!newArgVal)
           return nullptr;
-        CallArgs.push_back(std::move(newArg));
+        CallArgs.push_back(std::move(newArgVal));
         if (CallArgs.back()->getType()->isPointerTy() &&
             !CalleeF->getArg(i)->getType()->isPointerTy()) {
           CallArgs.back() = state.Builder->CreateLoad(
-              llvm::Type::getDoubleTy(*state.TheContext), CallArgs.back(), "");
+              CallArgs.back()->getType()->getNonOpaquePointerElementType(),
+              CallArgs.back(), "");
         }
       }
     }
@@ -305,8 +365,7 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
   for (unsigned i = 0, e = ExternalArgs.size(); i != e; ++i) {
     llvm::Value *value = ExternalArgs[i]->codegen(state);
     if (value->getType()->isTokenTy()) {
-      assert(0 == 1); // TODO implement
-      //      auto *list = dynamic_cast<ListExprAST *>(OutArgs[i].get());
+      auto *list = dynamic_cast<ListExprAST *>(OutArgs[i].get());
       //      assert(list);
       //      for (const auto &expr : list->elements()) {
       //        auto newArg = func(expr->codegen(state), CalleeF->getArg(i),
@@ -329,9 +388,15 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
       if (CallArgs.back()->getType()->isPointerTy() &&
           !CalleeF->getArg(i)->getType()->isPointerTy()) {
         CallArgs.back() = state.Builder->CreateLoad(
-            llvm::Type::getDoubleTy(*state.TheContext), CallArgs.back(), "");
+            CallArgs.back()->getType()->getNonOpaquePointerElementType(),
+            CallArgs.back(), "");
       }
     }
+  }
+
+  for (unsigned i = 0, e = PortPropArgs.size(); i != e; ++i) {
+    llvm::Value *value = PortPropArgs[i]->codegen(state);
+    CallArgs.push_back(std::move(value));
   }
 
   CalleeF->dump();

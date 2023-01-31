@@ -27,6 +27,7 @@ find_package(LLVM REQUIRED CONFIG)
 
 set(STRIDEJIT_SRC
   src/exprast.cpp
+  src/listexprast.cpp
   src/numberexprast.cpp
   src/strideenvironment.cpp
   src/stridecompiler.cpp
@@ -35,6 +36,7 @@ set(STRIDEJIT_SRC
 
 set(STRIDEJIT_HEADERS
   include/exprast.hpp
+  include/listexprast.hpp
   include/numberexprast.hpp
   include/strideenvironment.hpp
   include/functionast.hpp

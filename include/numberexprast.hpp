@@ -48,6 +48,17 @@ public:
   std::vector<size_t> getIndeces() const;
 };
 
+class PortPropertyAST : public ExprAST {
+  std::string Name;
+  std::string Property;
+
+public:
+  PortPropertyAST(const std::string &Name, const std::string &Property)
+      : Name(Name), Property(Property) {}
+
+  llvm::Value *codegen(StrideCompiler &state) override;
+};
+
 /// BinaryExprAST - Expression class for a binary operator.
 class BinaryExprAST : public ExprAST {
   char Op;
@@ -58,17 +69,6 @@ public:
                 std::unique_ptr<ExprAST> RHS);
 
   llvm::Value *codegen(StrideCompiler &state) override;
-};
-
-class ListExprAST : public ExprAST {
-  std::vector<std::unique_ptr<ExprAST>> members;
-
-public:
-  ListExprAST() {}
-
-  void addElement(std::unique_ptr<ExprAST> elem);
-  llvm::Value *codegen(StrideCompiler &state) override;
-  std::vector<std::unique_ptr<ExprAST>> &elements() { return members; }
 };
 
 #endif // NUMBEREXPRAST_HPP

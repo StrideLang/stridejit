@@ -216,6 +216,8 @@ bool StrideEnvironment::compileObjectToDisk(std::string path) {
           f << "int *";
         } else if (domainFunc.type == DataType::BOOL) {
           f << "bool *";
+          //        } else if (domainFunc.type == DataType::INT64) {
+          //          f << "int64_t *";
         } else {
           f << "INVALID";
         }
@@ -382,6 +384,7 @@ bool StrideEnvironment::loadLibrary(const char *libName, std::string &err) {
 
 #include "exprast.hpp"
 #include "functionast.hpp"
+#include "listexprast.hpp"
 #include "numberexprast.hpp"
 
 #include "astquery.h"
@@ -462,17 +465,14 @@ std::unique_ptr<ExprAST> createExpr(ASTNode node) {
       return V;
     }
   } else if (node->getNodeType() == AST::List) {
-    auto list = std::make_unique<ListExprAST>();
-    for (const auto &elem : node->getChildren()) {
-      list->addElement(createExpr(elem));
-    }
+    auto list = std::make_unique<ListExprAST>(node->getChildren());
     return list;
   } else if (node->getNodeType() == AST::PortProperty) {
-    auto list = std::make_unique<ListExprAST>();
-    for (const auto &elem : node->getChildren()) {
-      list->addElement(createExpr(elem));
-    }
-    return list;
+    auto pp = std::static_pointer_cast<PortPropertyNode>(node);
+    auto V =
+        std::make_unique<PortPropertyAST>(pp->getName(), pp->getPortName());
+    setTypeCastMetadata(node, V.get());
+    return V;
   }
   std::cerr << " Node type not supported " << std::endl;
   return nullptr;
@@ -590,7 +590,9 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
       }
 
     } else if (current->getNodeType() == AST::Function) {
-      auto newFunc = std::static_pointer_cast<FunctionNode>(current);
+      auto func = std::static_pointer_cast<FunctionNode>(current);
+      auto funcDecl =
+          ASTQuery::findDeclarationByName(func->getName(), {}, tree);
 
       std::vector<std::unique_ptr<ExprAST>> mainInArgs;
       std::vector<llvm::Type *> mainInArgTypes;
@@ -609,28 +611,37 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
               generated[domainName].expr.back().get());
           auto listNodes = prevList->getChildren();
           auto nodeIt = listNodes.begin();
-          for (auto elem = v->elements().begin(); elem != v->elements().end();
-               elem++) {
-            mainInArgs.emplace_back(std::move(*elem));
-            auto elemDecl = ASTQuery::findDeclarationByName(
-                ASTQuery::getNodeName(*nodeIt), *scope, tree);
-            if (elemDecl) {
-              mainInArgTypes.push_back(state.getLLVMType(elemDecl));
-            } else if ((*nodeIt)->getNodeType() == AST::Int) {
-              mainInArgTypes.push_back(
-                  llvm::Type::getInt32Ty(*state.TheContext));
+          if (v->getType() == ListExprAST::Type::MUTABLE_CONSISTENT) {
+            for (auto elem = v->elements().begin(); elem != v->elements().end();
+                 elem++) {
+              mainInArgs.emplace_back(std::move(*elem));
+              auto elemDecl = ASTQuery::findDeclarationByName(
+                  ASTQuery::getNodeName(*nodeIt), *scope, tree);
+              if (elemDecl) {
+                mainInArgTypes.push_back(state.getLLVMType(elemDecl));
+              } else if ((*nodeIt)->getNodeType() == AST::Int) {
+                mainInArgTypes.push_back(
+                    llvm::Type::getInt32Ty(*state.TheContext));
 
-            } else if ((*nodeIt)->getNodeType() == AST::Real) {
-              mainInArgTypes.push_back(
-                  llvm::Type::getDoubleTy(*state.TheContext));
-            } else {
-              // Fallback. We shouldn't get here when things are fully
-              // implemented
-              mainInArgTypes.push_back(
-                  llvm::Type::getDoubleTy(*state.TheContext));
+              } else if ((*nodeIt)->getNodeType() == AST::Real) {
+                mainInArgTypes.push_back(
+                    llvm::Type::getDoubleTy(*state.TheContext));
+              } else {
+                // Fallback. We shouldn't get here when things are fully
+                // implemented
+                mainInArgTypes.push_back(
+                    llvm::Type::getDoubleTy(*state.TheContext));
+              }
+
+              nodeIt++;
             }
-
-            nodeIt++;
+          } else if (v->getType() == ListExprAST::Type::IMMUTABLE_CONSISTENT) {
+            mainInArgs.emplace_back(
+                std::move(generated[domainName].expr.back()));
+            mainInArgTypes.push_back(llvm::PointerType::get(
+                llvm::Type::getDoubleTy(*state.TheContext), 0));
+          } else {
+            assert(0 == 1);
           }
           generated[domainName].expr.pop_back();
 
@@ -641,6 +652,7 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
           mainInArgTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));
         }
       }
+
       std::optional<ExternalFunction> externFunc;
       if (next) { // outputs
         // FIXME: ensure next node is processed correctly. This will not
@@ -650,14 +662,15 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
             ASTQuery::findDeclarationByName(ASTQuery::getNodeName(next), *scope,
                                             tree);
         externFunc = state.getExternalFunction(
-            newFunc->getName(), state.getLLVMType(nextDecl), mainInArgTypes);
+            func->getName(), state.getLLVMType(nextDecl), mainInArgTypes);
         if (!externFunc) {
+          assert(nextExpr);
           mainOutArgs.emplace_back(std::move(nextExpr));
           mainOutArgTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));
         }
       } else {
         externFunc = state.getExternalFunction(
-            newFunc->getName(), state.getLLVMType(nullptr), mainInArgTypes);
+            func->getName(), state.getLLVMType(nullptr), mainInArgTypes);
       }
 
       if (externFunc) {
@@ -669,6 +682,7 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
         }
         auto newCall = std::make_unique<CallExprAST>(
             externFunc->name, std::move(mainOutArgs), std::move(mainInArgs),
+            std::vector<std::unique_ptr<ExprAST>>{},
             std::vector<std::unique_ptr<ExprAST>>{});
         newCall->callType = CallableType::External;
         generated[domainName].expr.push_back(std::move(newCall));
@@ -676,23 +690,44 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
                   << std::endl;
       } else {
         auto newFuncDecl =
-            createFunctionDeclaration(newFunc, prev, next, tree, scope, state);
+            createFunctionDeclaration(func, prev, next, tree, scope, state);
         std::vector<std::unique_ptr<ExprAST>> ExternalArgs;
         if (newFuncDecl) {
           for (const auto &arg : newFuncDecl->getProto().getExternalArgs()) {
             ExternalArgs.push_back(std::make_unique<VariableExprAST>(arg.name));
           }
         }
+        std::vector<std::unique_ptr<ExprAST>> PortPropArgs;
+        if (funcDecl) {
+          auto usedPortProps = CodeAnalysis::getUsedPortProperties(funcDecl);
+          auto innerScope = *scope;
+          std::vector<ASTNode> blocks;
+          auto blocksNode = funcDecl->getPropertyValue("blocks");
+          if (blocksNode) {
+            blocks = blocksNode->getChildren();
+          }
+          innerScope.push_back({funcDecl, blocks});
+          for (const auto &ppNode : usedPortProps) {
+            if (ppNode->getPortName() == "size") {
+              auto size = CodeAnalysis::evaluateSizePortProperty(
+                  ppNode->getName(), innerScope, funcDecl, func, tree);
+              PortPropArgs.push_back(std::make_unique<IntExprAST>(size));
+            } else if (ppNode->getPortName() == "rate") {
+              auto rate = CodeAnalysis::evaluateRatePortProperty(
+                  ppNode->getName(), innerScope, funcDecl, func, tree);
+              PortPropArgs.push_back(std::make_unique<RealExprAST>(rate));
+            }
+          }
+        }
         auto callexpr = std::make_unique<CallExprAST>(
-            std::string(newFunc->getName()), std::move(mainOutArgs),
-            std::move(mainInArgs), std::move(ExternalArgs));
+            std::string(func->getName()), std::move(mainOutArgs),
+            std::move(mainInArgs), std::move(ExternalArgs),
+            std::move(PortPropArgs));
         if (newFuncDecl) {
           callexpr->callType = newFuncDecl->callType;
           generated[domainName].functions.push_back(std::move(newFuncDecl));
         } else {
           // Function already declared
-          auto funcDecl =
-              ASTQuery::findDeclarationByName(newFunc->getName(), {}, tree);
           if (funcDecl) {
             if (funcDecl->getObjectType() == "module") {
               callexpr->callType = CallableType::Module;
@@ -718,6 +753,8 @@ GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream, ASTNode tree,
       generated[domainName].expr.push_back(createExpr(current));
     } else if (current->getNodeType() == AST::Switch) {
       generated[domainName].expr.push_back(createExpr(current));
+    } else if (current->getNodeType() == AST::PortProperty) {
+      generated[domainName].expr.push_back(createExpr(current));
     } else {
       std::cerr << "ERROR: Unsupported type" << std::endl;
     }
@@ -739,6 +776,7 @@ createFunctionDeclaration(std::shared_ptr<FunctionNode> func, ASTNode prev,
   std::vector<PrototypeArg> Args;
   std::vector<PrototypeArg> OutArgs;
   std::vector<PrototypeArg> ExternalArgs;
+  std::vector<PrototypeArg> UsedPortProperties;
 
   auto portsNode = funcDecl->getPropertyValue("ports");
   std::string portBlockName;
@@ -890,13 +928,21 @@ createFunctionDeclaration(std::shared_ptr<FunctionNode> func, ASTNode prev,
         decl->getName(), llvm::PointerType::get(state.getLLVMType(decl), 0)});
   }
 
-  auto proto = std::make_unique<PrototypeAST>(func->getName(), OutArgs, Args,
-                                              ExternalArgs);
+  auto usedPortPropertiesNodes = CodeAnalysis::getUsedPortProperties(funcDecl);
+  for (const auto &pp : usedPortPropertiesNodes) {
+    // FIXME validate unique name
+    std::string name = pp->getName() + "_" + pp->getPortName();
+    UsedPortProperties.push_back(
+        PrototypeArg{name, llvm::Type::getInt64Ty(*state.TheContext)});
+  }
   llvm::Function *TheFunction = state.getFunctionInModule(func->getName());
   if (TheFunction) {
-    // TODO should check if current function is the same
+    // TODO this is here to check if current function is the same as existing
+    // function
     return nullptr;
   }
+  auto proto = std::make_unique<PrototypeAST>(func->getName(), OutArgs, Args,
+                                              ExternalArgs, UsedPortProperties);
 
   // llvm::Function *TheFunction = state.getFunctionInModule(P.getName());
   auto newfunc =
@@ -963,6 +1009,8 @@ void generateCode(ASTNode tree, ScopeStack *scope, StrideCompiler &state) {
           domainArgs.push_back({decl->getName(), DataType::BOOL});
         } else if (type->isIntegerTy(32)) {
           domainArgs.push_back({decl->getName(), DataType::INT32});
+          //        } else if (type->isIntegerTy(64)) {
+          //          domainArgs.push_back({decl->getName(), DataType::INT64});
         } else {
           assert(0 == 1);
         }
@@ -980,7 +1028,7 @@ void generateCode(ASTNode tree, ScopeStack *scope, StrideCompiler &state) {
        it++) {
     auto proto = std::make_unique<PrototypeAST>(
         std::string(it->first + "_process"), std::vector<PrototypeArg>{},
-        std::vector<PrototypeArg>{}, ExternalArgs);
+        std::vector<PrototypeArg>{}, ExternalArgs, std::vector<PrototypeArg>{});
     auto newfunc =
         std::make_unique<FunctionAST>(std::move(proto), std::move(it->second));
     newfunc->callType = CallableType::DomainFunction;

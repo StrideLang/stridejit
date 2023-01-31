@@ -44,7 +44,7 @@ EXPORT bool __stride_Greater_b_ii(int32_t a, int32_t b);
 EXPORT bool __stride_Equal_b_dd(double a, double b);
 }
 
-enum class DataType { DOUBLE, BOOL, INT32 };
+enum class DataType { DOUBLE, BOOL, INT32, INT64 };
 
 struct ExternalFunction {
   std::string name;
@@ -95,6 +95,7 @@ public:
   std::unique_ptr<llvm::Module> TheModule;
   std::unique_ptr<llvm::IRBuilder<>> Builder;
   std::map<std::string, llvm::Value *> NamedValues;
+  std::map<std::string, llvm::Value *> PortBlockMap;
   std::map<std::string, std::unique_ptr<PrototypeAST>> FunctionProtos;
   std::map<char, int> BinopPrecedence;
   std::unique_ptr<llvm::legacy::FunctionPassManager> TheFPM;

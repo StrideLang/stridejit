@@ -3,3 +3,4 @@ signal Out[16] {}
 
 In[1] >> Out[2];
 In[2] + 1.2 >> Out[3];
+In[3] >> Cos() >> Out[4];

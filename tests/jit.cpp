@@ -39,6 +39,32 @@
 using namespace llvm;
 
 
+TEST(JIT, PortPropertySize) {
+
+  StrideEnvironment strenv;
+
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "port_property_size.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  auto EntrySym = strenv.JIT->lookup("RootDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
+
+  EXPECT_NE(Entry, nullptr);
+  double In[16] = {0};
+  double Out[2] = {0};
+  Entry(In, Out);
+
+  EXPECT_EQ(Out[0], 32);
+  EXPECT_EQ(Out[1], 8);
+}
+
 TEST(JIT, TypecastStream) {
 
   StrideEnvironment strenv;
@@ -120,10 +146,12 @@ TEST(JIT, Bundles) {
   In[2] = 0.4;
 
   Entry(In, Out);
-
+  // Stride code: In[1] >> Out[2];
   EXPECT_DOUBLE_EQ(In[1], Out[2]);
-  // Stride code:  In[2] + 1.2 >> Out[3];
+  // Stride code: In[2] + 1.2 >> Out[3];
   EXPECT_DOUBLE_EQ(Out[3], 0.4 + 1.2);
+  //  Stride code : In[3] >> Cos() >> Out[4];
+  EXPECT_DOUBLE_EQ(Out[4], cos(In[3]));
 }
 
 TEST(JIT, CompileToDisk) {

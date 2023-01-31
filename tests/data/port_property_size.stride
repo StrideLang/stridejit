@@ -1,0 +1,26 @@
+
+
+module PortProperty {
+    ports: [
+        mainInputPort InputPort {
+            block: Input
+        }
+        mainOutputPort {
+            block: Output
+        }
+    ]
+    blocks: [
+        signal Input[InputPort.size] { }
+        signal Output {}
+    ]
+    streams: [
+        2.0 * InputPort.size >> Output;
+    ]
+}
+
+
+signal In[16] { domain: RootDomain }
+signal Out[2] { domain: RootDomain }
+
+In >> PortProperty() >> Out[0];
+[1,2,3,4] >> PortProperty() >> Out[1];
