@@ -1,6 +1,6 @@
 #include "listexprast.hpp"
 
-#include "strideenvironment.hpp"
+#include "stridegenerator.hpp"
 
 #include <astfunctions.h>
 
@@ -10,7 +10,7 @@ ListExprAST::ListExprAST(std::vector<ASTNode> elements)
   bool isMutable = false;
   std::string previousType = "";
   for (const auto &e : elementNodes) {
-    members.push_back(createExpr(e));
+    members.push_back(StrideGenerator::createExpr(e));
     if (e->getNodeType() != AST::Int && e->getNodeType() != AST::Real) {
       isMutable = true;
     }

@@ -29,18 +29,22 @@ set(STRIDEJIT_SRC
   src/exprast.cpp
   src/listexprast.cpp
   src/numberexprast.cpp
+  src/functionast.cpp
+
   src/strideenvironment.cpp
   src/stridecompiler.cpp
-  src/functionast.cpp
+  src/stridegenerator.cpp
 )
 
 set(STRIDEJIT_HEADERS
   include/exprast.hpp
   include/listexprast.hpp
   include/numberexprast.hpp
-  include/strideenvironment.hpp
   include/functionast.hpp
+
+  include/strideenvironment.hpp
   include/stridecompiler.hpp
+  include/stridegenerator.hpp
 )
 
 add_library(StrideJit 

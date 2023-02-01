@@ -1,12 +1,563 @@
 #include "gtest/gtest.h"
 
+// stridejit
 #include "exprast.hpp"
 #include "numberexprast.hpp"
 #include "strideenvironment.hpp"
+#include "stridegenerator.hpp"
 
+// stride
 #include "astfunctions.h"
 #include "astquery.h"
-#include "strideparser.h"
+
+// llvm
+#include "llvm/ExecutionEngine/JITSymbol.h"
+//#include "llvm/ExecutionEngine/Orc/LLJIT.h"
+
+
+TEST(JIT, PortPropertySize) {
+
+  StrideEnvironment strenv;
+
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "port_property_size.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto Entry = (void (*)(...))(EntrySym->getAddress());
+
+  EXPECT_NE(Entry, nullptr);
+  double In[16] = {0};
+  double Out[2] = {0};
+  Entry(In, Out);
+
+  EXPECT_EQ(Out[0], 32);
+  EXPECT_EQ(Out[1], 8);
+}
+
+TEST(JIT, TypecastStream) {
+
+  StrideEnvironment strenv;
+
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "typecast_stream.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto Entry = (void (*)(...))(EntrySym->getAddress());
+
+  //    EXPECT_NE(Entry, nullptr);
+  //    //  double in = 0;
+  //    //  double out = 0;
+  int32_t Int[2] = {0};
+  double Float[2] = {0};
+  Entry(Int, Float);
+
+  EXPECT_EQ(Int[0], 1);
+  EXPECT_EQ(Int[1], 4);
+
+  EXPECT_DOUBLE_EQ(Float[0], 3.0);
+  EXPECT_DOUBLE_EQ(Float[1], 5.0);
+}
+
+TEST(JIT, IntegerType) {
+
+  StrideEnvironment strenv;
+
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "integer_type.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto Entry = (void (*)(...))(EntrySym->getAddress());
+
+  //    EXPECT_NE(Entry, nullptr);
+  //    //  double in = 0;
+  //    //  double out = 0;
+  double S = 0;
+  int32_t Val = 0;
+  Entry(&S, &Val);
+
+  EXPECT_EQ(S, 0);
+
+  Entry(&S, &Val);
+  EXPECT_EQ(S, 3);
+}
+
+TEST(JIT, Bundles) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "bundles.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto Entry = (void (*)(...))(EntrySym->getAddress());
+
+  double In[16] = {0};
+  double Out[16] = {0};
+  In[2] = 0.4;
+
+  Entry(In, Out);
+  // Stride code: In[1] >> Out[2];
+  EXPECT_DOUBLE_EQ(In[1], Out[2]);
+  // Stride code: In[2] + 1.2 >> Out[3];
+  EXPECT_DOUBLE_EQ(Out[3], 0.4 + 1.2);
+  //  Stride code : In[3] >> Cos() >> Out[4];
+  EXPECT_DOUBLE_EQ(Out[4], cos(In[3]));
+}
+
+TEST(JIT, CompileToDisk) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileObjectToDisk("out");
+  EXPECT_TRUE(ret);
+}
+
+TEST(JIT, PackDomainExternalPointer) {
+
+  StrideEnvironment strenv;
+  strenv.state.setConfiguration(StrideConfig::PACK_DOMAIN_FUNCTION_EXTERNAL);
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto Entry = (void (*)(...))(EntrySym->getAddress());
+
+  auto args = strenv.state.domainArgs["RootDomain"];
+
+  std::map<std::string, double> doubleArgs;
+  size_t memsize = 0;
+
+  for (const auto &arg : args) {
+    doubleArgs[arg.name] = 0.0;
+    memsize += sizeof(double *);
+  }
+  uint8_t *domainArgs = (uint8_t *)malloc(memsize);
+  double *in = &doubleArgs["In"];
+  memcpy(domainArgs, &in, sizeof(double *));
+  double *out = &doubleArgs["Out"];
+  memcpy(domainArgs + sizeof(double *), &out, sizeof(double *));
+
+  doubleArgs["In"] = 1.0;
+
+  Entry(domainArgs);
+
+  EXPECT_FLOAT_EQ(doubleArgs["Out"], 1.0);
+}
+
+TEST(JIT, PackDomainExternal) {
+
+  StrideEnvironment strenv;
+  strenv.state.setConfiguration(StrideConfig::PACK_DOMAIN_FUNCTION_EXTERNAL);
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto Entry = (void (*)(...))(EntrySym->getAddress());
+
+  double in = 1.0;
+  double out = 0.0;
+
+  struct {
+    double *In;
+    double *Out;
+  } PackedArgs;
+
+  PackedArgs.In = &in;
+  PackedArgs.Out = &out;
+
+  Entry(&PackedArgs);
+
+  EXPECT_FLOAT_EQ(*PackedArgs.Out, 1.0);
+}
+
+TEST(JIT, ReactionCondition) {
+
+  StrideEnvironment strenv;
+
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "reactioncondition.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto Entry = (void (*)(...))(EntrySym->getAddress());
+
+  EXPECT_NE(Entry, nullptr);
+  //  double in = 0;
+  //  double out = 0;
+  double S = 0;
+  double Val = 0;
+  Entry(&S, &Val);
+
+  EXPECT_EQ(S, 0);
+
+  Entry(&S, &Val);
+  EXPECT_EQ(S, 3);
+
+  //  EntrySym = strenv.JIT->lookup("S");
+  //  if (!EntrySym) {
+  //    std::cerr << "No entry" << std::endl;
+  //  }
+  //  double v = *((double *)EntrySym->getAddress());
+  //  EXPECT_EQ(Entry, nullptr);
+}
+
+TEST(JIT, PassThru) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto Entry = (void (*)(...))(EntrySym->getAddress());
+
+  double in = 1.0;
+  double out = 0;
+
+  Entry(&in, &out);
+
+  EXPECT_FLOAT_EQ(out, 1.0);
+}
+
+TEST(JIT, Reaction) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "reaction.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto Entry = (void (*)(...))(EntrySym->getAddress());
+
+  EXPECT_NE(Entry, nullptr);
+  //  double in = 0;
+  //  double out = 0;
+  double S = 0;
+  Entry(&S);
+
+  EXPECT_EQ(S, 3);
+
+  //  EntrySym = strenv.JIT->lookup("S");
+  //  if (!EntrySym) {
+  //    std::cerr << "No entry" << std::endl;
+  //  }
+  //  double v = *((double *)EntrySym->getAddress());
+  //  EXPECT_EQ(Entry, nullptr);
+}
+
+TEST(JIT, Stream) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "stream.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  //  auto Entry = (void (*)(...))(EntrySym->getAddress());
+}
+
+TEST(JIT, DomainFunctions) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  EXPECT_EQ(strenv.state.domainArgs.size(), 1);
+  EXPECT_EQ(strenv.state.domainArgs["RootDomain"].size(), 1);
+  EXPECT_EQ(strenv.state.domainArgs["RootDomain"][0].name, "Out");
+  EXPECT_EQ(strenv.state.domainArgs["RootDomain"][0].type, DataType::DOUBLE);
+}
+
+TEST(JIT, ModuleInternal) {
+
+  StrideEnvironment strenv;
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "module_internal.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto Entry = (void (*)(...))(EntrySym->getAddress());
+
+  double out;
+
+  Entry(&out);
+  EXPECT_EQ(out, 5);
+}
+
+TEST(JIT, CreateClass) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto Entry = (void (*)(...))(EntrySym->getAddress());
+
+  double out;
+
+  Entry(&out);
+  EXPECT_EQ(out, 5);
+}
+
+TEST(JIT, MathFunction) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "functions.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto Entry = (void (*)(...))(EntrySym->getAddress());
+
+  double out = 0;
+
+  Entry(&out);
+  EXPECT_EQ(out, 1.0);
+}
+
+TEST(JIT, TwoStreams) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "twostreams.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto Entry = (void (*)(...))(EntrySym->getAddress());
+
+  double in = 0;
+  double out = 0;
+
+  Entry(&in, &out);
+  EXPECT_EQ(out, cos(cos(in)));
+
+  in = 3.14159;
+  Entry(&in, &out);
+  EXPECT_FLOAT_EQ(out, cos(cos(in)));
+
+  in = 1.0;
+  Entry(&in, &out);
+  EXPECT_FLOAT_EQ(out, cos(cos(in)));
+}
+
+TEST(JIT, SwitchOut) {
+
+  StrideEnvironment strenv;
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "switchout.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto Entry = (void (*)(...))(EntrySym->getAddress());
+
+  double in = 0;
+  bool out = false;
+
+  Entry(&in, &out);
+  EXPECT_FALSE(out);
+
+  in = 10;
+  Entry(&in, &out);
+  EXPECT_TRUE(out);
+
+  in = 1;
+  Entry(&in, &out);
+  EXPECT_FALSE(out);
+}
+
+TEST(JIT, List) {
+
+  StrideEnvironment strenv;
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "listinput.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto Entry = (void (*)(...))(EntrySym->getAddress());
+
+  double in = 0;
+  double out = 0;
+
+  Entry(&in, &out);
+  EXPECT_EQ(out, 0.0);
+
+  in = 10;
+  Entry(&in, &out);
+  EXPECT_EQ(out, 1.0);
+}
+
+TEST(JIT, Domains) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "domains.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("TestDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto Entry = (void (*)(...))(EntrySym->getAddress());
+
+  EXPECT_NE(Entry, nullptr);
+  double in = 0;
+  double out = 0;
+}
+
+TEST(JIT, IO) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "io.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto Entry = (void (*)(...))(EntrySym->getAddress());
+
+  double in = 0;
+  double out = 0;
+
+  Entry(&in, &out);
+  EXPECT_EQ(out, 1.0);
+
+  in = 3.14159;
+  Entry(&in, &out);
+  EXPECT_FLOAT_EQ(out, cos(3.14159));
+
+  in = 1.0;
+  Entry(&in, &out);
+  EXPECT_FLOAT_EQ(out, cos(1.0));
+}
 
 TEST(Function, Simple) {
 
@@ -29,8 +580,8 @@ TEST(Function, Simple) {
                   ->getRight();
 
   ScopeStack scope;
-  auto func = createFunctionDeclaration(addFunc, prev, next, tree, &scope,
-                                        strenv.state);
+  auto func = StrideGenerator::createFunctionDeclaration(
+      addFunc, prev, next, tree, &scope, strenv.state);
   auto *v = func->codegen(strenv.state);
   EXPECT_NE(v, nullptr);
 
