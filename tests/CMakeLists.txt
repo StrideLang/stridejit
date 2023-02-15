@@ -17,8 +17,8 @@ if (STRIDEJIT_BUILD_TESTS)
         FetchContent_MakeAvailable(googletest)
     endif()
     set(TEST_SOURCES main.cpp
-      jit.cpp
       basic.cpp
+      jit.cpp
     )
     add_executable(stridejit_tests ${TEST_SOURCES})
 

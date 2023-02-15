@@ -3,17 +3,17 @@
 #include "blocknode.h"
 #include "stridecompiler.hpp"
 
-#include "llvm/ADT/APFloat.h"
-#include "llvm/ADT/STLExtras.h"
+//#include "llvm/ADT/APFloat.h"
+//#include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/Constants.h"
+//#include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
-#include "llvm/IR/Verifier.h"
+//#include "llvm/IR/Verifier.h"
 
 extern "C" {
 EXPORT double __stride_Greater_d_dd(double a, double b) {
@@ -32,6 +32,10 @@ EXPORT bool __stride_Equal_b_dd(double a, double b) {
   // TODO should be removed and llvm functions for this should be used instead
   return a == b;
 }
+EXPORT bool __stride_Equal_b_ii(int32_t a, int32_t b) {
+  // TODO should be removed and llvm functions for this should be used instead
+  return a == b;
+}
 }
 
 StrideCompiler::StrideCompiler() {
@@ -44,19 +48,6 @@ StrideCompiler::StrideCompiler() {
   BinopPrecedence['+'] = 20;
   BinopPrecedence['-'] = 20;
   BinopPrecedence['*'] = 40; // highest.
-
-  TheFPM = std::make_unique<llvm::legacy::FunctionPassManager>(TheModule.get());
-
-  // Do simple "peephole" optimizations and bit-twiddling optzns.
-  TheFPM->add(llvm::createInstructionCombiningPass());
-  // Reassociate expressions.
-  TheFPM->add(llvm::createReassociatePass());
-  // Eliminate Common SubExpressions.
-  TheFPM->add(llvm::createGVNPass());
-  // Simplify the control flow graph (deleting unreachable blocks, etc).
-  TheFPM->add(llvm::createCFGSimplificationPass());
-
-  TheFPM->doInitialization();
 
   // Initialize types map
   typesMap["_RealType"] = llvm::Type::getDoubleTy(*TheContext);

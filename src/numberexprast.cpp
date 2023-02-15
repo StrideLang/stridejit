@@ -1,6 +1,6 @@
 #include "numberexprast.hpp"
 
-#include "strideenvironment.hpp"
+#include "stridecompiler.hpp"
 
 // ----------------------
 
@@ -24,7 +24,10 @@ llvm::Value *IntExprAST::codegen(StrideCompiler &state) {
   return llvm::ConstantInt::get(*state.TheContext, llvm::APInt(NumBits, Val));
 }
 
-std::vector<size_t> VariableExprAST::getIndeces() const { return Indeces; }
+std::vector<std::variant<size_t, std::string>>
+VariableExprAST::getIndeces() const {
+  return Indeces;
+}
 
 llvm::Value *VariableExprAST::codegen(StrideCompiler &state) {
   // Look this variable up in the function.
@@ -83,8 +86,16 @@ llvm::Value *BinaryExprAST::codegen(StrideCompiler &state) {
         if (indeces.size() > 0) {
           // FIXME support ranges
           std::vector<llvm::Value *> idxList;
-          idxList.push_back(llvm::ConstantInt::get(
-              *state.TheContext, llvm::APInt(64, indeces[0])));
+          auto idx = indeces[0];
+          const size_t *intIdx = std::get_if<size_t>(&idx);
+          if (intIdx) {
+            idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
+                                                     llvm::APInt(64, *intIdx)));
+          }
+          const std::string *strIdx = std::get_if<std::string>(&idx);
+          if (strIdx) {
+            idxList.push_back(state.NamedValues[*strIdx]);
+          }
           auto *GEP = state.Builder->CreateGEP(
               Val->getType()->getNonOpaquePointerElementType(), Val, idxList);
           Val = state.Builder->CreateLoad(
@@ -106,8 +117,16 @@ llvm::Value *BinaryExprAST::codegen(StrideCompiler &state) {
         if (indeces.size() > 0) {
           // FIXME support ranges
           std::vector<llvm::Value *> idxList;
-          idxList.push_back(llvm::ConstantInt::get(
-              *state.TheContext, llvm::APInt(64, indeces[0])));
+          auto idx = indeces[0];
+          const size_t *intIdx = std::get_if<size_t>(&idx);
+          if (intIdx) {
+            idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
+                                                     llvm::APInt(64, *intIdx)));
+          }
+          const std::string *strIdx = std::get_if<std::string>(&idx);
+          if (strIdx) {
+            idxList.push_back(state.NamedValues[*strIdx]);
+          }
           Variable = state.Builder->CreateGEP(
               Variable->getType()->getNonOpaquePointerElementType(), Variable,
               idxList);
@@ -132,7 +151,9 @@ llvm::Value *BinaryExprAST::codegen(StrideCompiler &state) {
       } else
         state.Builder->CreateStore(loadInst, Variable);
     } else {
-      state.Builder->CreateStore(Val, Variable);
+      if (state.NamedValues[LHSE->getName()]->getType()->isPointerTy()) {
+        state.Builder->CreateStore(Val, Variable);
+      }
     }
 
     if (typecast.size() > 0) {
@@ -144,11 +165,9 @@ llvm::Value *BinaryExprAST::codegen(StrideCompiler &state) {
             Val, llvm::Type::getInt32Ty(*state.TheContext));
       }
     }
-    // This might be unnecessary if variable is not read further, but should
-    // be removed by optimization pass
-    //    state.NamedValues[LHSE->getName()] =
-    //        state.Builder->CreateLoad(Val->getType(), Variable);
-
+    if (!state.NamedValues[LHSE->getName()]->getType()->isPointerTy()) {
+      state.NamedValues[LHSE->getName()] = Val;
+    }
     return Val;
   }
 
@@ -166,8 +185,16 @@ llvm::Value *BinaryExprAST::codegen(StrideCompiler &state) {
       if (indeces.size() > 0) {
         // FIXME support ranges
         std::vector<llvm::Value *> idxList;
-        idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
-                                                 llvm::APInt(64, indeces[0])));
+        auto idx = indeces[0];
+        const size_t *intIdx = std::get_if<size_t>(&idx);
+        if (intIdx) {
+          idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
+                                                   llvm::APInt(64, *intIdx)));
+        }
+        const std::string *strIdx = std::get_if<std::string>(&idx);
+        if (strIdx) {
+          idxList.push_back(state.NamedValues[*strIdx]);
+        }
         auto GEP = state.Builder->CreateGEP(
             L->getType()->getNonOpaquePointerElementType(), L, idxList);
         L = state.Builder->CreateLoad(
@@ -189,8 +216,16 @@ llvm::Value *BinaryExprAST::codegen(StrideCompiler &state) {
       if (indeces.size() > 0) {
         // FIXME support ranges
         std::vector<llvm::Value *> idxList;
-        idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
-                                                 llvm::APInt(64, indeces[0])));
+        auto idx = indeces[0];
+        const size_t *intIdx = std::get_if<size_t>(&idx);
+        if (intIdx) {
+          idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
+                                                   llvm::APInt(64, *intIdx)));
+        }
+        const std::string *strIdx = std::get_if<std::string>(&idx);
+        if (strIdx) {
+          idxList.push_back(state.NamedValues[*strIdx]);
+        }
         auto GEP = state.Builder->CreateGEP(
             R->getType()->getNonOpaquePointerElementType(), R, idxList);
         R = state.Builder->CreateLoad(

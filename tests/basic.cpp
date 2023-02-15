@@ -14,6 +14,31 @@
 #include "llvm/ExecutionEngine/JITSymbol.h"
 //#include "llvm/ExecutionEngine/Orc/LLJIT.h"
 
+TEST(JIT, Loop) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "loop.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.JIT->lookup("RootDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
+
+  EXPECT_NE(Entry, nullptr);
+  double List[20] = {1000, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                     1,    1, 1, 1, 1, 1, 1, 1, 1, 100};
+  double Out = 0;
+  Entry(List, &Out);
+
+  EXPECT_EQ(Out, 1108);
+}
 
 TEST(JIT, PortPropertySize) {
 

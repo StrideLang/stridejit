@@ -101,10 +101,20 @@ std::unique_ptr<ExprAST> StrideGenerator::createExpr(ASTNode node) {
     setTypeCastMetadata(node, V.get());
     return V;
   } else if (node->getNodeType() == AST::Bundle) {
-    std::vector<size_t> indeces;
     auto bundleNode = std::static_pointer_cast<BundleNode>(node);
-    auto V = std::make_unique<VariableExprAST>(bundleNode->getName(),
-                                               bundleNode->getIndeces());
+
+    std::vector<std::variant<size_t, std::string>> indeces;
+    for (const auto &idx : bundleNode->index()->getChildren()) {
+      if (idx->getNodeType() == AST::Block) {
+        indeces.push_back(std::static_pointer_cast<BlockNode>(idx)->getName());
+      } else if (idx->getNodeType() == AST::Int) {
+        indeces.push_back(
+            (size_t)std::static_pointer_cast<ValueNode>(idx)->getIntValue());
+      } else {
+        std::cerr << "Unsupported node type for bundle index.";
+      }
+    }
+    auto V = std::make_unique<VariableExprAST>(bundleNode->getName(), indeces);
     setTypeCastMetadata(node, V.get());
     return V;
   } else if (node->getNodeType() == AST::Real) {
@@ -248,14 +258,64 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
             static_cast<CallExprAST *>(generated[domainName].expr.back().get());
         assert(dynamic_cast<CallExprAST *>(
             generated[domainName].expr.back().get()));
+        auto funcDecl = ASTQuery::findDeclarationByName(
+            ASTQuery::getNodeName(prev), *scope, tree);
         std::vector<llvm::Type *> argTypes;
         for (auto it = callexpr->OutArgs.begin(); it != callexpr->OutArgs.end();
              it++) {
-          argTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));
+
+          if (auto *ve = dynamic_cast<VariableExprAST *>(it->get())) {
+            if (!funcDecl->getPropertyValue("blocks")) {
+              assert(0 == 1);
+            } else {
+              auto argDecl = ASTQuery::findDeclarationByName(
+                  ve->getName(),
+                  {{nullptr,
+                    funcDecl->getPropertyValue("blocks")->getChildren()}},
+                  nullptr);
+              if (argDecl) {
+                argTypes.push_back(state.getLLVMType(argDecl));
+              } else {
+                std::cerr
+                    << "ERROR falling back on double type. Arg type nto found"
+                    << std::endl;
+                argTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));
+              }
+            }
+          }
         }
         for (auto it = callexpr->InArgs.begin(); it != callexpr->InArgs.end();
              it++) {
-          argTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));
+          if (auto *pp = dynamic_cast<PortPropertyAST *>(it->get())) {
+            // TODO get port property integer type from platform definition
+            // This appears in other places, make suer to change all
+            argTypes.push_back(llvm::Type::getInt32Ty(*state.TheContext));
+          } else if (auto *ve = dynamic_cast<VariableExprAST *>(it->get())) {
+            if (!funcDecl->getPropertyValue("blocks")) {
+              // FIXME this will happen for platform functions where the inputs
+              // and output types are not in the blocks port.
+              std::cerr
+                  << "ERROR falling back on double type. Arg type not found"
+                  << std::endl;
+              argTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));
+            } else {
+              auto argDecl = ASTQuery::findDeclarationByName(
+                  ve->getName(),
+                  {{nullptr,
+                    funcDecl->getPropertyValue("blocks")->getChildren()}},
+                  nullptr);
+              if (argDecl) {
+                argTypes.push_back(state.getLLVMType(argDecl));
+              } else {
+                std::cerr
+                    << "ERROR falling back on double type. Arg type not found"
+                    << std::endl;
+                argTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));
+              }
+            }
+          } else {
+            argTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));
+          }
         }
         //        if (callexpr->isExternal) {
         //          assert(argTypes.size() > 0);
@@ -319,6 +379,17 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               } else if ((*nodeIt)->getNodeType() == AST::Real) {
                 mainInArgTypes.push_back(
                     llvm::Type::getDoubleTy(*state.TheContext));
+              } else if ((*nodeIt)->getNodeType() == AST::PortProperty) {
+                auto pp = std::static_pointer_cast<PortPropertyNode>(*nodeIt);
+                if (pp->getPortName() == "size") {
+                  mainInArgTypes.push_back(
+                      llvm::Type::getInt32Ty(*state.TheContext));
+                } else if (pp->getPortName() == "rate") {
+                  mainInArgTypes.push_back(
+                      llvm::Type::getDoubleTy(*state.TheContext));
+                } else {
+                  assert(0 == 1);
+                }
               } else {
                 // Fallback. We shouldn't get here when things are fully
                 // implemented
@@ -404,7 +475,8 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
             if (ppNode->getPortName() == "size") {
               auto size = CodeAnalysis::evaluateSizePortProperty(
                   ppNode->getName(), innerScope, funcDecl, func, tree);
-              PortPropArgs.push_back(std::make_unique<IntExprAST>(size));
+              // TODO determine integer type for size from platform defintion.
+              PortPropArgs.push_back(std::make_unique<IntExprAST>(size, 32));
             } else if (ppNode->getPortName() == "rate") {
               auto rate = CodeAnalysis::evaluateRatePortProperty(
                   ppNode->getName(), innerScope, funcDecl, func, tree);
@@ -624,8 +696,15 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
   for (const auto &pp : usedPortPropertiesNodes) {
     // FIXME validate unique name
     std::string name = pp->getName() + "_" + pp->getPortName();
-    UsedPortProperties.push_back(
-        PrototypeArg{name, llvm::Type::getInt64Ty(*state.TheContext)});
+    // TODO determine the type of integer for port properties from platform
+    // defintion.
+    if (pp->getPortName() == "size") {
+      UsedPortProperties.push_back(
+          PrototypeArg{name, llvm::Type::getInt32Ty(*state.TheContext)});
+    } else if (pp->getPortName() == "rate") {
+      UsedPortProperties.push_back(
+          PrototypeArg{name, llvm::Type::getDoubleTy(*state.TheContext)});
+    }
   }
   llvm::Function *TheFunction = state.getFunctionInModule(func->getName());
   if (TheFunction) {
@@ -646,6 +725,15 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
     newfunc->callType = CallableType::Module;
   } else if (funcDecl->getObjectType() == "reaction") {
     newfunc->callType = CallableType::Reaction;
+  } else if (funcDecl->getObjectType() == "loop") {
+    newfunc->callType = CallableType::Loop;
+    auto terminateWhenNode = funcDecl->getPropertyValue("terminateWhen");
+    if (terminateWhenNode) {
+      if (terminateWhenNode->getNodeType() == AST::Block) {
+        newfunc->terminateWhenName =
+            std::static_pointer_cast<BlockNode>(terminateWhenNode)->getName();
+      }
+    }
   } else {
     std::cerr << "Callable type unsuported" << std::endl;
   }

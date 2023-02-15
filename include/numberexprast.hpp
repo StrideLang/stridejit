@@ -4,6 +4,7 @@
 #include "exprast.hpp"
 
 #include <map>
+#include <variant>
 
 class StrideCompiler;
 
@@ -20,7 +21,7 @@ class IntExprAST : public ExprAST {
   uint8_t NumBits{32};
 
 public:
-  IntExprAST(int64_t Val) : Val(Val) {}
+  IntExprAST(int64_t Val, int8_t numBits = 32) : Val(Val), NumBits(numBits) {}
   llvm::Value *codegen(StrideCompiler &state) override;
 };
 
@@ -36,16 +37,18 @@ public:
 class VariableExprAST : public ExprAST {
   std::string Name;
   std::string Type;
-  std::vector<size_t> Indeces;
+  std::vector<std::variant<size_t, std::string>> Indeces;
 
 public:
-  VariableExprAST(const std::string &Name,
-                  const std::vector<size_t> &&Indeces = std::vector<size_t>{})
+  VariableExprAST(
+      const std::string &Name,
+      const std::vector<std::variant<size_t, std::string>> &Indeces =
+          std::vector<std::variant<size_t, std::string>>{})
       : Name(Name), Indeces(Indeces) {}
 
   llvm::Value *codegen(StrideCompiler &state) override;
   const std::string &getName() const { return Name; }
-  std::vector<size_t> getIndeces() const;
+  std::vector<std::variant<size_t, std::string>> getIndeces() const;
 };
 
 class PortPropertyAST : public ExprAST {

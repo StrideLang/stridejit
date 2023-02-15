@@ -29,9 +29,9 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/MC/TargetRegistry.h"
-//#include "llvm/Transforms/InstCombine/InstCombine.h"
-//#include "llvm/Transforms/Scalar.h"
-//#include "llvm/Transforms/Scalar/GVN.h"
+#include "llvm/Transforms/InstCombine/InstCombine.h"
+#include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Scalar/GVN.h"
 
 // JIT
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
@@ -134,9 +134,25 @@ bool StrideEnvironment::generateIr(std::string path) {
   //  if (mVerbose) {
   //    state.TheModule->dump();
   //  }
+
   if (m_optimizeCode) {
+    std::unique_ptr<llvm::legacy::FunctionPassManager> TheFPM;
+    TheFPM = std::make_unique<llvm::legacy::FunctionPassManager>(
+        state.TheModule.get());
+
+    // Do simple "peephole" optimizations and bit-twiddling optzns.
+    TheFPM->add(llvm::createInstructionCombiningPass());
+    // Reassociate expressions.
+    TheFPM->add(llvm::createReassociatePass());
+    // Eliminate Common SubExpressions.
+    TheFPM->add(llvm::createGVNPass());
+    // Simplify the control flow graph (deleting unreachable blocks, etc).
+    TheFPM->add(llvm::createCFGSimplificationPass());
+
+    TheFPM->doInitialization();
+
     for (auto &F : *state.TheModule) {
-      state.TheFPM->run(F);
+      TheFPM->run(F);
     }
   }
   if (mVerbose) {
@@ -209,6 +225,9 @@ bool StrideEnvironment::compileInMemory() {
       llvm::JITSymbolFlags());
   M[Mangle("__stride_Equal_b_dd")] = llvm::JITEvaluatedSymbol(
       llvm::pointerToJITTargetAddress(&__stride_Equal_b_dd),
+      llvm::JITSymbolFlags());
+  M[Mangle("__stride_Equal_b_ii")] = llvm::JITEvaluatedSymbol(
+      llvm::pointerToJITTargetAddress(&__stride_Equal_b_ii),
       llvm::JITSymbolFlags());
   llvm::cantFail(JIT->getMainJITDylib().define(llvm::orc::absoluteSymbols(M)));
 

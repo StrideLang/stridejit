@@ -1,7 +1,31 @@
-#include "functionast.hpp"
+//#include "llvm/ADT/StringRef.h"
+#include "llvm/ExecutionEngine/JITSymbol.h"
+//#include "llvm/ExecutionEngine/Orc/CompileOnDemandLayer.h"
+//#include "llvm/ExecutionEngine/Orc/CompileUtils.h"
+//#include "llvm/ExecutionEngine/Orc/Core.h"
+//#include "llvm/ExecutionEngine/Orc/EPCIndirectionUtils.h"
+//#include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
+//#include "llvm/ExecutionEngine/Orc/ExecutorProcessControl.h"
+//#include "llvm/ExecutionEngine/Orc/IRCompileLayer.h"
+//#include "llvm/ExecutionEngine/Orc/IRTransformLayer.h"
+//#include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
+//#include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
+//#include "llvm/ExecutionEngine/SectionMemoryManager.h"
+//#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/LLVMContext.h"
+//#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/Verifier.h"
+//#include "llvm/Transforms/InstCombine/InstCombine.h"
+//#include "llvm/Transforms/Scalar.h"
+//#include "llvm/Transforms/Scalar/GVN.h"
+
 #include "exprast.hpp"
+#include "functionast.hpp"
 #include "listexprast.hpp"
-#include "strideenvironment.hpp"
+#include "stridecompiler.hpp"
+
+#include "blocknode.h"
+#include "valuenode.h"
 
 #include <iostream>
 
@@ -63,44 +87,52 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     //    }
   }
 
-  for (const auto &decl : internalVariables) {
-    // TODO avoid namespace clashes
-    if (state.NamedValues.find(std::string(decl->getName())) ==
-        state.NamedValues.end()) {
-      // Create an alloca for this variable.
-      llvm::Type *type;
-      auto typeNode = decl->getPropertyValue("type");
-      if (typeNode && typeNode->getNodeType() == AST::Block) {
-        auto typeBlockName =
-            std::static_pointer_cast<BlockNode>(typeNode)->getName();
-        if (state.typesMap.find(typeBlockName) != state.typesMap.end()) {
-          type = state.typesMap[typeBlockName];
+  auto defineInternal = [&]() {
+    for (const auto &decl : internalVariables) {
+      // TODO avoid namespace clashes
+      if (state.NamedValues.find(std::string(decl->getName())) ==
+          state.NamedValues.end()) {
+        // Create an alloca for this variable.
+        llvm::Type *type;
+        if (decl->getObjectType() == "signal") {
+          auto typeNode = decl->getPropertyValue("type");
+          if (typeNode && typeNode->getNodeType() == AST::Block) {
+            auto typeBlockName =
+                std::static_pointer_cast<BlockNode>(typeNode)->getName();
+            if (state.typesMap.find(typeBlockName) != state.typesMap.end()) {
+              type = state.typesMap[typeBlockName];
+            } else {
+              std::cerr << "Unknown type " << typeBlockName
+                        << " . Falling back on double" << std::endl;
+            }
+          } else {
+            std::cerr << "Undefined type. Falling back on double" << std::endl;
+            type = llvm::Type::getDoubleTy(*state.TheContext);
+          }
+        } else if (decl->getObjectType() == "switch") {
+          type = state.typesMap["_SwitchType"];
         } else {
-          std::cerr << "Unknown type " << typeBlockName
-                    << " . Falling back on double" << std::endl;
+          std::cerr << "Invalid declaration for block '" << decl->getName()
+                    << "' . Ignoring" << std::endl;
+          continue;
         }
+        llvm::AllocaInst *Alloca =
+            state.CreateEntryBlockAlloca(TheFunction, decl->getName(), type);
+        state.NamedValues[decl->getName()] = Alloca;
       } else {
-        std::cerr << "Undefined type. Falling back on double" << std::endl;
-        type = llvm::Type::getDoubleTy(*state.TheContext);
       }
-      llvm::AllocaInst *Alloca =
-          state.CreateEntryBlockAlloca(TheFunction, decl->getName(), type);
-      state.NamedValues[decl->getName()] = Alloca;
-    } else {
     }
-  }
-  //  state.TheModule->dump();
+  };
 
-  //  auto *out = state.TheModule->getGlobalVariable("Out");
+  // Pre Body
 
-  //  auto *v = state.Builder->CreateLoad(
-  //      llvm::Type::getDoubleTy(*state.TheContext), out, "Out");
-  //  state.NamedValues["Out"] = v;
-  // Add arguments to variable symbol table.
+  // For loops
+  std::map<std::string, llvm::Value *> OldVals;
+  std::map<std::string, llvm::PHINode *> PHIVariables;
+  llvm::BasicBlock *LoopBB;
 
-  // Finish off the function.
-  //    state.Builder->CreateRet(RetVal);
   if (callType == CallableType::DomainFunction) {
+    defineInternal();
     if (state.hasConfiguration(StrideConfig::PACK_DOMAIN_FUNCTION_EXTERNAL)) {
 
       llvm::BasicBlock *EntryBB = &TheFunction->getEntryBlock();
@@ -128,6 +160,108 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
         argCounter++;
       }
     }
+  } else if (callType == CallableType::Loop) {
+    llvm::Function *TheFunction = state.Builder->GetInsertBlock()->getParent();
+    llvm::BasicBlock *PreheaderBB = state.Builder->GetInsertBlock();
+    LoopBB = llvm::BasicBlock::Create(*state.TheContext, "loop", TheFunction);
+
+    // Insert an explicit fall through from the current block to the LoopBB.
+    state.Builder->CreateBr(LoopBB);
+    // Start insertion in LoopBB.
+    state.Builder->SetInsertPoint(LoopBB);
+    { // Define internal vars as PHI
+      for (const auto &decl : internalVariables) {
+        // Create an alloca for this variable.
+        llvm::Type *type;
+        llvm::Value *defaultValue;
+        if (decl->getObjectType() == "signal") {
+          auto defaultNode = decl->getPropertyValue("default");
+          if (!defaultNode) {
+            std::cerr << "No default provided for internal variable."
+                      << std::endl;
+            continue;
+          }
+          auto typeNode = decl->getPropertyValue("type");
+          if (typeNode && typeNode->getNodeType() == AST::Block) {
+            auto typeBlockName =
+                std::static_pointer_cast<BlockNode>(typeNode)->getName();
+            if (state.typesMap.find(typeBlockName) != state.typesMap.end()) {
+              type = state.typesMap[typeBlockName];
+            } else {
+              std::cerr << "Unknown type " << typeBlockName
+                        << " . Falling back on double" << std::endl;
+            }
+            if (typeBlockName == "_RealType") {
+              double val =
+                  std::static_pointer_cast<ValueNode>(defaultNode)->toReal();
+              defaultValue = llvm::ConstantFP::get(
+                  llvm::Type::getDoubleTy(*state.TheContext),
+                  llvm::APFloat(val));
+
+            } else if (typeBlockName == "_IntType") {
+              if (defaultNode->getNodeType() == AST::Int) {
+                // TODO determine best int for this case.
+                int64_t val = std::static_pointer_cast<ValueNode>(defaultNode)
+                                  ->getIntValue();
+                defaultValue = llvm::ConstantInt::get(
+                    llvm::Type::getInt32Ty(*state.TheContext),
+                    llvm::APInt(32, val));
+              } else if (defaultNode->getNodeType() == AST::Real) {
+                double val = std::static_pointer_cast<ValueNode>(defaultNode)
+                                 ->getRealValue();
+
+                defaultValue = llvm::ConstantInt::get(
+                    llvm::Type::getInt32Ty(*state.TheContext),
+                    llvm::APInt(32, int32_t(val)));
+              }
+            }
+          } else {
+            std::cerr << "Undefined type. Falling back on double" << std::endl;
+            assert(0 == 1);
+            type = llvm::Type::getDoubleTy(*state.TheContext);
+          }
+          // Start the PHI node with an entry for Start.
+          std::string VarName = decl->getName();
+          llvm::PHINode *Variable = state.Builder->CreatePHI(type, 2, VarName);
+          Variable->addIncoming(defaultValue, PreheaderBB);
+
+          PHIVariables[VarName] = Variable;
+          OldVals[VarName] = state.NamedValues[VarName];
+          state.NamedValues[VarName] = Variable;
+
+        } else if (decl->getObjectType() == "switch") {
+          type = state.typesMap["_SwitchType"];
+          auto defaultNode = decl->getPropertyValue("default");
+          if (defaultNode) {
+            if (defaultNode->getNodeType() == AST::Switch) {
+              bool val = std::static_pointer_cast<ValueNode>(defaultNode)
+                             ->getSwitchValue();
+              defaultValue = llvm::ConstantInt::get(
+                  llvm::Type::getInt1Ty(*state.TheContext),
+                  llvm::APInt(1, val ? 1 : 0));
+            } else {
+              std::cerr << "Invalid default for switch" << std::endl;
+            }
+          } else {
+            std::cerr << "No default for switch" << std::endl;
+          }
+        } else {
+          std::cerr << "Invalid declaration for block '" << decl->getName()
+                    << "' . Ignoring" << std::endl;
+          continue;
+        }
+        // Start the PHI node with an entry for Start.
+        std::string VarName = decl->getName();
+        llvm::PHINode *Variable = state.Builder->CreatePHI(type, 2, VarName);
+        Variable->addIncoming(defaultValue, PreheaderBB);
+
+        PHIVariables[VarName] = Variable;
+        OldVals[VarName] = state.NamedValues[VarName];
+        state.NamedValues[VarName] = Variable;
+      }
+    }
+  } else {
+    defineInternal();
   }
 
   for (const auto &statement : Body) {
@@ -144,6 +278,64 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     //    }
   }
 
+  // Post Body
+  if (callType == CallableType::Loop) {
+
+    //    // Emit the step value.
+    //    llvm::Value *StepVal = nullptr;
+    //    if (Step) {
+    //      StepVal = Step->codegen();
+    //      if (!StepVal)
+    //        return nullptr;
+    //    } else {
+    //      // If not specified, use 1.0.
+    //      StepVal = llvm::ConstantFP::get(*state.TheContext,
+    //      llvm::APFloat(1.0));
+    //    }
+
+    //    llvm::Value *NextVar = state.Builder->CreateFAdd(Variable, StepVal,
+    //    "nextvar");
+    // Compute the end condition.
+    llvm::Value *EndCond;
+    //    llvm::Value *EndCond = End->codegen();
+    //    if (!EndCond)
+    //      return nullptr;
+
+    // Convert condition to a bool by comparing non-equal to 0.0.
+    //        EndCond = Builder->CreateFCmpONE(
+    //            EndCond, llvm::ConstantFP::get(*TheContext,
+    //            llvm::APFloat(0.0)), "loopcond");
+
+    // Create the "after loop" block and insert it.
+    llvm::BasicBlock *LoopEndBB = state.Builder->GetInsertBlock();
+    llvm::BasicBlock *AfterBB =
+        llvm::BasicBlock::Create(*state.TheContext, "afterloop", TheFunction);
+
+    if (terminateWhenName.size() > 0) {
+      EndCond = state.NamedValues[terminateWhenName];
+    } else {
+      // TODO need to define EndCond
+      assert(0 == 1);
+    }
+    // Insert the conditional branch into the end of LoopEndBB.
+    state.Builder->CreateCondBr(EndCond, AfterBB, LoopBB);
+    // Any new code will be inserted in AfterBB.
+    state.Builder->SetInsertPoint(AfterBB);
+    for (const auto &oldVal : OldVals) {
+      // Add a new entry to the PHI node for the backedge.
+      PHIVariables[oldVal.first]->addIncoming(state.NamedValues[oldVal.first],
+                                              LoopEndBB);
+      // Restore the unshadowed variable.
+      if (oldVal.second)
+        state.NamedValues[oldVal.first] = oldVal.second;
+      else
+        state.NamedValues.erase(oldVal.first);
+    }
+
+    // for expr always returns 0.0.
+    //    return
+    //    llvm::Constant::getNullValue(llvm::Type::getDoubleTy(*TheContext));
+  }
   auto *outVal = llvm::ConstantInt::get(state.Builder->getInt32Ty(), 0, true);
   state.Builder->CreateRet(outVal);
   // Validate the generated code, checking for consistency.
@@ -273,8 +465,17 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
         if (indeces.size() > 0) {
           // FIXME support ranges
           std::vector<llvm::Value *> idxList;
-          idxList.push_back(llvm::ConstantInt::get(
-              *state.TheContext, llvm::APInt(64, indeces[0])));
+          auto idx = indeces[0];
+          const size_t *intIdx = std::get_if<size_t>(&idx);
+          if (intIdx) {
+            idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
+                                                     llvm::APInt(64, *intIdx)));
+          }
+          const std::string *strIdx = std::get_if<std::string>(&idx);
+          if (strIdx) {
+            idxList.push_back(state.NamedValues[*strIdx]);
+          }
+
           auto *GEP = state.Builder->CreateGEP(
               value->getType()->getNonOpaquePointerElementType(), value,
               idxList);
@@ -302,7 +503,8 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
     }
   }
 
-  if (callType == CallableType::Module || callType == CallableType::External) {
+  if (callType == CallableType::Module || callType == CallableType::Loop ||
+      callType == CallableType::External) {
     for (unsigned i = 0, e = InArgs.size(); i != e; ++i) {
       llvm::Value *value = InArgs[i]->codegen(state);
       if (value->getType()->isTokenTy()) {
@@ -327,8 +529,16 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
           if (indeces.size() > 0) {
             // FIXME support ranges
             std::vector<llvm::Value *> idxList;
-            idxList.push_back(llvm::ConstantInt::get(
-                *state.TheContext, llvm::APInt(64, indeces[0])));
+            auto idx = indeces[0];
+            const size_t *intIdx = std::get_if<size_t>(&idx);
+            if (intIdx) {
+              idxList.push_back(llvm::ConstantInt::get(
+                  *state.TheContext, llvm::APInt(64, *intIdx)));
+            }
+            const std::string *strIdx = std::get_if<std::string>(&idx);
+            if (strIdx) {
+              idxList.push_back(state.NamedValues[*strIdx]);
+            }
             auto *GEP = state.Builder->CreateGEP(
                 value->getType()->getNonOpaquePointerElementType(), value,
                 idxList);
@@ -431,6 +641,8 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
     state.Builder->CreateBr(MergeBB);
     ThenBB = state.Builder->GetInsertBlock();
     state.Builder->SetInsertPoint(MergeBB);
+  } else if (callType == CallableType::Loop) {
+    call = state.Builder->CreateCall(CalleeF, CallArgs, CalleeF->getName());
   } else {
     call = state.Builder->CreateCall(CalleeF, CallArgs, CalleeF->getName());
   }

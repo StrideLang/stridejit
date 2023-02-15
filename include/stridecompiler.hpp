@@ -8,10 +8,14 @@
 #include "declarationnode.h"
 #include "functionast.hpp"
 
+#include "llvm/IR/IRBuilder.h"
+
 // forward declarations for llvm
 namespace llvm {
 class Value;
-}
+class Module;
+
+} // namespace llvm
 
 #if defined(_MSC_VER)
 //  Microsoft
@@ -34,6 +38,7 @@ EXPORT bool __stride_Greater_b_dd(double a, double b);
 EXPORT bool __stride_Greater_b_ii(int32_t a, int32_t b);
 
 EXPORT bool __stride_Equal_b_dd(double a, double b);
+EXPORT bool __stride_Equal_b_ii(int32_t a, int32_t b);
 }
 
 enum class DataType { DOUBLE, BOOL, INT32, INT64 };
@@ -90,7 +95,6 @@ public:
   std::map<std::string, llvm::Value *> PortBlockMap;
   std::map<std::string, std::unique_ptr<PrototypeAST>> FunctionProtos;
   std::map<char, int> BinopPrecedence;
-  std::unique_ptr<llvm::legacy::FunctionPassManager> TheFPM;
 
   std::unordered_map<std::string, std::vector<ExternalFunction>> functionMap;
   std::unordered_map<std::string, llvm::Type *> typesMap;
