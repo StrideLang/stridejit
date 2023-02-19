@@ -19,6 +19,6 @@ module AddTwo {
 }
 
 
-signal Out { domain: RootDomain }
+signal Out { }
 
 3.0 >> AddTwo() >> Out;

@@ -214,20 +214,8 @@ bool StrideEnvironment::compileInMemory() {
   llvm::orc::SymbolMap M;
   llvm::orc::MangleAndInterner Mangle(JIT->getExecutionSession(),
                                       JIT->getDataLayout());
-  M[Mangle("__stride_Greater_b_dd")] = llvm::JITEvaluatedSymbol(
-      llvm::pointerToJITTargetAddress(&__stride_Greater_b_dd),
-      llvm::JITSymbolFlags());
   M[Mangle("__stride_Greater_d_dd")] = llvm::JITEvaluatedSymbol(
       llvm::pointerToJITTargetAddress(&__stride_Greater_d_dd),
-      llvm::JITSymbolFlags());
-  M[Mangle("__stride_Greater_b_ii")] = llvm::JITEvaluatedSymbol(
-      llvm::pointerToJITTargetAddress(&__stride_Greater_b_ii),
-      llvm::JITSymbolFlags());
-  M[Mangle("__stride_Equal_b_dd")] = llvm::JITEvaluatedSymbol(
-      llvm::pointerToJITTargetAddress(&__stride_Equal_b_dd),
-      llvm::JITSymbolFlags());
-  M[Mangle("__stride_Equal_b_ii")] = llvm::JITEvaluatedSymbol(
-      llvm::pointerToJITTargetAddress(&__stride_Equal_b_ii),
       llvm::JITSymbolFlags());
   llvm::cantFail(JIT->getMainJITDylib().define(llvm::orc::absoluteSymbols(M)));
 

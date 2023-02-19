@@ -678,3 +678,85 @@ llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
 
   return call;
 }
+
+llvm::Value *LLVMCommandAST::codegen(StrideCompiler &state) {
+  std::vector<llvm::Value *> CallArgs;
+
+  for (unsigned i = 0, e = InArgs.size(); i != e; ++i) {
+    llvm::Value *value = InArgs[i]->codegen(state);
+    if (value->getType()->isTokenTy()) {
+      auto *list = dynamic_cast<ListExprAST *>(InArgs[i].get());
+      assert(list);
+      for (const auto &expr : list->elements()) {
+        CallArgs.push_back(expr->codegen(state));
+        if (CallArgs.back()->getType()->isPointerTy()) {
+          CallArgs.back() = state.Builder->CreateLoad(
+              CallArgs.back()->getType()->getNonOpaquePointerElementType(),
+              CallArgs.back(), "");
+        }
+      }
+    } else {
+      CallArgs.push_back(value);
+      if (CallArgs.back()->getType()->isPointerTy()) {
+        CallArgs.back() = state.Builder->CreateLoad(
+            CallArgs.back()->getType()->getNonOpaquePointerElementType(),
+            CallArgs.back(), "");
+      }
+    }
+  }
+  for (unsigned i = 0, e = OutArgs.size(); i != e; ++i) {
+    llvm::Value *value = OutArgs[i]->codegen(state);
+    if (value->getType()->isTokenTy()) {
+      auto *list = dynamic_cast<ListExprAST *>(OutArgs[i].get());
+      assert(list);
+      for (const auto &expr : list->elements()) {
+        CallArgs.push_back(expr->codegen(state));
+        if (CallArgs.back()->getType()->isPointerTy()) {
+          CallArgs.back() = state.Builder->CreateLoad(
+              CallArgs.back()->getType()->getNonOpaquePointerElementType(),
+              CallArgs.back(), "");
+        }
+      }
+    } else {
+      CallArgs.push_back(value);
+      if (CallArgs.back()->getType()->isPointerTy()) {
+        CallArgs.back() = state.Builder->CreateLoad(
+            CallArgs.back()->getType()->getNonOpaquePointerElementType(),
+            CallArgs.back(), "");
+      }
+    }
+  }
+  for (unsigned i = 0, e = ExternalArgs.size(); i != e; ++i) {
+    llvm::Value *value = ExternalArgs[i]->codegen(state);
+    if (value->getType()->isTokenTy()) {
+      auto *list = dynamic_cast<ListExprAST *>(OutArgs[i].get());
+    } else {
+      CallArgs.push_back(value);
+      if (CallArgs.back()->getType()->isPointerTy()) {
+        CallArgs.back() = state.Builder->CreateLoad(
+            CallArgs.back()->getType()->getNonOpaquePointerElementType(),
+            CallArgs.back(), "");
+      }
+    }
+  }
+
+  for (unsigned i = 0, e = PortPropArgs.size(); i != e; ++i) {
+    llvm::Value *value = PortPropArgs[i]->codegen(state);
+    CallArgs.push_back(value);
+  }
+
+  llvm::Value *outval{nullptr};
+  if (command == "icmp gt") {
+    outval = state.Builder->CreateICmpSGT(CallArgs[0], CallArgs[1]);
+  } else if (command == "icmp eq") {
+    outval = state.Builder->CreateICmpEQ(CallArgs[0], CallArgs[1]);
+  } else if (command == "fcmp ogt") {
+    outval = state.Builder->CreateFCmpOGT(CallArgs[0], CallArgs[1]);
+  } else if (command == "fcmp oeq") {
+    outval = state.Builder->CreateFCmpOEQ(CallArgs[0], CallArgs[1]);
+  } else {
+    assert(0 == 1); // FIXME implement
+  }
+
+  return outval;
+}

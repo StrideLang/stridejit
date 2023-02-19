@@ -16,7 +16,14 @@ struct PrototypeArg {
   std::string property; // If port property, this is not empty
 };
 
-enum class CallableType { Module, Reaction, Loop, External, DomainFunction };
+enum class CallableType {
+  Module,
+  Reaction,
+  Loop,
+  External,
+  DomainFunction,
+  LLVMCommand
+};
 
 /// PrototypeAST - This class represents the "prototype" for a function,
 /// which captures its name, and its argument names (thus implicitly the number
@@ -97,6 +104,28 @@ public:
 
   CallableType callType;
 
+  std::vector<std::unique_ptr<ExprAST>> InArgs;
+  std::vector<std::unique_ptr<ExprAST>> OutArgs;
+  std::vector<std::unique_ptr<ExprAST>> ExternalArgs;
+  std::vector<std::unique_ptr<ExprAST>> PortPropArgs;
+  std::unique_ptr<ExprAST> ret;
+};
+
+class LLVMCommandAST : public ExprAST {
+protected:
+public:
+  LLVMCommandAST(const std::string &command,
+                 std::vector<std::unique_ptr<ExprAST>> OutArgs,
+                 std::vector<std::unique_ptr<ExprAST>> InArgs,
+                 std::vector<std::unique_ptr<ExprAST>> ExternalArgs,
+                 std::vector<std::unique_ptr<ExprAST>> PortPropArgs)
+      : command(command), InArgs(std::move(InArgs)),
+        OutArgs(std::move(OutArgs)), ExternalArgs(std::move(ExternalArgs)),
+        PortPropArgs(std::move(PortPropArgs)) {}
+
+  llvm::Value *codegen(StrideCompiler &state) override;
+
+  std::string command;
   std::vector<std::unique_ptr<ExprAST>> InArgs;
   std::vector<std::unique_ptr<ExprAST>> OutArgs;
   std::vector<std::unique_ptr<ExprAST>> ExternalArgs;

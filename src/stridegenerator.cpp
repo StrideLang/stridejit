@@ -227,112 +227,139 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
     } else if (current->getNodeType() == AST::Block ||
                current->getNodeType() == AST::Bundle) {
       auto block = createExpr(current);
+      auto decl = ASTQuery::findDeclarationByName(
+          ASTQuery::getNodeName(current), *scope, tree);
+      if (!decl) {
+        std::cerr << "No declaration for: " << ASTQuery::getNodeName(current)
+                  << " in " << AST::toText(inputStream) << " in "
+                  << inputStream->getFilename() << ":" << inputStream->getLine()
+                  << std::endl;
+        return generated;
+      }
       // TODO accumulate read and write variables for switch, expressions,
       // lists and function arguments
-      if (ASTQuery::findDeclarationByName(ASTQuery::getNodeName(current),
-                                          *scope, tree)) {
-        // If on root namespace
-        if (current == inputStream->getLeft()) {
+      // If on root namespace
+      if (current == inputStream->getLeft()) {
+        generated[domainName].readVariables.push_back(current);
+      } else {
+        generated[domainName].writeVariables.push_back(current);
+        if (!next) {
+          // TODO needed?
           generated[domainName].readVariables.push_back(current);
-        } else {
-          generated[domainName].writeVariables.push_back(current);
-          if (!next) {
-            // TODO needed?
-            generated[domainName].readVariables.push_back(current);
-          }
         }
       }
       if (prev && prev->getNodeType() == AST::Function) {
         auto prevFunc = std::static_pointer_cast<FunctionNode>(prev);
-        auto decl = ASTQuery::findDeclarationByName(
-            ASTQuery::getNodeName(current), *scope, tree);
-        if (!decl) {
-          std::cerr << "No declaration for: " << ASTQuery::getNodeName(current)
-                    << " in " << AST::toText(inputStream) << " in "
-                    << inputStream->getFilename() << ":"
-                    << inputStream->getLine() << std::endl;
-          return generated;
-        }
-        auto retType = state.getLLVMType(decl);
-        auto callexpr =
-            static_cast<CallExprAST *>(generated[domainName].expr.back().get());
-        assert(dynamic_cast<CallExprAST *>(
-            generated[domainName].expr.back().get()));
         auto funcDecl = ASTQuery::findDeclarationByName(
             ASTQuery::getNodeName(prev), *scope, tree);
-        std::vector<llvm::Type *> argTypes;
-        for (auto it = callexpr->OutArgs.begin(); it != callexpr->OutArgs.end();
-             it++) {
+        auto retType = state.getLLVMType(decl);
+        if (auto callexpr = dynamic_cast<CallExprAST *>(
+                generated[domainName].expr.back().get())) {
 
-          if (auto *ve = dynamic_cast<VariableExprAST *>(it->get())) {
-            if (!funcDecl->getPropertyValue("blocks")) {
-              assert(0 == 1);
-            } else {
-              auto argDecl = ASTQuery::findDeclarationByName(
-                  ve->getName(),
-                  {{nullptr,
-                    funcDecl->getPropertyValue("blocks")->getChildren()}},
-                  nullptr);
-              if (argDecl) {
-                argTypes.push_back(state.getLLVMType(argDecl));
+          std::vector<llvm::Type *> argTypes;
+          for (auto it = callexpr->OutArgs.begin();
+               it != callexpr->OutArgs.end(); it++) {
+
+            if (auto *ve = dynamic_cast<VariableExprAST *>(it->get())) {
+              if (!funcDecl->getPropertyValue("blocks")) {
+                assert(0 == 1);
               } else {
-                std::cerr
-                    << "ERROR falling back on double type. Arg type nto found"
-                    << std::endl;
-                argTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));
+                auto argDecl = ASTQuery::findDeclarationByName(
+                    ve->getName(),
+                    {{nullptr,
+                      funcDecl->getPropertyValue("blocks")->getChildren()}},
+                    nullptr);
+                if (argDecl) {
+                  argTypes.push_back(state.getLLVMType(argDecl));
+                } else {
+                  std::cerr
+                      << "ERROR falling back on double type. Arg type nto found"
+                      << std::endl;
+                  argTypes.push_back(
+                      llvm::Type::getDoubleTy(*state.TheContext));
+                }
               }
             }
           }
-        }
-        for (auto it = callexpr->InArgs.begin(); it != callexpr->InArgs.end();
-             it++) {
-          if (auto *pp = dynamic_cast<PortPropertyAST *>(it->get())) {
-            // TODO get port property integer type from platform definition
-            // This appears in other places, make suer to change all
-            argTypes.push_back(llvm::Type::getInt32Ty(*state.TheContext));
-          } else if (auto *ve = dynamic_cast<VariableExprAST *>(it->get())) {
-            if (!funcDecl->getPropertyValue("blocks")) {
-              // FIXME this will happen for platform functions where the inputs
-              // and output types are not in the blocks port.
-              std::cerr
-                  << "ERROR falling back on double type. Arg type not found"
-                  << std::endl;
-              argTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));
-            } else {
-              auto argDecl = ASTQuery::findDeclarationByName(
-                  ve->getName(),
-                  {{nullptr,
-                    funcDecl->getPropertyValue("blocks")->getChildren()}},
-                  nullptr);
-              if (argDecl) {
-                argTypes.push_back(state.getLLVMType(argDecl));
-              } else {
+          for (auto it = callexpr->InArgs.begin(); it != callexpr->InArgs.end();
+               it++) {
+            if (auto *pp = dynamic_cast<PortPropertyAST *>(it->get())) {
+              // TODO get port property integer type from platform definition
+              // This appears in other places, make suer to change all
+              argTypes.push_back(llvm::Type::getInt32Ty(*state.TheContext));
+            } else if (auto *ve = dynamic_cast<VariableExprAST *>(it->get())) {
+              if (!funcDecl->getPropertyValue("blocks")) {
+                // FIXME this will happen for platform functions where the
+                // inputs and output types are not in the blocks port.
                 std::cerr
                     << "ERROR falling back on double type. Arg type not found"
                     << std::endl;
                 argTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));
+              } else {
+                auto argDecl = ASTQuery::findDeclarationByName(
+                    ve->getName(),
+                    {{nullptr,
+                      funcDecl->getPropertyValue("blocks")->getChildren()}},
+                    nullptr);
+                if (argDecl) {
+                  argTypes.push_back(state.getLLVMType(argDecl));
+                } else {
+                  std::cerr
+                      << "ERROR falling back on double type. Arg type not found"
+                      << std::endl;
+                  argTypes.push_back(
+                      llvm::Type::getDoubleTy(*state.TheContext));
+                }
+              }
+            } else {
+              argTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));
+            }
+          }
+          //        if (callexpr->isExternal) {
+          //          assert(argTypes.size() > 0);
+          //          argTypes.resize(argTypes.size() - 1);
+          //        }
+
+          // TODO do we also test that the function is not declared in Stride
+          // code? Or is this check enough?
+          auto externFunc =
+              state.getExternalFunction(prevFunc->getName(), retType, argTypes);
+          if (externFunc) {
+            generated[domainName].expr.back() = std::make_unique<BinaryExprAST>(
+                '=', std::move(block),
+                std::move(generated[domainName].expr.back()));
+          } else {
+            // Stride Functions pass the output as arguments, so no need to
+            // assign
+          }
+        } else if (dynamic_cast<LLVMCommandAST *>(
+                       generated[domainName].expr.back().get())) {
+          auto outputsNode = funcDecl->getPropertyValue("outputs");
+          llvm::Type *outType;
+          if (outputsNode && outputsNode->getChildren().size() > 0) {
+            auto outputTypeNode = outputsNode->getChildren()[0];
+            if (outputTypeNode && outputTypeNode->getNodeType() == AST::Block) {
+              auto outputType =
+                  std::static_pointer_cast<BlockNode>(outputTypeNode);
+              if (state.typesMap.find(outputType->getName()) !=
+                  state.typesMap.end()) {
+                outType = state.typesMap[outputType->getName()];
               }
             }
-          } else {
-            argTypes.push_back(llvm::Type::getDoubleTy(*state.TheContext));
           }
-        }
-        //        if (callexpr->isExternal) {
-        //          assert(argTypes.size() > 0);
-        //          argTypes.resize(argTypes.size() - 1);
-        //        }
 
-        // TODO do we also test that the function is not declared in Stride
-        // code? Or is this check enough?
-        auto externFunc =
-            state.getExternalFunction(prevFunc->getName(), retType, argTypes);
-        if (externFunc) {
+          if (retType != outType) {
+            if (retType->isIntegerTy() && outType->isDoubleTy()) {
+              //              block = state.Builder->CreateFPToSI(
+              //                  block,
+              //                  llvm::Type::getDoubleTy(*state.TheContext));
+            }
+          }
           generated[domainName].expr.back() = std::make_unique<BinaryExprAST>(
               '=', std::move(block),
               std::move(generated[domainName].expr.back()));
         } else {
-          // Stride Functions pass the output as arguments, so no need to
-          // assign
+          assert(0 == 1);
         }
       } else if (generated[domainName].expr.size() > 0) {
         generated[domainName].expr.back() = std::make_unique<BinaryExprAST>(
@@ -341,7 +368,6 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       } else {
         generated[domainName].expr.push_back(std::move(block));
       }
-
     } else if (current->getNodeType() == AST::Function) {
       auto func = std::static_pointer_cast<FunctionNode>(current);
       auto funcDecl =
@@ -438,20 +464,29 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       }
 
       if (externFunc) {
-        if (!state.TheModule->getFunction(externFunc->name)) {
-          auto *newFunc = llvm::Function::Create(
-              externFunc->llvmFunctionType, llvm::Function::ExternalLinkage,
-              externFunc->name, *state.TheModule);
-          generated[domainName].externalFunctions.push_back(newFunc);
+        if (externFunc->name.size() > 0 && externFunc->name[0] == '@') {
+          if (!state.TheModule->getFunction(externFunc->name)) {
+            auto *newFunc = llvm::Function::Create(
+                externFunc->llvmFunctionType, llvm::Function::ExternalLinkage,
+                externFunc->name.substr(1), *state.TheModule);
+            generated[domainName].externalFunctions.push_back(newFunc);
+          }
+          auto newCall = std::make_unique<CallExprAST>(
+              externFunc->name.substr(1), std::move(mainOutArgs),
+              std::move(mainInArgs), std::vector<std::unique_ptr<ExprAST>>{},
+              std::vector<std::unique_ptr<ExprAST>>{});
+          newCall->callType = CallableType::External;
+          generated[domainName].expr.push_back(std::move(newCall));
+          std::cerr << " Using external function:" << externFunc->name
+                    << std::endl;
+        } else {
+          auto newCall = std::make_unique<LLVMCommandAST>(
+              externFunc->name, std::move(mainOutArgs), std::move(mainInArgs),
+              std::vector<std::unique_ptr<ExprAST>>{},
+              std::vector<std::unique_ptr<ExprAST>>{});
+
+          generated[domainName].expr.push_back(std::move(newCall));
         }
-        auto newCall = std::make_unique<CallExprAST>(
-            externFunc->name, std::move(mainOutArgs), std::move(mainInArgs),
-            std::vector<std::unique_ptr<ExprAST>>{},
-            std::vector<std::unique_ptr<ExprAST>>{});
-        newCall->callType = CallableType::External;
-        generated[domainName].expr.push_back(std::move(newCall));
-        std::cerr << " Using external function:" << externFunc->name
-                  << std::endl;
       } else {
         auto newFuncDecl =
             createFunctionDeclaration(func, prev, next, tree, scope, state);
@@ -608,6 +643,9 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
   }
 
   auto functionScope = *scope;
+  if (functionScope.size() == 0) {
+    functionScope.push_back({nullptr, {}});
+  }
   if (funcDecl->getObjectType() == "reaction" ||
       funcDecl->getObjectType() == "loop") {
     // share parent scope for reaction and loop

@@ -34,11 +34,6 @@ class Module;
 
 extern "C" {
 EXPORT double __stride_Greater_d_dd(double a, double b);
-EXPORT bool __stride_Greater_b_dd(double a, double b);
-EXPORT bool __stride_Greater_b_ii(int32_t a, int32_t b);
-
-EXPORT bool __stride_Equal_b_dd(double a, double b);
-EXPORT bool __stride_Equal_b_ii(int32_t a, int32_t b);
 }
 
 enum class DataType { DOUBLE, BOOL, INT32, INT64 };
