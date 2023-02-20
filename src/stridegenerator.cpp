@@ -59,6 +59,31 @@ void StrideGenerator::generateCode(ASTNode tree, ScopeStack *scope,
         // function
         ExternalArgs.push_back(
             {decl->getName(), llvm::PointerType::get(type, 0)});
+        if (decl->getObjectType() == "signal") {
+          auto defaultNode = decl->getPropertyValue("default");
+          if (defaultNode && (defaultNode->getNodeType() == AST::Int ||
+                              defaultNode->getNodeType() == AST::Real)) {
+            if (type->isDoubleTy()) {
+              ExternalArgs.back().defaultValue =
+                  std::static_pointer_cast<ValueNode>(defaultNode)->toReal();
+            } else if (type->isIntegerTy(32)) {
+              if (defaultNode->getNodeType() == AST::Int) {
+                auto intValue = std::static_pointer_cast<ValueNode>(defaultNode)
+                                    ->getIntValue();
+                assert(intValue <= INT32_MAX);
+                assert(intValue >= INT32_MIN);
+                ExternalArgs.back().defaultValue = (int32_t)intValue;
+              } else if (defaultNode->getNodeType() == AST::Real) {
+                auto doubleValue =
+                    std::static_pointer_cast<ValueNode>(defaultNode)
+                        ->getRealValue();
+                assert(doubleValue <= INT32_MAX);
+                assert(doubleValue >= INT32_MIN);
+                ExternalArgs.back().defaultValue = (int32_t)doubleValue;
+              }
+            }
+          }
+        }
         if (type->isDoubleTy()) {
           domainArgs.push_back({decl->getName(), DataType::DOUBLE});
         } else if (type->isIntegerTy(1)) {
@@ -88,8 +113,35 @@ void StrideGenerator::generateCode(ASTNode tree, ScopeStack *scope,
     auto newfunc =
         std::make_unique<FunctionAST>(std::move(proto), std::move(it->second));
     newfunc->callType = CallableType::DomainFunction;
-
     newfunc->codegen(state);
+
+    auto initProto = std::make_unique<PrototypeAST>(
+        std::string(it->first + "_init"), std::vector<PrototypeArg>{},
+        std::vector<PrototypeArg>{}, ExternalArgs, std::vector<PrototypeArg>{});
+    std::vector<std::unique_ptr<ExprAST>> resetBody;
+    for (auto &extArg : ExternalArgs) {
+
+      if (std::holds_alternative<int32_t>(extArg.defaultValue)) {
+        auto varInit = std::make_unique<BinaryExprAST>(
+            '=', std::move(std::make_unique<VariableExprAST>(extArg.name)),
+            std::move(std::make_unique<IntExprAST>(
+                std::get<int32_t>(extArg.defaultValue))));
+        resetBody.push_back(std::move(varInit));
+      } else if (std::holds_alternative<double>(extArg.defaultValue)) {
+        auto varInit = std::make_unique<BinaryExprAST>(
+            '=', std::move(std::make_unique<VariableExprAST>(extArg.name)),
+            std::move(std::make_unique<RealExprAST>(
+                std::get<double>(extArg.defaultValue))));
+        resetBody.push_back(std::move(varInit));
+      } else {
+        std::cerr << "ERROR unexpected type for default." << std::endl;
+      }
+    }
+    auto initFunc = std::make_unique<FunctionAST>(std::move(initProto),
+                                                  std::move(resetBody));
+    initFunc->callType = CallableType::DomainFunction;
+    initFunc->codegen(state);
+
     state.domainArgs[it->first] = domainArgs;
   }
 }

@@ -56,6 +56,44 @@
 //  }
 //}
 
+TEST(JIT, DomainInit) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "domain_init.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.JIT->lookup("RootDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> InitSym =
+      strenv.JIT->lookup("RootDomain_init");
+  if (!InitSym) {
+    std::cerr << "No init entry" << std::endl;
+  }
+
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
+  auto *InitEntry = (void (*)(...))InitSym->getAddress();
+
+  EXPECT_NE(Entry, nullptr);
+  double In;
+  int32_t In2;
+  InitEntry(&In, &In2);
+  EXPECT_EQ(In, 3.0);
+  EXPECT_EQ(In2, 10);
+  Entry(&In, &In2);
+  EXPECT_EQ(In, 5.0);
+  EXPECT_EQ(In2, 11);
+  InitEntry(&In, &In2);
+  EXPECT_EQ(In, 3.0);
+  EXPECT_EQ(In2, 10);
+}
+
 TEST(JIT, Loop) {
 
   StrideEnvironment strenv;

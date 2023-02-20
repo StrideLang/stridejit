@@ -1,0 +1,5 @@
+signal In {default: 3.0}
+signal In2 {type: _IntType default: 10}
+
+In + 2 >> In;
+In2 + 1 >> In2;

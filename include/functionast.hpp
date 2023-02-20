@@ -14,6 +14,7 @@ struct PrototypeArg {
   std::string name;
   llvm::Type *llvmType;
   std::string property; // If port property, this is not empty
+  std::variant<double, int32_t> defaultValue;
 };
 
 enum class CallableType {
