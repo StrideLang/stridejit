@@ -304,6 +304,9 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         auto prevFunc = std::static_pointer_cast<FunctionNode>(prev);
         auto funcDecl = ASTQuery::findDeclarationByName(
             ASTQuery::getNodeName(prev), *scope, tree);
+        if (!funcDecl) {
+          assert(0 == 1);
+        }
         auto retType = state.getLLVMType(decl);
         if (auto callexpr = dynamic_cast<CallExprAST *>(
                 generated[domainName].expr.back().get())) {
@@ -407,9 +410,75 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               //                  llvm::Type::getDoubleTy(*state.TheContext));
             }
           }
-          generated[domainName].expr.back() = std::make_unique<BinaryExprAST>(
-              '=', std::move(block),
-              std::move(generated[domainName].expr.back()));
+
+          if (decl->getObjectType() == "trigger") {
+            std::vector<std::unique_ptr<ExprAST>> Expressions;
+            auto triggerResetsNode = decl->getCompilerProperty("triggerResets");
+            if (triggerResetsNode) {
+              for (const auto &node : triggerResetsNode->getChildren()) {
+                if (node->getNodeType() == AST::Declaration ||
+                    node->getNodeType() == AST::BundleDeclaration) {
+                  auto resetNodeDecl =
+                      std::static_pointer_cast<DeclarationNode>(node);
+                  // TODO is this code duplicated?
+                  if (resetNodeDecl->getObjectType() == "signal") {
+                    auto typeNode = resetNodeDecl->getPropertyValue("type");
+                    if (typeNode && typeNode->getNodeType() == AST::Block) {
+                      auto typeName =
+                          std::static_pointer_cast<BlockNode>(typeNode)
+                              ->getName();
+                      auto defaultNode =
+                          resetNodeDecl->getPropertyValue("default");
+                      if (!defaultNode) {
+                        continue;
+                      }
+                      if (typeName == "_RealType" &&
+                          defaultNode->getNodeType() == AST::Real) {
+                        double defaultValue =
+                            std::static_pointer_cast<ValueNode>(defaultNode)
+                                ->getRealValue();
+                        auto varInit = std::make_unique<BinaryExprAST>(
+                            '=',
+                            std::move(std::make_unique<VariableExprAST>(
+                                resetNodeDecl->getName())),
+                            std::move(
+                                std::make_unique<RealExprAST>(defaultValue)));
+                        Expressions.push_back(std::move(varInit));
+                      } else if (typeName == "_IntType" &&
+                                 defaultNode->getNodeType() == AST::Int) {
+                        int32_t defaultValue =
+                            std::static_pointer_cast<ValueNode>(defaultNode)
+                                ->getIntValue();
+                        auto varInit = std::make_unique<BinaryExprAST>(
+                            '=',
+                            std::move(std::make_unique<VariableExprAST>(
+                                resetNodeDecl->getName())),
+                            std::move(
+                                std::make_unique<IntExprAST>(defaultValue)));
+                        Expressions.push_back(std::move(varInit));
+                      } else {
+                        assert(0 == 1);
+                      }
+                    } else {
+                      assert(0 == 1);
+                    }
+
+                  } else if (resetNodeDecl->getObjectType() == "switch") {
+
+                  } else {
+                    assert(0 == 1);
+                  }
+                }
+              }
+            }
+            generated[domainName].expr.back() = std::make_unique<ResetExprAST>(
+                "ResetName", std::move(generated[domainName].expr.back()),
+                std::move(Expressions));
+          } else {
+            generated[domainName].expr.back() = std::make_unique<BinaryExprAST>(
+                '=', std::move(block),
+                std::move(generated[domainName].expr.back()));
+          }
         } else {
           assert(0 == 1);
         }

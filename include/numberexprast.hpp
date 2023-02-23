@@ -74,4 +74,16 @@ public:
   llvm::Value *codegen(StrideCompiler &state) override;
 };
 
+class ResetExprAST : public ExprAST {
+  std::string Name;
+  std::unique_ptr<ExprAST> Condition;
+  std::vector<std::unique_ptr<ExprAST>> Expressions;
+
+public:
+  ResetExprAST(std::string Name, std::unique_ptr<ExprAST> Condition,
+               std::vector<std::unique_ptr<ExprAST>> Expressions);
+
+  llvm::Value *codegen(StrideCompiler &state) override;
+};
+
 #endif // NUMBEREXPRAST_HPP

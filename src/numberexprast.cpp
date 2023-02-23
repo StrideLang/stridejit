@@ -323,3 +323,35 @@ llvm::Value *PortPropertyAST::codegen(StrideCompiler &state) {
   }
   return V;
 }
+
+ResetExprAST::ResetExprAST(std::string Name, std::unique_ptr<ExprAST> Condition,
+                           std::vector<std::unique_ptr<ExprAST>> Expressions)
+    : Name(Name), Condition(std::move(Condition)),
+      Expressions(std::move(Expressions)) {}
+
+llvm::Value *ResetExprAST::codegen(StrideCompiler &state) {
+  llvm::Function *TheFunction = state.Builder->GetInsertBlock()->getParent();
+  llvm::Value *V = Condition->codegen(state);
+  llvm::BasicBlock *ThenBB =
+      llvm::BasicBlock::Create(*state.TheContext, "then", TheFunction);
+  //  llvm::BasicBlock *ElseBB = llvm::BasicBlock::Create(*state.TheContext,
+  //  "else");
+  llvm::BasicBlock *MergeBB =
+      llvm::BasicBlock::Create(*state.TheContext, "ifcont", TheFunction);
+
+  state.Builder->CreateCondBr(V, ThenBB, MergeBB);
+  state.Builder->SetInsertPoint(ThenBB);
+
+  //  llvm::Value *ThenV = Then->codegen();
+  //  if (!ThenV)
+  //    return nullptr;
+  for (auto &expr : Expressions) {
+    expr->codegen(state);
+  }
+
+  state.Builder->CreateBr(MergeBB);
+  //  ThenBB = state.Builder->GetInsertBlock();
+  state.Builder->SetInsertPoint(MergeBB);
+
+  return nullptr;
+}

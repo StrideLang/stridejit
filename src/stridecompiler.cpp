@@ -115,11 +115,11 @@ llvm::Type *StrideCompiler::getLLVMType(std::shared_ptr<DeclarationNode> decl) {
   if (!decl) {
     return typesMap[""];
   }
-  auto typePropNode = decl->getPropertyValue("type");
-  std::string type = "_RealType";
-  if (decl->getObjectType() == "switch") {
+  if (decl->getObjectType() == "switch" || decl->getObjectType() == "trigger") {
     return typesMap["_SwitchType"];
   }
+  auto typePropNode = decl->getPropertyValue("type");
+  std::string type = "_RealType";
   if (typePropNode) {
     if (typePropNode->getNodeType() == AST::Block) {
       type = std::static_pointer_cast<BlockNode>(typePropNode)->getName();

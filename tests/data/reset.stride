@@ -1,0 +1,7 @@
+signal In {default: 3.0 reset: Reset}
+signal Count {default: 0 type: _IntType reset: Reset}
+trigger Reset {default: off}
+
+[Count, 5] >> Equal() >> Reset;
+In + 2 >> In;
+Count + 1 >> Count;

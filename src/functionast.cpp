@@ -67,24 +67,6 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
 
   for (auto &Arg : TheFunction->args()) {
     state.NamedValues[std::string(Arg.getName())] = &Arg;
-
-    //    if (state.NamedValues.find(std::string(Arg.getName())) ==
-    //        state.NamedValues.end()) {
-    //      // Create an alloca for this variable.
-    //      llvm::AllocaInst *Alloca =
-    //          state.CreateEntryBlockAlloca(TheFunction, Arg.getName());
-    //      //      // Add arguments to variable symbol table.
-    //      state.Builder->CreateStore(&Arg, Alloca);
-    //      //      // Store the initial value into the alloca.
-    //      //      auto argLoad = state.Builder->CreateLoad(Arg.getType(),
-    //      &Arg,
-    //      //      "Input");
-    //      state.NamedValues[std::string(Arg.getName())] = Alloca;
-    //    } else {
-
-    //      //      state.Builder->CreateStore(&Arg,
-    //      // state.NamedValues[std::string(Arg.getName())]);
-    //    }
   }
 
   auto defineInternal = [&]() {
