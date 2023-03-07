@@ -276,11 +276,43 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
     if (current->getNodeType() == AST::Expression) {
       assert(prev == nullptr);
       generated[domainName].expr.push_back(createExpr(current));
+      // FIXME look recursively inside elements
+      for (const auto &elem : current->getChildren()) {
+        auto decl = elem->getCompilerProperty("declaration");
+        if (decl && decl->getChildren().size() > 0) {
+          if (decl->getChildren()[0]->getCompilerProperty("reads")) {
+            generated[domainName].readVariables.push_back(elem);
+          }
+        }
+      }
     } else if (current->getNodeType() == AST::Block ||
                current->getNodeType() == AST::Bundle) {
       auto block = createExpr(current);
       auto decl = ASTQuery::findDeclarationByName(
           ASTQuery::getNodeName(current), *scope, tree);
+      if (current->getNodeType() == AST::Bundle) {
+        auto indexNode = std::static_pointer_cast<BundleNode>(current)->index();
+        if (indexNode->getNodeType() == AST::List) {
+          for (const auto &elem : indexNode->getChildren()) {
+            if (elem->getNodeType() == AST::Block) {
+              auto indexDecl = ASTQuery::findDeclarationByName(
+                  ASTQuery::getNodeName(elem), *scope, tree);
+              if (indexDecl) {
+                generated[domainName].readVariables.push_back(elem);
+              } else {
+                assert(0 == 1);
+              }
+            } else if (elem->getNodeType() == AST::Int) {
+              // Nothing needed in this case
+            } else {
+              assert(0 == 1); // FIXME complete support for processing index
+                              // contents
+            }
+          }
+        } else {
+          assert(0 == 1);
+        }
+      }
       if (!decl) {
         std::cerr << "No declaration for: " << ASTQuery::getNodeName(current)
                   << " in " << AST::toText(inputStream) << " in "
@@ -492,7 +524,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
     } else if (current->getNodeType() == AST::Function) {
       auto func = std::static_pointer_cast<FunctionNode>(current);
       auto funcDecl =
-          ASTQuery::findDeclarationByName(func->getName(), {}, tree);
+          ASTQuery::findDeclarationByName(func->getName(), *scope, tree);
 
       std::vector<std::unique_ptr<ExprAST>> mainInArgs;
       std::vector<llvm::Type *> mainInArgTypes;
@@ -672,6 +704,15 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       generated[domainName].expr.push_back(createExpr(current));
     } else if (current->getNodeType() == AST::List) {
       generated[domainName].expr.push_back(createExpr(current));
+      // FIXME look recursively inside elements
+      for (const auto &elem : current->getChildren()) {
+        auto decl = elem->getCompilerProperty("declaration");
+        if (decl) {
+          if (decl->getCompilerProperty("reads")) {
+            generated[domainName].readVariables.push_back(elem);
+          }
+        }
+      }
     } else if (current->getNodeType() == AST::Switch) {
       generated[domainName].expr.push_back(createExpr(current));
     } else if (current->getNodeType() == AST::PortProperty) {
@@ -689,7 +730,8 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
     std::shared_ptr<FunctionNode> func, ASTNode prev, ASTNode next,
     ASTNode tree, ScopeStack *scope, StrideCompiler &state) {
 
-  auto funcDecl = ASTQuery::findDeclarationByName(func->getName(), {}, tree);
+  auto funcDecl =
+      ASTQuery::findDeclarationByName(func->getName(), *scope, tree);
   if (!funcDecl) {
     return nullptr;
   }
@@ -769,26 +811,22 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
   }
   if (funcDecl->getObjectType() == "reaction" ||
       funcDecl->getObjectType() == "loop") {
-    // share parent scope for reaction and loop
-    for (const auto &node : tree->getChildren()) {
-      if (node->getNodeType() == AST::Declaration ||
-          node->getNodeType() == AST::BundleDeclaration) {
-        // FIMXE insert right scope in the right place
-        functionScope.back().second.push_back(node);
-      }
+    // TODO grab correct scope, currently passing all.
+    for (const auto &scopeEntry : *scope) {
+
+      functionScope.back().second.insert(functionScope.back().second.begin(),
+                                         scopeEntry.second.begin(),
+                                         scopeEntry.second.end());
     }
   }
+
+  functionScope.push_back({funcDecl, {}});
 
   auto blocks = funcDecl->getPropertyValue("blocks");
   if (blocks) {
     for (const auto &blockDecl : blocks->getChildren()) {
-      for (auto &scopeHead : functionScope) {
-        if (scopeHead.first == nullptr) {
-          scopeHead.second.push_back(blockDecl);
-        }
-      }
+      functionScope.back().second.push_back(blockDecl);
     }
-    //      std::vector<ASTNode> internalVariables = blocks->getChildren();
   }
 
   auto streams = funcDecl->getPropertyValue("streams");
@@ -806,36 +844,37 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
           collected.push_back(std::move(domainCode.second.expr.front()));
           domainCode.second.expr.erase(domainCode.second.expr.begin());
         }
+        // FIXME nested functions need to have their name mangled/hashed as they
+        // move to the global namespace
+        for (const auto &f : domainCode.second.functions) {
+          f->codegen(state);
+        }
         externalFunctions.insert(externalFunctions.end(),
                                  domainCode.second.externalFunctions.begin(),
                                  domainCode.second.externalFunctions.end());
         for (const auto &readVar : domainCode.second.readVariables) {
-          if (readVar->getNodeType() == AST::Block) {
-            auto block = std::static_pointer_cast<BlockNode>(readVar);
-            std::string blockName = block->getName();
-            if (std::find_if(Args.begin(), Args.end(),
-                             [&blockName](const PrototypeArg &x) {
-                               return x.name == blockName;
-                             }) == Args.end() &&
-                std::find_if(OutArgs.begin(), OutArgs.end(),
-                             [&blockName](const PrototypeArg &x) {
-                               return x.name == blockName;
-                             }) == OutArgs.end()) {
-              if (readVar->getNodeType() == AST::Block) {
-                auto decl = ASTQuery::findDeclarationByName(
-                    std::static_pointer_cast<BlockNode>(readVar)->getName(), {},
-                    blocks);
-                if (decl) {
-                  usedInternalVariables.push_back(decl);
-                } else if (funcDecl->getObjectType() == "reaction" ||
-                           funcDecl->getObjectType() == "loop") {
-                  decl = ASTQuery::findDeclarationByName(
-                      std::static_pointer_cast<BlockNode>(readVar)->getName(),
-                      *scope, tree);
-                  if (decl) {
-                    usedExternalVariables.push_back(decl);
-                  }
-                }
+          std::string blockName = ASTQuery::getNodeName(readVar);
+          if (blockName.size() > 0 &&
+              std::find_if(Args.begin(), Args.end(),
+                           [&blockName](const PrototypeArg &x) {
+                             return x.name == blockName;
+                           }) == Args.end() &&
+              std::find_if(OutArgs.begin(), OutArgs.end(),
+                           [&blockName](const PrototypeArg &x) {
+                             return x.name == blockName;
+                           }) == OutArgs.end()) {
+            auto decl = ASTQuery::findDeclarationByName(
+                std::static_pointer_cast<BlockNode>(readVar)->getName(), {},
+                blocks);
+            if (decl) {
+              usedInternalVariables.push_back(decl);
+            } else if (funcDecl->getObjectType() == "reaction" ||
+                       funcDecl->getObjectType() == "loop") {
+              decl = ASTQuery::findDeclarationByName(
+                  std::static_pointer_cast<BlockNode>(readVar)->getName(),
+                  *scope, tree);
+              if (decl) {
+                usedExternalVariables.push_back(decl);
               }
             }
           }

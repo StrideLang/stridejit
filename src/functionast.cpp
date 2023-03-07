@@ -69,7 +69,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     state.NamedValues[std::string(Arg.getName())] = &Arg;
   }
 
-  auto defineInternal = [&]() {
+  auto allocateLocalVariables = [&]() {
     for (const auto &decl : internalVariables) {
       // TODO avoid namespace clashes
       if (state.NamedValues.find(std::string(decl->getName())) ==
@@ -93,6 +93,8 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
           }
         } else if (decl->getObjectType() == "switch") {
           type = state.typesMap["_SwitchType"];
+        } else if (decl->getObjectType() == "iterator") {
+          type = state.typesMap["_IntType"];
         } else {
           std::cerr << "Invalid declaration for block '" << decl->getName()
                     << "' . Ignoring" << std::endl;
@@ -107,14 +109,19 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   };
 
   // Pre Body
+  // Before actual function code there is some work done to loops to manage the
+  // iteration and to functions that have packed arguments, to unpack them. For
+  // everything else, local variables need to be allocated
 
   // For loops
   std::map<std::string, llvm::Value *> OldVals;
   std::map<std::string, llvm::PHINode *> PHIVariables;
   llvm::BasicBlock *LoopBB;
+  int32_t itStart = 0, itLimit = 0, itIncrement = 0;
+  std::string itName;
 
   if (callType == CallableType::DomainFunction) {
-    defineInternal();
+    allocateLocalVariables();
     if (state.hasConfiguration(StrideConfig::PACK_DOMAIN_FUNCTION_EXTERNAL)) {
 
       llvm::BasicBlock *EntryBB = &TheFunction->getEntryBlock();
@@ -153,10 +160,11 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     state.Builder->SetInsertPoint(LoopBB);
     { // Define internal vars as PHI
       for (const auto &decl : internalVariables) {
-        // Create an alloca for this variable.
         llvm::Type *type;
         llvm::Value *defaultValue;
         if (decl->getObjectType() == "signal") {
+          //  Local signals in loops are reset on every trigger, so they are
+          //  allocated and set to their default value
           auto defaultNode = decl->getPropertyValue("default");
           if (!defaultNode) {
             std::cerr << "No default provided for internal variable."
@@ -212,6 +220,8 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
           state.NamedValues[VarName] = Variable;
 
         } else if (decl->getObjectType() == "switch") {
+          //  Local switches in loops are reset on every trigger, so they are
+          //  allocated and set to their default value
           type = state.typesMap["_SwitchType"];
           auto defaultNode = decl->getPropertyValue("default");
           if (defaultNode) {
@@ -227,6 +237,27 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
           } else {
             std::cerr << "No default for switch" << std::endl;
           }
+        } else if (decl->getObjectType() == "iterator") {
+          std::cout << "iterator" << std::endl;
+          auto startNode = decl->getPropertyValue("default");
+          auto limitNode = decl->getPropertyValue("limit");
+          auto incrementNode = decl->getPropertyValue("increment");
+          if (startNode && startNode->getNodeType() == AST::Int && limitNode &&
+              limitNode->getNodeType() == AST::Int && incrementNode &&
+              incrementNode->getNodeType() == AST::Int) {
+            itName = decl->getName();
+            itStart =
+                std::static_pointer_cast<ValueNode>(startNode)->getIntValue();
+            itLimit =
+                std::static_pointer_cast<ValueNode>(limitNode)->getIntValue();
+            itIncrement = std::static_pointer_cast<ValueNode>(incrementNode)
+                              ->getIntValue();
+          }
+
+          type = llvm::IntegerType::get(*state.TheContext, 32);
+          defaultValue =
+              llvm::ConstantInt::get(llvm::Type::getInt32Ty(*state.TheContext),
+                                     llvm::APInt(32, int32_t(itStart)));
         } else {
           std::cerr << "Invalid declaration for block '" << decl->getName()
                     << "' . Ignoring" << std::endl;
@@ -243,9 +274,10 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
       }
     }
   } else {
-    defineInternal();
+    allocateLocalVariables();
   }
 
+  // Generate the function body
   for (const auto &statement : Body) {
     if (!statement) {
       return nullptr;
@@ -288,17 +320,26 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     //            EndCond, llvm::ConstantFP::get(*TheContext,
     //            llvm::APFloat(0.0)), "loopcond");
 
+    if (terminateWhenName.size() > 0) {
+      EndCond = state.NamedValues[terminateWhenName];
+    } else if (itIncrement != 0) {
+      auto *newIteratorValue = state.Builder->CreateAdd(
+          PHIVariables[itName],
+          llvm::ConstantInt::get(*state.TheContext,
+                                 llvm::APInt(32, itIncrement)));
+      EndCond = state.Builder->CreateICmpEQ(
+          newIteratorValue,
+          llvm::ConstantInt::get(*state.TheContext,
+                                 llvm::APInt(itLimit, itLimit)));
+    } else {
+      assert(0 == 1);
+    }
+
     // Create the "after loop" block and insert it.
     llvm::BasicBlock *LoopEndBB = state.Builder->GetInsertBlock();
     llvm::BasicBlock *AfterBB =
         llvm::BasicBlock::Create(*state.TheContext, "afterloop", TheFunction);
 
-    if (terminateWhenName.size() > 0) {
-      EndCond = state.NamedValues[terminateWhenName];
-    } else {
-      // TODO need to define EndCond
-      assert(0 == 1);
-    }
     // Insert the conditional branch into the end of LoopEndBB.
     state.Builder->CreateCondBr(EndCond, AfterBB, LoopBB);
     // Any new code will be inserted in AfterBB.

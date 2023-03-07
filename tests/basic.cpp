@@ -56,6 +56,44 @@
 //  }
 //}
 
+TEST(JIT, ReactionInModule) {
+
+  StrideEnvironment strenv;
+
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "reaction_in_module.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.JIT->lookup("RootDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = (void (*)(...))EntrySym->getAddress();
+  EXPECT_NE(Entry, nullptr);
+
+  double In = 3.0;
+  double Out = 1.0;
+
+  Entry(&In, &Out);
+  EXPECT_EQ(Out, 1.0);
+  In = 4.0;
+  Entry(&In, &Out);
+  EXPECT_EQ(Out, 1.0);
+  In = 5.0;
+  Entry(&In, &Out);
+  EXPECT_EQ(Out, 1.0);
+  In = 6.0;
+  Entry(&In, &Out);
+  EXPECT_EQ(Out, 6.0);
+  In = 10.0;
+  Entry(&In, &Out);
+  EXPECT_EQ(Out, 10.0);
+}
+
 TEST(JIT, Reset) {
 
   StrideEnvironment strenv;

@@ -1,0 +1,24 @@
+module Max {
+    ports: [
+        mainInputPort InputPort {
+            block: Input
+        }
+        mainOutputPort OutputPort {
+            block: Output
+        }
+    ]
+    blocks: [
+        signal Input {}
+        signal Output { default: 0 reset:Reset }
+    ]
+    streams: [
+        [Input, 5] >> Greater() >> reaction { Input >> Output; };
+
+    ]
+}
+
+
+signal Input {}
+signal Out {}
+
+Input>> Max() >> Out;
