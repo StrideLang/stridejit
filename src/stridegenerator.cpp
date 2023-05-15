@@ -21,7 +21,7 @@ void StrideGenerator::generateCode(ASTNode tree, ScopeStack *scope,
   //  createGlobals(tree, state);
   std::map<std::string, std::vector<std::unique_ptr<ExprAST>>>
       domainGeneratedCode;
-  std::vector<PrototypeArg> ExternalArgs;
+  std::vector<std::shared_ptr<DeclarationNode>> GlobalSignals;
 
   std::vector<DomainArg> domainArgs;
 
@@ -53,37 +53,8 @@ void StrideGenerator::generateCode(ASTNode tree, ScopeStack *scope,
           decl->getObjectType() == "constant") {
         // Global signals become pointers to domain function
         auto *type = state.getLLVMType(decl);
-        // TODO For now all signals declared in the root domain are arguments to
-        // the domain function but this should be defined somewhere with more
-        // control, to choose what is external and the order of arguments to the
-        // function
-        ExternalArgs.push_back(
-            {decl->getName(), llvm::PointerType::get(type, 0)});
-        if (decl->getObjectType() == "signal") {
-          auto defaultNode = decl->getPropertyValue("default");
-          if (defaultNode && (defaultNode->getNodeType() == AST::Int ||
-                              defaultNode->getNodeType() == AST::Real)) {
-            if (type->isDoubleTy()) {
-              ExternalArgs.back().defaultValue =
-                  std::static_pointer_cast<ValueNode>(defaultNode)->toReal();
-            } else if (type->isIntegerTy(32)) {
-              if (defaultNode->getNodeType() == AST::Int) {
-                auto intValue = std::static_pointer_cast<ValueNode>(defaultNode)
-                                    ->getIntValue();
-                assert(intValue <= INT32_MAX);
-                assert(intValue >= INT32_MIN);
-                ExternalArgs.back().defaultValue = (int32_t)intValue;
-              } else if (defaultNode->getNodeType() == AST::Real) {
-                auto doubleValue =
-                    std::static_pointer_cast<ValueNode>(defaultNode)
-                        ->getRealValue();
-                assert(doubleValue <= INT32_MAX);
-                assert(doubleValue >= INT32_MIN);
-                ExternalArgs.back().defaultValue = (int32_t)doubleValue;
-              }
-            }
-          }
-        }
+        // TODO Group globals by domain
+        GlobalSignals.push_back(decl);
         if (type->isDoubleTy()) {
           domainArgs.push_back({decl->getName(), DataType::DOUBLE});
         } else if (type->isIntegerTy(1)) {
@@ -96,31 +67,110 @@ void StrideGenerator::generateCode(ASTNode tree, ScopeStack *scope,
           assert(0 == 1);
         }
       } else if (decl->getObjectType() == "switch") {
-        ExternalArgs.push_back(
-            PrototypeArg{decl->getName(),
-                         llvm::PointerType::get(state.getLLVMType(decl), 0)});
+        GlobalSignals.push_back(decl);
         domainArgs.push_back({decl->getName(), DataType::BOOL});
       } else {
         continue;
       }
     }
   }
+  // Generate domain functions
+
+  // Determine external variables that become arguments to the domain function.
+  std::vector<PrototypeArg> ExternalArgs;
   for (auto it = domainGeneratedCode.begin(); it != domainGeneratedCode.end();
        it++) {
+    const std::string &domainName = it->first;
+    // Find domain and insert inputs and output to tree.
+    auto domainDecl = ASTQuery::findDeclarationByName(domainName, *scope, tree);
+    if (domainDecl) {
+      std::cout << " Found domain declaration for " << domainName << std::endl;
+      auto domainExternalInputNode = domainDecl->getPropertyValue("inputs");
+      if (domainExternalInputNode) {
+        for (const auto &externalInput :
+             domainExternalInputNode->getChildren()) {
+          if (externalInput->getNodeType() == AST::Declaration) {
+            auto decl =
+                std::static_pointer_cast<DeclarationNode>(externalInput);
+
+            // TODO for now, all domain inputs are external. Internal (pass by
+            // value) inputs should be allowed
+            bool external = true;
+            if (external) {
+
+              ExternalArgs.push_back(
+                  {decl->getName(),
+                   llvm::PointerType::get(state.getLLVMType(decl), 0),
+                   std::string(), getDefaultValue(decl, state)});
+            } else {
+              ExternalArgs.push_back({decl->getName(), state.getLLVMType(decl),
+                                      std::string(),
+                                      getDefaultValue(decl, state)});
+            }
+            // Remove external from globals list
+            for (auto global = GlobalSignals.begin();
+                 global != GlobalSignals.end(); global++) {
+              if ((*global)->getName() == decl->getName()) {
+                GlobalSignals.erase(global);
+                break;
+              }
+            }
+          }
+        }
+      }
+      auto domainExternalOutputNode = domainDecl->getPropertyValue("outputs");
+      if (domainExternalOutputNode) {
+        for (const auto &externalOutput :
+             domainExternalOutputNode->getChildren()) {
+          if (externalOutput->getNodeType() == AST::Declaration) {
+            auto decl =
+                std::static_pointer_cast<DeclarationNode>(externalOutput);
+            // TODO for now, all domain outputs are external. Internal (pass by
+            // value) outputs should be allowed
+            bool external = true;
+            if (external) {
+
+              ExternalArgs.push_back(
+                  {decl->getName(),
+                   llvm::PointerType::get(state.getLLVMType(decl), 0),
+                   std::string(), getDefaultValue(decl, state)});
+            } else {
+              ExternalArgs.push_back({decl->getName(), state.getLLVMType(decl),
+                                      std::string(),
+                                      getDefaultValue(decl, state)});
+            }
+            // Remove external from globals list
+            for (auto global = GlobalSignals.begin();
+                 global != GlobalSignals.end(); global++) {
+              if ((*global)->getName() == decl->getName()) {
+                GlobalSignals.erase(global);
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+
     auto proto = std::make_unique<PrototypeAST>(
-        std::string(it->first + "_process"), std::vector<PrototypeArg>{},
+        std::string(domainName + "_process"), std::vector<PrototypeArg>{},
         std::vector<PrototypeArg>{}, ExternalArgs, std::vector<PrototypeArg>{});
     auto newfunc =
         std::make_unique<FunctionAST>(std::move(proto), std::move(it->second));
     newfunc->callType = CallableType::DomainFunction;
+
+    // Add domain member variables (globals)
+    for (const auto &global : GlobalSignals) {
+      newfunc->internalVariables.push_back(global);
+    }
+
     newfunc->codegen(state);
 
     auto initProto = std::make_unique<PrototypeAST>(
-        std::string(it->first + "_init"), std::vector<PrototypeArg>{},
+        std::string(domainName + "_init"), std::vector<PrototypeArg>{},
         std::vector<PrototypeArg>{}, ExternalArgs, std::vector<PrototypeArg>{});
     std::vector<std::unique_ptr<ExprAST>> resetBody;
     for (auto &extArg : ExternalArgs) {
-
       if (std::holds_alternative<int32_t>(extArg.defaultValue)) {
         auto varInit = std::make_unique<BinaryExprAST>(
             '=', std::move(std::make_unique<VariableExprAST>(extArg.name)),
@@ -140,9 +190,13 @@ void StrideGenerator::generateCode(ASTNode tree, ScopeStack *scope,
     auto initFunc = std::make_unique<FunctionAST>(std::move(initProto),
                                                   std::move(resetBody));
     initFunc->callType = CallableType::DomainFunction;
+    // Add domain member variables (globals)
+    for (const auto &global : GlobalSignals) {
+      initFunc->internalVariables.push_back(global);
+    }
     initFunc->codegen(state);
 
-    state.domainArgs[it->first] = domainArgs;
+    state.domainArgs[domainName] = domainArgs;
   }
 }
 
@@ -945,4 +999,36 @@ void StrideGenerator::setTypeCastMetadata(ASTNode node, ExprAST *V) {
           std::static_pointer_cast<ValueNode>(typecastNode)->getStringValue();
     }
   }
+}
+
+std::variant<double, int32_t>
+StrideGenerator::getDefaultValue(std::shared_ptr<DeclarationNode> decl,
+                                 StrideCompiler &state) {
+  std::variant<double, int32_t> defaultValue;
+  auto *type = state.getLLVMType(decl);
+  if (decl->getObjectType() == "signal") {
+    auto defaultNode = decl->getPropertyValue("default");
+    if (defaultNode && (defaultNode->getNodeType() == AST::Int ||
+                        defaultNode->getNodeType() == AST::Real)) {
+      if (type->isDoubleTy()) {
+        defaultValue =
+            std::static_pointer_cast<ValueNode>(defaultNode)->toReal();
+      } else if (type->isIntegerTy(32)) {
+        if (defaultNode->getNodeType() == AST::Int) {
+          auto intValue =
+              std::static_pointer_cast<ValueNode>(defaultNode)->getIntValue();
+          assert(intValue <= INT32_MAX);
+          assert(intValue >= INT32_MIN);
+          defaultValue = (int32_t)intValue;
+        } else if (defaultNode->getNodeType() == AST::Real) {
+          auto doubleValue =
+              std::static_pointer_cast<ValueNode>(defaultNode)->getRealValue();
+          assert(doubleValue <= INT32_MAX);
+          assert(doubleValue >= INT32_MIN);
+          defaultValue = (int32_t)doubleValue;
+        }
+      }
+    }
+  }
+  return defaultValue;
 }

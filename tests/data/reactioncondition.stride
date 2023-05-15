@@ -1,7 +1,27 @@
 
+_domainDefinition TestDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+    ]
+    outputs: [
+        signal Out { domain: TestDomain }
+        signal Counter { domain: TestDomain}
+    ]
+	domainFunctionCode: ''
+}
 
-signal S { domain: RootDomain}
-signal Counter { domain: RootDomain}
+reaction Reaction { 
+    streams: [
+        Out + 3.0 >> Out;
+    ]
+    domain: TestDomain
+}
 
-[Counter, 0.0] >> Greater() >> reaction { S + 3.0 >> S;};
+
+[Counter, 0.0] >> Greater() >> Reaction();
 Counter + 1.0 >> Counter;

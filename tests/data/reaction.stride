@@ -1,4 +1,24 @@
 
+_domainDefinition TestDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+    ]
+    outputs: [
+        signal Out { domain: TestDomain }
+    ]
+	domainFunctionCode: ''
+}
 
-signal S { domain: RootDomain}
-on >> reaction { S + 3.0 >> S;};
+reaction Reaction { 
+    streams: [
+        Out + 3.0 >> Out;
+    ]
+    domain: TestDomain
+}
+
+on >> Reaction();

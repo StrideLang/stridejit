@@ -1,5 +1,18 @@
-signal In {default: 3.0}
-signal In2 {type: _IntType default: 10}
+_domainDefinition TestDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+    ]
+    outputs: [
+        signal In {default: 3.0 domain: TestDomain}
+        signal In2 {type: _IntType default: 10 domain: TestDomain}
+    ]
+	domainFunctionCode: ''
+}
 
 In + 2 >> In;
 In2 + 1 >> In2;

@@ -1,7 +1,27 @@
 
 
-signal S { domain: RootDomain type: _RealType}
-signal Counter { domain: RootDomain type: _IntType}
+_domainDefinition TestDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+    ]
+    outputs: [
+        signal S { domain: TestDomain type: _RealType}
+        signal Counter { domain: TestDomain type: _IntType}
+    ]
+	domainFunctionCode: ''
+}
 
-[Counter, 0] >> Greater() >> reaction { S + 3.0 >> S;};
+reaction Reaction { 
+    streams: [
+        S + 3.0 >> S;
+    ]
+    domain: TestDomain
+}
+
+[Counter, 0] >> Greater() >> Reaction();
 Counter + 1 >> Counter;

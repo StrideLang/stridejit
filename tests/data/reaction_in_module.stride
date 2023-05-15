@@ -1,3 +1,19 @@
+_domainDefinition TestDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+        signal In {domain: TestDomain}
+    ]
+    outputs: [
+        signal Out {domain: TestDomain}
+    ]
+	domainFunctionCode: ''
+}
+
 module Max {
     ports: [
         mainInputPort InputPort {
@@ -17,8 +33,4 @@ module Max {
     ]
 }
 
-
-signal Input {}
-signal Out {}
-
-Input>> Max() >> Out;
+In >> Max() >> Out;

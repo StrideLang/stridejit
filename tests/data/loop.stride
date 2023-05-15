@@ -1,3 +1,19 @@
+_domainDefinition TestDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+		signal List[20] { default: 1 }
+    ]
+    outputs: [
+        signal Out { domain: TestDomain }
+    ]
+	domainFunctionCode: ''
+}
+
 loop Add {
 	ports: [
 		mainInputPort InputPort {
@@ -23,9 +39,5 @@ loop Add {
 		
 	]
 }
-
-
-signal List[20] { default: 1 }
-signal Out {}
 
 List >> Add() >> Out;

@@ -1,5 +1,3 @@
-
-
 _domainDefinition TestDomain {
 	framework: _JitFramework
 	# requiresResources: [_RootContext]
@@ -7,30 +5,13 @@ _domainDefinition TestDomain {
 	rate: -1 # -1 is 'one-shot/final' domain
     substitutions: [ ]
     domainIncludes: []
+    inputs: [
+        signal In { domain: TestDomain }
+    ]
+    outputs: [
+        signal Out { domain: TestDomain }
+    ]
 	domainFunctionCode: ''
 }
-
-
-module AddTwo {
-    ports: [
-        mainInputPort {
-            block: Input
-        }
-        mainOutputPort {
-            block: Output
-        }
-    ]
-    blocks: [
-        signal Input {}
-        signal Output {}
-    ]
-    streams: [
-        Input + 2 >> Output;
-    ]
-}
-
-
-signal In { domain: TestDomain }
-signal Out { domain: TestDomain }
 
 In >> Out;

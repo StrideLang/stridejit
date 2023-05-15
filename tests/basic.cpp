@@ -25,7 +25,7 @@
 //  EXPECT_TRUE(ret);
 
 //  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-//      strenv.JIT->lookup("RootDomain_process");
+//      strenv.JIT->lookup("TestDomain_process");
 //  if (!EntrySym) {
 //    std::cerr << "No entry" << std::endl;
 //  }
@@ -67,7 +67,7 @@ TEST(JIT, ReactionInModule) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.JIT->lookup("RootDomain_process");
+      strenv.JIT->lookup("TestDomain_process");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
   }
@@ -104,7 +104,7 @@ TEST(JIT, Reset) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.JIT->lookup("RootDomain_process");
+      strenv.JIT->lookup("TestDomain_process");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
   }
@@ -113,7 +113,7 @@ TEST(JIT, Reset) {
   EXPECT_NE(Entry, nullptr);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> InitSym =
-      strenv.JIT->lookup("RootDomain_init");
+      strenv.JIT->lookup("TestDomain_init");
   if (!InitSym) {
     std::cerr << "No init entry" << std::endl;
   }
@@ -151,13 +151,13 @@ TEST(JIT, DomainInit) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.JIT->lookup("RootDomain_process");
+      strenv.JIT->lookup("TestDomain_process");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
   }
 
   llvm::Expected<llvm::JITEvaluatedSymbol> InitSym =
-      strenv.JIT->lookup("RootDomain_init");
+      strenv.JIT->lookup("TestDomain_init");
   if (!InitSym) {
     std::cerr << "No init entry" << std::endl;
   }
@@ -189,7 +189,7 @@ TEST(JIT, Loop) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.JIT->lookup("RootDomain_process");
+      strenv.JIT->lookup("TestDomain_process");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
   }
@@ -216,7 +216,7 @@ TEST(JIT, PortPropertySize) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.getFunction("RootDomain_process");
+      strenv.getFunction("TestDomain_process");
 
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
@@ -243,7 +243,7 @@ TEST(JIT, TypecastStream) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.getFunction("RootDomain_process");
+      strenv.getFunction("TestDomain_process");
 
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
@@ -275,7 +275,7 @@ TEST(JIT, IntegerType) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.getFunction("RootDomain_process");
+      strenv.getFunction("TestDomain_process");
 
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
@@ -305,7 +305,7 @@ TEST(JIT, Bundles) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.getFunction("RootDomain_process");
+      strenv.getFunction("TestDomain_process");
 
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
@@ -345,7 +345,7 @@ TEST(JIT, PackDomainExternalPointer) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.getFunction("RootDomain_process");
+      strenv.getFunction("TestDomain_process");
 
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
@@ -384,7 +384,7 @@ TEST(JIT, PackDomainExternal) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.getFunction("RootDomain_process");
+      strenv.getFunction("TestDomain_process");
 
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
@@ -418,7 +418,7 @@ TEST(JIT, ReactionCondition) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.getFunction("RootDomain_process");
+      strenv.getFunction("TestDomain_process");
 
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
@@ -445,31 +445,6 @@ TEST(JIT, ReactionCondition) {
   //  EXPECT_EQ(Entry, nullptr);
 }
 
-TEST(JIT, PassThru) {
-
-  StrideEnvironment strenv;
-
-  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
-  EXPECT_TRUE(ret);
-  ret = strenv.compileInMemory();
-  EXPECT_TRUE(ret);
-
-  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.getFunction("RootDomain_process");
-
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-  auto Entry = (void (*)(...))(EntrySym->getAddress());
-
-  double in = 1.0;
-  double out = 0;
-
-  Entry(&in, &out);
-
-  EXPECT_FLOAT_EQ(out, 1.0);
-}
-
 TEST(JIT, Reaction) {
 
   StrideEnvironment strenv;
@@ -480,7 +455,7 @@ TEST(JIT, Reaction) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.getFunction("RootDomain_process");
+      strenv.getFunction("TestDomain_process");
 
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
@@ -503,6 +478,31 @@ TEST(JIT, Reaction) {
   //  EXPECT_EQ(Entry, nullptr);
 }
 
+TEST(JIT, PassThru) {
+
+  StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
+      strenv.getFunction("TestDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+  auto Entry = (void (*)(...))(EntrySym->getAddress());
+
+  double in = 1.0;
+  double out = 0;
+
+  Entry(&in, &out);
+
+  EXPECT_FLOAT_EQ(out, 1.0);
+}
+
 TEST(JIT, Stream) {
 
   StrideEnvironment strenv;
@@ -513,7 +513,7 @@ TEST(JIT, Stream) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.getFunction("RootDomain_process");
+      strenv.getFunction("TestDomain_process");
 
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
@@ -531,9 +531,9 @@ TEST(JIT, DomainFunctions) {
   EXPECT_TRUE(ret);
 
   EXPECT_EQ(strenv.state.domainArgs.size(), 1);
-  EXPECT_EQ(strenv.state.domainArgs["RootDomain"].size(), 1);
-  EXPECT_EQ(strenv.state.domainArgs["RootDomain"][0].name, "Out");
-  EXPECT_EQ(strenv.state.domainArgs["RootDomain"][0].type, DataType::DOUBLE);
+  EXPECT_EQ(strenv.state.domainArgs["TestDomain"].size(), 1);
+  EXPECT_EQ(strenv.state.domainArgs["TestDomain"][0].name, "Out");
+  EXPECT_EQ(strenv.state.domainArgs["TestDomain"][0].type, DataType::DOUBLE);
 }
 
 TEST(JIT, ModuleInternal) {
@@ -546,7 +546,7 @@ TEST(JIT, ModuleInternal) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.getFunction("RootDomain_process");
+      strenv.getFunction("TestDomain_process");
 
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
@@ -569,7 +569,7 @@ TEST(JIT, CreateClass) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.getFunction("RootDomain_process");
+      strenv.getFunction("TestDomain_process");
 
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
@@ -592,7 +592,7 @@ TEST(JIT, MathFunction) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.getFunction("RootDomain_process");
+      strenv.getFunction("TestDomain_process");
 
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
@@ -615,7 +615,7 @@ TEST(JIT, TwoStreams) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.getFunction("RootDomain_process");
+      strenv.getFunction("TestDomain_process");
 
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
@@ -646,7 +646,7 @@ TEST(JIT, SwitchOut) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.getFunction("RootDomain_process");
+      strenv.getFunction("TestDomain_process");
 
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
@@ -677,7 +677,7 @@ TEST(JIT, List) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.getFunction("RootDomain_process");
+      strenv.getFunction("TestDomain_process");
 
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
@@ -713,8 +713,10 @@ TEST(JIT, Domains) {
   auto Entry = (void (*)(...))(EntrySym->getAddress());
 
   EXPECT_NE(Entry, nullptr);
-  double in = 0;
+  double in = 1;
   double out = 0;
+  Entry(&in, &out);
+  EXPECT_EQ(out, 1);
 }
 
 TEST(JIT, IO) {
@@ -727,7 +729,7 @@ TEST(JIT, IO) {
   EXPECT_TRUE(ret);
 
   llvm::Expected<llvm::JITEvaluatedSymbol> EntrySym =
-      strenv.getFunction("RootDomain_process");
+      strenv.getFunction("TestDomain_process");
 
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;

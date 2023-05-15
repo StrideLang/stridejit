@@ -1,6 +1,21 @@
-signal In {default: 3.0 reset: Reset}
-signal Count {default: 0 type: _IntType reset: Reset}
-trigger Reset {default: off}
+
+_domainDefinition TestDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+        signal In {default: 3.0 reset: Reset domain: TestDomain}
+    ]
+    outputs: [
+        signal Count {default: 0 type: _IntType reset: Reset domain: TestDomain}
+    ]
+	domainFunctionCode: ''
+}
+
+trigger Reset {default: off  domain: TestDomain}
 
 [Count, 5] >> Equal() >> Reset;
 In + 2 >> In;

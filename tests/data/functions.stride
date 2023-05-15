@@ -1,3 +1,17 @@
-signal Out {}
+
+_domainDefinition TestDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+    ]
+    outputs: [
+        signal Out { domain: TestDomain }
+    ]
+	domainFunctionCode: ''
+}
 
 0.0 >> Cos() >> Out;

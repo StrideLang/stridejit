@@ -1,5 +1,21 @@
-signal In[16] {}
-signal Out[16] {}
+
+
+_domainDefinition TestDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+        signal In[16] {domain: TestDomain}
+    ]
+    outputs: [
+        signal Out[16] {domain: TestDomain}
+    ]
+	domainFunctionCode: ''
+}
+
 
 In[1] >> Out[2];
 In[2] + 1.2 >> Out[3];

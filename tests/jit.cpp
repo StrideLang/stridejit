@@ -55,7 +55,7 @@ TEST(JIT, Create) {
           llvm::orc::ThreadSafeModule(std::move(strenv.state.TheModule),
                                       std::move(strenv.state.TheContext)))) {
   }
-  auto EntrySym = (*JIT)->lookup("RootDomain_process");
+  auto EntrySym = (*JIT)->lookup("TestDomain_process");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
   }

@@ -1,6 +1,19 @@
 
-signal Int[2] {type: _IntType}
-signal Float[2] {type: _RealType}
+_domainDefinition TestDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+		signal Int[2] {type: _IntType domain: TestDomain}
+    ]
+    outputs: [
+        signal Float[2] {type: _RealType domain: TestDomain}
+    ]
+	domainFunctionCode: ''
+}
 
 1.0 >> Int[0];
 3 >> Float[0];
