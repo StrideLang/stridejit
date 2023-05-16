@@ -28,7 +28,7 @@ module Max {
         signal Output { default: 0 reset:Reset }
     ]
     streams: [
-        [Input, 5] >> Greater() >> reaction { Input >> Output; };
+        [Input, 5.0] >> Greater() >> reaction { Input >> Output; };
 
     ]
 }
