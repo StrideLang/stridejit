@@ -89,7 +89,8 @@ void StrideGenerator::generateCode(ASTNode tree, ScopeStack *scope,
       if (domainExternalInputNode) {
         for (const auto &externalInput :
              domainExternalInputNode->getChildren()) {
-          if (externalInput->getNodeType() == AST::Declaration) {
+          if (externalInput->getNodeType() == AST::Declaration ||
+              externalInput->getNodeType() == AST::BundleDeclaration) {
             auto decl =
                 std::static_pointer_cast<DeclarationNode>(externalInput);
 
@@ -122,7 +123,8 @@ void StrideGenerator::generateCode(ASTNode tree, ScopeStack *scope,
       if (domainExternalOutputNode) {
         for (const auto &externalOutput :
              domainExternalOutputNode->getChildren()) {
-          if (externalOutput->getNodeType() == AST::Declaration) {
+          if (externalOutput->getNodeType() == AST::Declaration ||
+              externalOutput->getNodeType() == AST::BundleDeclaration) {
             auto decl =
                 std::static_pointer_cast<DeclarationNode>(externalOutput);
             // TODO for now, all domain outputs are external. Internal (pass by
@@ -173,15 +175,20 @@ void StrideGenerator::generateCode(ASTNode tree, ScopeStack *scope,
     for (auto &extArg : ExternalArgs) {
       if (std::holds_alternative<int32_t>(extArg.defaultValue)) {
         auto varInit = std::make_unique<BinaryExprAST>(
-            '=', std::move(std::make_unique<VariableExprAST>(extArg.name)),
-            std::move(std::make_unique<IntExprAST>(
-                std::get<int32_t>(extArg.defaultValue))));
+            '=', std::make_unique<VariableExprAST>(extArg.name),
+            std::make_unique<IntExprAST>(
+                std::get<int32_t>(extArg.defaultValue)));
         resetBody.push_back(std::move(varInit));
       } else if (std::holds_alternative<double>(extArg.defaultValue)) {
         auto varInit = std::make_unique<BinaryExprAST>(
-            '=', std::move(std::make_unique<VariableExprAST>(extArg.name)),
-            std::move(std::make_unique<RealExprAST>(
-                std::get<double>(extArg.defaultValue))));
+            '=', std::make_unique<VariableExprAST>(extArg.name),
+            std::make_unique<RealExprAST>(
+                std::get<double>(extArg.defaultValue)));
+        resetBody.push_back(std::move(varInit));
+      } else if (std::holds_alternative<bool>(extArg.defaultValue)) {
+        auto varInit = std::make_unique<BinaryExprAST>(
+            '=', std::make_unique<VariableExprAST>(extArg.name),
+            std::make_unique<BoolExprAST>(std::get<bool>(extArg.defaultValue)));
         resetBody.push_back(std::move(varInit));
       } else {
         std::cerr << "ERROR unexpected type for default." << std::endl;
@@ -1001,10 +1008,10 @@ void StrideGenerator::setTypeCastMetadata(ASTNode node, ExprAST *V) {
   }
 }
 
-std::variant<double, int32_t>
+DefaultVariant
 StrideGenerator::getDefaultValue(std::shared_ptr<DeclarationNode> decl,
                                  StrideCompiler &state) {
-  std::variant<double, int32_t> defaultValue;
+  DefaultVariant defaultValue;
   auto *type = state.getLLVMType(decl);
   if (decl->getObjectType() == "signal") {
     auto defaultNode = decl->getPropertyValue("default");
@@ -1027,6 +1034,15 @@ StrideGenerator::getDefaultValue(std::shared_ptr<DeclarationNode> decl,
           assert(doubleValue >= INT32_MIN);
           defaultValue = (int32_t)doubleValue;
         }
+      }
+    }
+  } else if (decl->getObjectType() == "switch") {
+    auto defaultNode = decl->getPropertyValue("default");
+    if (defaultNode && defaultNode->getNodeType() == AST::Switch) {
+      if (type->isIntegerTy(1)) {
+        auto switchValue =
+            std::static_pointer_cast<ValueNode>(defaultNode)->getSwitchValue();
+        defaultValue = (bool)switchValue;
       }
     }
   }

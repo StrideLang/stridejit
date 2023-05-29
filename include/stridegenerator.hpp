@@ -3,8 +3,11 @@
 
 #include <map>
 #include <memory>
+#include <string>
 #include <variant>
 #include <vector>
+
+#include "exprast.hpp"
 
 // Stride
 class StreamNode;
@@ -15,7 +18,6 @@ class DeclarationNode;
 using ScopeStack = std::vector<std::pair<ASTNode, std::vector<ASTNode>>>;
 
 // StrideJIT
-class ExprAST;
 class FunctionAST;
 class StrideCompiler;
 
@@ -54,8 +56,8 @@ private:
   static void setTypeCastMetadata(ASTNode node, ExprAST *V);
 
   // helper functions
-  static std::variant<double, int32_t>
-  getDefaultValue(std::shared_ptr<DeclarationNode> decl, StrideCompiler &state);
+  static DefaultVariant getDefaultValue(std::shared_ptr<DeclarationNode> decl,
+                                        StrideCompiler &state);
 };
 
 #endif // STRIDEGENERATOR_HPP

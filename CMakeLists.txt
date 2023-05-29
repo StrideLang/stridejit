@@ -7,7 +7,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # For details on LLVM Cmake options https://llvm.org/docs/CMake.html
 message("Building StrideJit with LLVM")
 
-#include(ExternalProject)
+# For Windows:
+# First clone llvm, then build and intall through cmake
+# git clone https://github.com/llvm/llvm-project.git --branch llvmorg-14.0.6 --depth 1
+# Make sure the installation path is not too long as it causes build issues.
+# TODO check if cloning through cmake as external project works.
+# Did not work for me on windows, perhaps just the path was the issue?
+
+include(ExternalProject)
 #ExternalProject_Add(llvm
 #    GIT_REPOSITORY https://github.com/llvm/llvm-project.git
 #    GIT_TAG        llvmorg-14.0.6
@@ -19,9 +26,7 @@ message("Building StrideJit with LLVM")
 #    LOG_INSTALL 1
 #)
 
-
-set(LLVM_DIR ${CMAKE_MODULE_PATH} "C:/Users/Andres/source/repos/boardgame/libgame/external/stridejit/external/llvm-prefix/src/llvm/llvm/out/install/x64-Release/lib/cmake/llvm")
-set(LLVM_DIR ${CMAKE_MODULE_PATH} "C:/Users/Andres/source/repos/boardgame/libgame/external/stridejit/external/llvm-prefix/src/llvm/llvm/out/install/x64-Debug/lib/cmake/llvm")
+set(LLVM_DIR "C:\\Users\\Andres\\source\\repos\\llvm-install\\lib\\cmake\\llvm")
 
 find_package(LLVM REQUIRED CONFIG)
 
@@ -56,13 +61,10 @@ target_link_libraries(StrideJit PUBLIC StrideParser StrideCodegen)
 target_include_directories(StrideJit PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 #add_dependencies(StrideJit llvm)
 
-#llvm_map_components_to_libnames(llvm_libs support core irreader)
-
 # Link against LLVM libraries
 target_include_directories(StrideJit PUBLIC ${LLVM_INCLUDE_DIRS})
 
 separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
-#target_compile_definitions(StrideJit PUBLIC ${LLVM_DEFINITIONS_LIST})
 
 llvm_map_components_to_libnames(llvm_libs
     support core irreader orcjit
@@ -86,22 +88,22 @@ llvm_map_components_to_libnames(llvm_libs
 )
 target_link_libraries(StrideJit PUBLIC ${llvm_libs})
 
-set(STRIDELIB_SRC
-  src/libcompare.cpp
-)
+#set(STRIDELIB_SRC
+#  src/libcompare.cpp
+#)
 
-set(STRIDELIB_HEADERS
-  include/libcompare.hpp
-)
+#set(STRIDELIB_HEADERS
+#  include/libcompare.hpp
+#)
 
-add_library(StrideLib SHARED
-  ${STRIDELIB_SRC} ${STRIDELIB_HEADERS}
-)
+#add_library(StrideLib SHARED
+#  ${STRIDELIB_SRC} ${STRIDELIB_HEADERS}
+#)
 
-target_compile_options(StrideLib PUBLIC "-rdynamic")
-target_include_directories(StrideLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_definitions(StrideLib PUBLIC
-  "-DSTRIDELIB_PATH=\"${CMAKE_CURRENT_BINARY_DIR}\"")
+#target_compile_options(StrideLib PUBLIC "-rdynamic")
+#target_include_directories(StrideLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+#target_compile_definitions(StrideLib PUBLIC
+#  "-DSTRIDELIB_PATH=\"${CMAKE_CURRENT_BINARY_DIR}\"")
 
 add_subdirectory(tests)
 

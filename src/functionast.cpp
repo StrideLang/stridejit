@@ -22,8 +22,10 @@
 #include "exprast.hpp"
 #include "functionast.hpp"
 #include "listexprast.hpp"
+#include "numberexprast.hpp"
 #include "stridecompiler.hpp"
 
+#include "ast.h"
 #include "blocknode.h"
 #include "valuenode.h"
 

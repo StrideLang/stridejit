@@ -4,6 +4,9 @@
 #include "llvm/IR/Value.h"
 
 #include <map>
+#include <variant>
+
+using DefaultVariant = std::variant<double, int32_t, bool>;
 
 class StrideCompiler;
 

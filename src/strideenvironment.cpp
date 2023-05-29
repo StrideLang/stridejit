@@ -125,7 +125,8 @@ bool StrideEnvironment::generateIr(std::string path) {
           auto outputList = decl->getPropertyValue("outputs");
           auto functionNameNode = decl->getPropertyValue("processing");
           if (inputList && outputList && functionNameNode) {
-            std::cout << "Loaded: " << decl->getName() << std::endl;
+            //            std::cout << "Loaded: " << decl->getName() <<
+            //            std::endl;
             frameworkScope.push_back(decl);
             for (const auto &input : inputList->getChildren()) {
               if (input->getNodeType() == AST::Block) {
@@ -158,8 +159,14 @@ bool StrideEnvironment::generateIr(std::string path) {
                 llvm::FunctionType::get(retType, parameters, false);
             state.functionMap[decl->getName()].push_back(
                 ExternalFunction{name, FT});
-
-            std::cout << "Loaded platform module: " << decl->getName()
+            std::string atName;
+            auto atNode = decl->getCompilerProperty("_at");
+            if (atNode && atNode->getNodeType() == AST::String) {
+              atName =
+                  "@" +
+                  std::static_pointer_cast<ValueNode>(atNode)->getStringValue();
+            }
+            std::cout << "Loaded platform module: " << decl->getName() << atName
                       << std::endl;
           }
         }

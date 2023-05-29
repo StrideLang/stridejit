@@ -314,6 +314,7 @@ TEST(JIT, Bundles) {
 
   double In[16] = {0};
   double Out[16] = {0};
+  In[1] = 0.3;
   In[2] = 0.4;
 
   Entry(In, Out);
@@ -352,7 +353,7 @@ TEST(JIT, PackDomainExternalPointer) {
   }
   auto Entry = (void (*)(...))(EntrySym->getAddress());
 
-  auto args = strenv.state.domainArgs["RootDomain"];
+  auto args = strenv.state.domainArgs["TestDomain"];
 
   std::map<std::string, double> doubleArgs;
   size_t memsize = 0;

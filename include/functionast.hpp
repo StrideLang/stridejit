@@ -2,10 +2,8 @@
 #define FUNCTIONAST_HPP
 
 #include "exprast.hpp"
-#include "numberexprast.hpp"
 
 // From stride parser
-#include "ast.h"
 #include "declarationnode.h"
 
 class StrideCompiler;
@@ -14,7 +12,7 @@ struct PrototypeArg {
   std::string name;
   llvm::Type *llvmType;
   std::string property; // If port property, this is not empty
-  std::variant<double, int32_t> defaultValue;
+  DefaultVariant defaultValue;
 };
 
 enum class CallableType {
