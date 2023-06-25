@@ -8,6 +8,11 @@
 
 class StrideCompiler;
 
+namespace llvm {
+class Type;
+class Function;
+} // namespace llvm
+
 struct PrototypeArg {
   std::string name;
   llvm::Type *llvmType;
@@ -51,10 +56,7 @@ public:
   const std::string &getName() const { return Name; }
   bool isUnaryOp() const { return IsOperator && Args.size() == 1; }
   bool isBinaryOp() const { return IsOperator && Args.size() == 2; }
-  char getOperatorName() const {
-    assert(isUnaryOp() || isBinaryOp());
-    return Name[Name.size() - 1];
-  }
+  char getOperatorName() const;
   unsigned getBinaryPrecedence() const { return Precedence; }
   std::vector<PrototypeArg> getExternalArgs() const;
 

@@ -1,13 +1,15 @@
 #ifndef EXPRAST_HPP
 #define EXPRAST_HPP
 
-#include "llvm/IR/Value.h"
-
 #include <map>
+#include <string>
 #include <variant>
 
 using DefaultVariant = std::variant<double, int32_t, bool>;
 
+namespace llvm {
+class Value;
+}
 class StrideCompiler;
 
 class ExprAST {

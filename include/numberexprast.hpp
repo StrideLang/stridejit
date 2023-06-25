@@ -4,7 +4,9 @@
 #include "exprast.hpp"
 
 #include <map>
+#include <memory>
 #include <variant>
+#include <vector>
 
 class StrideCompiler;
 

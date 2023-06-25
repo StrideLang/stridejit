@@ -439,6 +439,11 @@ llvm::Function *PrototypeAST::codegen(StrideCompiler &state) {
   return F;
 }
 
+char PrototypeAST::getOperatorName() const {
+  assert(isUnaryOp() || isBinaryOp());
+  return Name[Name.size() - 1];
+}
+
 llvm::Value *CallExprAST::codegen(StrideCompiler &state) {
   std::cout << "CallExprAST codegen" << std::endl;
   // Look up the name in the global module table.
