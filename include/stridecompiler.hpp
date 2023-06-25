@@ -5,7 +5,7 @@
 #include <optional>
 #include <variant>
 
-#include "declarationnode.h"
+#include "stride/parser/declarationnode.h"
 #include "functionast.hpp"
 
 #include "llvm/IR/IRBuilder.h"

@@ -3,8 +3,8 @@
 #include <iostream>
 
 // stride
-#include "astfunctions.h"
-#include "astquery.h"
+#include "stride/parser/astfunctions.h"
+#include "stride/parser/astquery.h"
 #include "coderesolver.h"
 
 // stridejit

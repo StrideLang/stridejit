@@ -9,7 +9,7 @@
 #include "numberexprast.hpp"
 
 // stride
-#include "astquery.h"
+#include "stride/parser/astquery.h"
 #include "codeanalysis.hpp"
 
 // llvm

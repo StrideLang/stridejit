@@ -25,9 +25,9 @@
 #include "numberexprast.hpp"
 #include "stridecompiler.hpp"
 
-#include "ast.h"
-#include "blocknode.h"
-#include "valuenode.h"
+#include "stride/parser/ast.h"
+#include "stride/parser/blocknode.h"
+#include "stride/parser/valuenode.h"
 
 #include <iostream>
 

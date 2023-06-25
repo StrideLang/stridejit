@@ -4,7 +4,7 @@
 #include "exprast.hpp"
 
 // From stride parser
-#include "declarationnode.h"
+#include "stride/parser/declarationnode.h"
 
 class StrideCompiler;
 

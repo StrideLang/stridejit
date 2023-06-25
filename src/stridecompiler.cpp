@@ -1,6 +1,6 @@
 #include <iostream>
 
-#include "blocknode.h"
+#include "stride/parser/blocknode.h"
 #include "stridecompiler.hpp"
 
 //#include "llvm/ADT/APFloat.h"

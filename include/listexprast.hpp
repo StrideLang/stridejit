@@ -3,7 +3,7 @@
 #include "exprast.hpp"
 
 // From stride parser
-#include "ast.h"
+#include "stride/parser/ast.h"
 
 class StrideCompiler;
 

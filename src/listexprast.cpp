@@ -25,8 +25,8 @@
 #include "stridecompiler.hpp"
 
 #include "codequery.hpp"
-//#include "declarationnode.h"
-#include <astfunctions.h>
+//#include "stride/parser/declarationnode.h"
+#include <stride/parser/astfunctions.h>
 
 ListExprAST::ListExprAST(std::vector<ASTNode> elements)
     : elementNodes(elements) {
