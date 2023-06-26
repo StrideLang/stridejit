@@ -3,9 +3,9 @@
 #include <iostream>
 
 // stride
-#include "stride/parser/astfunctions.h"
-#include "stride/parser/astquery.h"
-#include "coderesolver.h"
+#include "stride/codegen/astfunctions.hpp"
+#include "stride/codegen/astquery.hpp"
+#include "stride/codegen/coderesolver.hpp"
 
 // stridejit
 #include "strideenvironment.hpp"
@@ -53,7 +53,7 @@ bool StrideEnvironment::generateIr(std::string path) {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
   ASTNode tree;
-  tree = ASTFunctions::parseFile(path.c_str());
+  tree = AST::parseFile(path.c_str());
   auto systemNodes = ASTQuery::getSystemNodes(tree);
   if (systemNodes.size() == 0) {
     auto systemNode =

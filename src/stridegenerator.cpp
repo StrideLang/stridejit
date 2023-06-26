@@ -9,8 +9,8 @@
 #include "numberexprast.hpp"
 
 // stride
-#include "stride/parser/astquery.h"
-#include "codeanalysis.hpp"
+#include "stride/codegen/astquery.hpp"
+#include "stride/codegen/codeanalysis.hpp"
 
 // llvm
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"

@@ -24,9 +24,9 @@
 //#include "numberexprast.hpp"
 #include "stridecompiler.hpp"
 
-#include "codequery.hpp"
+#include "stride/codegen/codequery.hpp"
 //#include "stride/parser/declarationnode.h"
-#include <stride/parser/astfunctions.h>
+#include <stride/codegen/astfunctions.hpp>
 
 ListExprAST::ListExprAST(std::vector<ASTNode> elements)
     : elementNodes(elements) {

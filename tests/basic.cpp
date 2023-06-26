@@ -7,8 +7,8 @@
 #include "stridegenerator.hpp"
 
 // stride
-#include "stride/parser/astfunctions.h"
-#include "stride/parser/astquery.h"
+#include "stride/codegen/astfunctions.hpp"
+#include "stride/codegen/astquery.hpp"
 
 // llvm
 #include "llvm/ExecutionEngine/JITSymbol.h"
@@ -755,7 +755,7 @@ TEST(JIT, IO) {
 TEST(Function, Simple) {
 
   ASTNode tree;
-  tree = ASTFunctions::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
+  tree = AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
   EXPECT_NE(tree, nullptr);
 
   StrideEnvironment strenv;
