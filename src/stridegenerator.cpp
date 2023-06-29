@@ -1,12 +1,12 @@
 #include <iostream>
 
-#include "stridecompiler.hpp"
-#include "stridegenerator.hpp"
+#include "stride/stridejit/stridecompiler.hpp"
+#include "stride/stridejit/stridegenerator.hpp"
 
-#include "exprast.hpp"
-#include "functionast.hpp"
-#include "listexprast.hpp"
-#include "numberexprast.hpp"
+#include "stride/stridejit/exprast.hpp"
+#include "stride/stridejit/functionast.hpp"
+#include "stride/stridejit/listexprast.hpp"
+#include "stride/stridejit/numberexprast.hpp"
 
 // stride
 #include "stride/codegen/astquery.hpp"

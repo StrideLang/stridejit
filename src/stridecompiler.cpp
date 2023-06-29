@@ -1,7 +1,7 @@
 #include <iostream>
 
 #include "stride/parser/blocknode.h"
-#include "stridecompiler.hpp"
+#include "stride/stridejit/stridecompiler.hpp"
 
 //#include "llvm/ADT/APFloat.h"
 //#include "llvm/ADT/STLExtras.h"

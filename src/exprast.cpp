@@ -1,5 +1,5 @@
-#include "exprast.hpp"
+#include "stride/stridejit/exprast.hpp"
 
-#include "strideenvironment.hpp"
+#include "stride/stridejit/strideenvironment.hpp"
 
 ExprAST::ExprAST() {}

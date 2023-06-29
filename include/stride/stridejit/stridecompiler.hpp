@@ -6,7 +6,7 @@
 #include <variant>
 
 #include "stride/parser/declarationnode.h"
-#include "functionast.hpp"
+#include "stride/stridejit/functionast.hpp"
 
 #include "llvm/IR/IRBuilder.h"
 

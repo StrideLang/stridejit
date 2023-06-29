@@ -1,10 +1,10 @@
 #include "gtest/gtest.h"
 
 // stridejit
-#include "exprast.hpp"
-#include "numberexprast.hpp"
-#include "strideenvironment.hpp"
-#include "stridegenerator.hpp"
+#include "stride/stridejit/exprast.hpp"
+#include "numberstride/stridejit/exprast.hpp"
+#include "stride/stridejit/strideenvironment.hpp"
+#include "stride/stridejit/stridegenerator.hpp"
 
 // stride
 #include "stride/codegen/astfunctions.hpp"

@@ -19,10 +19,10 @@
 //#include "llvm/Transforms/Scalar/GVN.h"
 #include "llvm/IR/Constants.h"
 
-#include "listexprast.hpp"
-#include "stridegenerator.hpp"
-//#include "numberexprast.hpp"
-#include "stridecompiler.hpp"
+#include "liststride/stridejit/exprast.hpp"
+#include "stride/stridejit/stridegenerator.hpp"
+//#include "numberstride/stridejit/exprast.hpp"
+#include "stride/stridejit/stridecompiler.hpp"
 
 #include "stride/codegen/codequery.hpp"
 //#include "stride/parser/declarationnode.h"

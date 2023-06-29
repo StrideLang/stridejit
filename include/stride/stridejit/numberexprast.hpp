@@ -1,7 +1,7 @@
 #ifndef NUMBEREXPRAST_HPP
 #define NUMBEREXPRAST_HPP
 
-#include "exprast.hpp"
+#include "stride/stridejit/exprast.hpp"
 
 #include <map>
 #include <memory>

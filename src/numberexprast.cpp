@@ -1,6 +1,6 @@
-#include "numberexprast.hpp"
+#include "numberstride/stridejit/exprast.hpp"
 
-#include "stridecompiler.hpp"
+#include "stride/stridejit/stridecompiler.hpp"
 
 // ----------------------
 
@@ -168,6 +168,7 @@ llvm::Value *BinaryExprAST::codegen(StrideCompiler &state) {
     if (!state.NamedValues[LHSE->getName()]->getType()->isPointerTy()) {
       state.NamedValues[LHSE->getName()] = Val;
     }
+    Val->dump();
     return Val;
   }
 

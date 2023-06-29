@@ -1,6 +1,6 @@
 #pragma once
 
-#include "exprast.hpp"
+#include "stride/stridejit/exprast.hpp"
 
 // From stride parser
 #include "stride/parser/ast.h"

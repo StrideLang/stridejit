@@ -19,11 +19,11 @@
 //#include "llvm/Transforms/Scalar.h"
 //#include "llvm/Transforms/Scalar/GVN.h"
 
-#include "exprast.hpp"
-#include "functionast.hpp"
-#include "listexprast.hpp"
-#include "numberexprast.hpp"
-#include "stridecompiler.hpp"
+#include "stride/stridejit/exprast.hpp"
+#include "stride/stridejit/functionast.hpp"
+#include "liststride/stridejit/exprast.hpp"
+#include "numberstride/stridejit/exprast.hpp"
+#include "stride/stridejit/stridecompiler.hpp"
 
 #include "stride/parser/ast.h"
 #include "stride/parser/blocknode.h"

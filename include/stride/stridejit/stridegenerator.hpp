@@ -7,7 +7,7 @@
 #include <variant>
 #include <vector>
 
-#include "exprast.hpp"
+#include "stride/stridejit/exprast.hpp"
 
 // Stride
 class StreamNode;

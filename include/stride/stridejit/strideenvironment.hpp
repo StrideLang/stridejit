@@ -3,7 +3,7 @@
 
 #include <string>
 
-#include "stridecompiler.hpp"
+#include "stride/stridejit/stridecompiler.hpp"
 
 // llvm forward declarations
 namespace llvm {

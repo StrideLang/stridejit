@@ -1,7 +1,7 @@
 #ifndef FUNCTIONAST_HPP
 #define FUNCTIONAST_HPP
 
-#include "exprast.hpp"
+#include "stride/stridejit/exprast.hpp"
 
 // From stride parser
 #include "stride/parser/declarationnode.h"

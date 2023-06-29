@@ -8,8 +8,8 @@
 #include "stride/codegen/coderesolver.hpp"
 
 // stridejit
-#include "strideenvironment.hpp"
-#include "stridegenerator.hpp"
+#include "stride/stridejit/strideenvironment.hpp"
+#include "stride/stridejit/stridegenerator.hpp"
 
 // llvm
 #include "llvm/ADT/StringRef.h"

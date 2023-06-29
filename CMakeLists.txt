@@ -42,14 +42,14 @@ set(STRIDEJIT_SRC
 )
 
 set(STRIDEJIT_HEADERS
-  include/exprast.hpp
-  include/listexprast.hpp
-  include/numberexprast.hpp
-  include/functionast.hpp
+  include/stride/stridejit/exprast.hpp
+  include/stride/stridejit/listexprast.hpp
+  include/stride/stridejit/numberexprast.hpp
+  include/stride/stridejit/functionast.hpp
 
-  include/strideenvironment.hpp
-  include/stridecompiler.hpp
-  include/stridegenerator.hpp
+  include/stride/stridejit/strideenvironment.hpp
+  include/stride/stridejit/stridecompiler.hpp
+  include/stride/stridejit/stridegenerator.hpp
 )
 
 add_library(StrideJit 
