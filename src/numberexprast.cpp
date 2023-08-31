@@ -1,4 +1,4 @@
-#include "numberstride/stridejit/exprast.hpp"
+#include "stride/stridejit/numberexprast.hpp"
 
 #include "stride/stridejit/stridecompiler.hpp"
 

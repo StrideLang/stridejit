@@ -19,7 +19,7 @@
 //#include "llvm/Transforms/Scalar/GVN.h"
 #include "llvm/IR/Constants.h"
 
-#include "liststride/stridejit/exprast.hpp"
+#include "stride/stridejit/listexprast.hpp"
 #include "stride/stridejit/stridegenerator.hpp"
 //#include "numberstride/stridejit/exprast.hpp"
 #include "stride/stridejit/stridecompiler.hpp"

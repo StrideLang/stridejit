@@ -21,8 +21,8 @@
 
 #include "stride/stridejit/exprast.hpp"
 #include "stride/stridejit/functionast.hpp"
-#include "liststride/stridejit/exprast.hpp"
-#include "numberstride/stridejit/exprast.hpp"
+#include "stride/stridejit/listexprast.hpp"
+#include "stride/stridejit/numberexprast.hpp"
 #include "stride/stridejit/stridecompiler.hpp"
 
 #include "stride/parser/ast.h"
@@ -77,7 +77,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
       if (state.NamedValues.find(std::string(decl->getName())) ==
           state.NamedValues.end()) {
         // Create an alloca for this variable.
-        llvm::Type *type;
+        llvm::Type *type = nullptr;
         if (decl->getObjectType() == "signal") {
           auto typeNode = decl->getPropertyValue("type");
           if (typeNode && typeNode->getNodeType() == AST::Block) {
@@ -312,7 +312,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     //    llvm::Value *NextVar = state.Builder->CreateFAdd(Variable, StepVal,
     //    "nextvar");
     // Compute the end condition.
-    llvm::Value *EndCond;
+    llvm::Value *EndCond = nullptr;
     //    llvm::Value *EndCond = End->codegen();
     //    if (!EndCond)
     //      return nullptr;

@@ -2,7 +2,7 @@
 
 // stridejit
 #include "stride/stridejit/exprast.hpp"
-#include "numberstride/stridejit/exprast.hpp"
+#include "stride/stridejit/numberexprast.hpp"
 #include "stride/stridejit/strideenvironment.hpp"
 #include "stride/stridejit/stridegenerator.hpp"
 
