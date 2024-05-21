@@ -3,6 +3,7 @@
 
 #include <string>
 
+#include "stride/parser/ast.h"
 #include "stride/stridejit/stridecompiler.hpp"
 
 // llvm forward declarations
@@ -22,6 +23,8 @@ public:
   StrideEnvironment(std::string strideroot = std::string());
 
   bool generateIr(std::string path);
+  bool generateIr(ASTNode root);
+
   bool compileInMemory();
   bool compileObjectToDisk(std::string path);
 

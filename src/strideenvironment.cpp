@@ -104,6 +104,11 @@ bool StrideEnvironment::generateIr(std::string path) {
 
   CodeResolver resolver(tree, ASTFunctions::getDefaultStrideRoot());
   resolver.process();
+
+  return generateIr(tree);
+}
+
+bool StrideEnvironment::generateIr(ASTNode root) {
   ScopeStack globalScope;
   {
     //    StrideLibrary library;
@@ -174,11 +179,10 @@ bool StrideEnvironment::generateIr(std::string path) {
     }
   }
 
-  if (!ASTFunctions::preprocess(tree, &globalScope)) {
+  if (!ASTFunctions::preprocess(root, &globalScope)) {
     return false;
   }
-
-  StrideGenerator::generateCode(tree, &globalScope, state);
+  StrideGenerator::generateCode(root, &globalScope, state);
   //  if (mVerbose) {
   //    state.TheModule->dump();
   //  }

@@ -1,19 +1,18 @@
 #include <iostream>
 
-#include "stride/stridejit/stridecompiler.hpp"
-#include "stride/stridejit/stridegenerator.hpp"
-
 #include "stride/stridejit/exprast.hpp"
 #include "stride/stridejit/functionast.hpp"
 #include "stride/stridejit/listexprast.hpp"
 #include "stride/stridejit/numberexprast.hpp"
+#include "stride/stridejit/stridecompiler.hpp"
+#include "stride/stridejit/stridegenerator.hpp"
 
 // stride
 #include "stride/codegen/astquery.hpp"
 #include "stride/codegen/codeanalysis.hpp"
 
 // llvm
-#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
+//#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 
 void StrideGenerator::generateCode(ASTNode tree, ScopeStack *scope,
                                    StrideCompiler &state) {
