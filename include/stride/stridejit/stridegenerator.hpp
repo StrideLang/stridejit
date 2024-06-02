@@ -9,6 +9,8 @@
 
 #include "stride/stridejit/exprast.hpp"
 
+#include "stride/stridejit/stridecompiler.hpp"
+
 // Stride
 class StreamNode;
 class FunctionNode;
@@ -36,17 +38,30 @@ public:
     std::vector<ASTNode> writeVariables;
   };
 
+  struct GeneratedIRCode {
+    std::map<std::string, std::vector<std::unique_ptr<ExprAST>>>
+        domainGeneratedCode;
+    std::vector<DomainArg> domainArgs;
+    std::vector<std::shared_ptr<DeclarationNode>> GlobalSignals;
+  };
+
   using GeneratedCode = std::map<std::string, DomainCode>;
 
   static void generateCode(ASTNode tree, ScopeStack *scope,
                            StrideCompiler &state);
 
+  static GeneratedIRCode generateCodeForTree(ASTNode tree, ScopeStack *scope,
+                                             StrideCompiler &state);
+
   static std::unique_ptr<ExprAST> createExpr(ASTNode node);
 
   static std::unique_ptr<FunctionAST>
-  createFunctionDeclaration(std::shared_ptr<FunctionNode> func, ASTNode prev,
-                            ASTNode next, ASTNode tree, ScopeStack *scope,
+  createFunctionDeclaration(std::shared_ptr<DeclarationNode> funcDecl, ASTNode tree, ScopeStack *scope,
                             StrideCompiler &state);
+
+  static void generatePlatformFunctionSignature(std::shared_ptr<DeclarationNode> decl,
+                                       std::vector<ASTNode> &frameworkScope,
+                                       StrideCompiler &state);
 
 private:
   static GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream,

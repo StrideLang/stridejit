@@ -26,6 +26,8 @@ StrideCompiler::StrideCompiler() {
   TheModule = std::make_unique<llvm::Module>("StrideJit", *this->TheContext);
   Builder = std::make_unique<llvm::IRBuilder<>>(*this->TheContext);
 
+  // TODO these should not be hardcoded here, but defined in the platform stride
+  // files
   BinopPrecedence['='] = 2;
   BinopPrecedence['<'] = 10;
   BinopPrecedence['+'] = 20;

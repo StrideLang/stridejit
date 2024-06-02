@@ -124,56 +124,8 @@ bool StrideEnvironment::generateIr(ASTNode root) {
           member->getNodeType() == AST::BundleDeclaration) {
         auto decl = std::static_pointer_cast<DeclarationNode>(member);
         if (decl->getObjectType() == "platformModule") {
-          std::vector<llvm::Type *> parameters;
-          llvm::Type *retType = nullptr;
-          auto inputList = decl->getPropertyValue("inputs");
-          auto outputList = decl->getPropertyValue("outputs");
-          auto functionNameNode = decl->getPropertyValue("processing");
-          if (inputList && outputList && functionNameNode) {
-            //            std::cout << "Loaded: " << decl->getName() <<
-            //            std::endl;
-            frameworkScope.push_back(decl);
-            for (const auto &input : inputList->getChildren()) {
-              if (input->getNodeType() == AST::Block) {
-                auto inputBlock = std::static_pointer_cast<BlockNode>(input);
-                auto inputType = inputBlock->getName();
-                if (state.typesMap.find(inputType) != state.typesMap.end()) {
-                  parameters.push_back(state.typesMap[inputType]);
-                } else {
-                  std::cerr << "Type not mapped: " << inputType << std::endl;
-                }
-              }
-            }
-            assert(outputList->getChildren().size() < 2);
-            if (outputList->getChildren().size() != 0) {
-              auto outputBlock = outputList->getChildren()[0];
-              if (outputBlock->getNodeType() == AST::Block) {
-                auto outputType =
-                    std::static_pointer_cast<BlockNode>(outputBlock)->getName();
-                if (state.typesMap.find(outputType) != state.typesMap.end()) {
-                  retType = state.typesMap[outputType];
-                } else {
-                  std::cerr << " Output Type not mapped: " << outputType
-                            << std::endl;
-                }
-              }
-            }
-            auto name = std::static_pointer_cast<ValueNode>(functionNameNode)
-                            ->getStringValue();
-            llvm::FunctionType *FT =
-                llvm::FunctionType::get(retType, parameters, false);
-            state.functionMap[decl->getName()].push_back(
-                ExternalFunction{name, FT});
-            std::string atName;
-            auto atNode = decl->getCompilerProperty("_at");
-            if (atNode && atNode->getNodeType() == AST::String) {
-              atName =
-                  "@" +
-                  std::static_pointer_cast<ValueNode>(atNode)->getStringValue();
-            }
-            std::cout << "Loaded platform module: " << decl->getName() << atName
-                      << std::endl;
-          }
+          StrideGenerator::generatePlatformFunctionSignature(decl, frameworkScope,
+                                                    state);
         }
       }
     }

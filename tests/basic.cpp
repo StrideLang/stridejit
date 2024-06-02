@@ -773,8 +773,11 @@ TEST(Function, Simple) {
                   ->getRight();
 
   ScopeStack scope;
-  auto func = StrideGenerator::createFunctionDeclaration(
-      addFunc, prev, next, tree, &scope, strenv.state);
+  auto funcDecl =
+      ASTQuery::findDeclarationByName(addFunc->getName(), scope, tree);
+  EXPECT_NE(funcDecl, nullptr);
+  auto func = StrideGenerator::createFunctionDeclaration(funcDecl, tree, &scope,
+                                                         strenv.state);
   auto *v = func->codegen(strenv.state);
   EXPECT_NE(v, nullptr);
 
