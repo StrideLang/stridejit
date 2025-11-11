@@ -284,6 +284,9 @@ std::unique_ptr<ExprAST> StrideGenerator::createExpr(ASTNode node) {
   } else if (node->getNodeType() == AST::List) {
     auto list = std::make_unique<ListExprAST>(node->getChildren());
     return list;
+  } else if (node->getNodeType() == AST::String) {
+    auto list = std::make_unique<ListExprAST>(node->getChildren());
+    return list;
   } else if (node->getNodeType() == AST::PortProperty) {
     auto pp = std::static_pointer_cast<PortPropertyNode>(node);
     auto V =
@@ -827,15 +830,9 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
 std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
     std::shared_ptr<DeclarationNode> funcDecl, ASTNode tree, ScopeStack *scope,
     StrideCompiler &state) {
-
   // FIXME validate declaration type. Only callable objects are accepted.
-  auto nameNode = funcDecl->getPropertyValue("name");
-  if (!nameNode || nameNode->getNodeType() != AST::String) {
-    std::cerr << " ERROR: Declaration does not have a name node" << std::endl;
-    return nullptr;
-  }
-  std::string funcName =
-      std::static_pointer_cast<ValueNode>(nameNode)->getStringValue();
+
+  std::string funcName = funcDecl->getName();
 
   std::vector<PrototypeArg> Args;
   std::vector<PrototypeArg> OutArgs;
