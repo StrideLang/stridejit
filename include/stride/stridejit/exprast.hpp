@@ -5,11 +5,13 @@
 #include <string>
 #include <variant>
 
-using DefaultVariant = std::variant<double, int32_t, bool>;
-
 namespace llvm {
 class Value;
 }
+
+namespace strd {
+using DefaultVariant = std::variant<double, int32_t, bool>;
+
 class StrideCompiler;
 
 class ExprAST {
@@ -22,5 +24,6 @@ public:
 
   std::string typecast;
 };
+} // namespace strd
 
 #endif // EXPRAST_HPP

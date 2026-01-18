@@ -36,6 +36,7 @@ extern "C" {
 EXPORT double __stride_Greater_d_dd(double a, double b);
 }
 
+namespace strd {
 enum class DataType { DOUBLE, BOOL, INT32, INT64 };
 
 struct ExternalFunction {
@@ -62,7 +63,7 @@ public:
                       std::vector<llvm::Type *> argTypes,
                       bool allowConversion = false);
 
-  llvm::Type *getLLVMType(std::shared_ptr<DeclarationNode> decl);
+  llvm::Type *getLLVMType(std::shared_ptr<strd::DeclarationNode> decl);
 
   llvm::Function *getFunctionInModule(std::string Name);
 
@@ -99,5 +100,6 @@ public:
 private:
   uint64_t m_configuration{NO_OPTIONS};
 };
+} // namespace strd
 
 #endif // STRIDECOMPILER_HPP

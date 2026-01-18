@@ -6,12 +6,13 @@
 // From stride parser
 #include "stride/parser/declarationnode.h"
 
-class StrideCompiler;
-
 namespace llvm {
 class Type;
 class Function;
 } // namespace llvm
+
+namespace strd {
+class StrideCompiler;
 
 struct PrototypeArg {
   std::string name;
@@ -80,7 +81,7 @@ public:
   llvm::Function *codegen(StrideCompiler &state);
 
   std::vector<llvm::Function *> externalFunctions;
-  std::vector<std::shared_ptr<DeclarationNode>> internalVariables;
+  std::vector<std::shared_ptr<strd::DeclarationNode>> internalVariables;
   std::string terminateWhenName;
 
   CallableType callType;
@@ -133,5 +134,6 @@ public:
   std::vector<std::unique_ptr<ExprAST>> PortPropArgs;
   std::unique_ptr<ExprAST> ret;
 };
+} // namespace strd
 
 #endif // FUNCTIONAST_HPP

@@ -41,6 +41,8 @@
 //#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/TargetSelect.h"
 
+using namespace strd;
+
 StrideEnvironment::StrideEnvironment(std::string strideRoot)
     : m_strideRoot(strideRoot) {
   if (m_strideRoot.size() == 0) {
@@ -124,8 +126,8 @@ bool StrideEnvironment::generateIr(ASTNode root) {
           member->getNodeType() == AST::BundleDeclaration) {
         auto decl = std::static_pointer_cast<DeclarationNode>(member);
         if (decl->getObjectType() == "platformModule") {
-          StrideGenerator::generatePlatformFunctionSignature(decl, frameworkScope,
-                                                    state);
+          StrideGenerator::generatePlatformFunctionSignature(
+              decl, frameworkScope, state);
         }
       }
     }

@@ -11,6 +11,12 @@
 
 #include "stride/stridejit/stridecompiler.hpp"
 
+// llvm
+namespace llvm {
+class Function;
+}
+
+namespace strd {
 // Stride
 class StreamNode;
 class FunctionNode;
@@ -22,11 +28,6 @@ using ScopeStack = std::vector<std::pair<ASTNode, std::vector<ASTNode>>>;
 // StrideJIT
 class FunctionAST;
 class StrideCompiler;
-
-// llvm
-namespace llvm {
-class Function;
-}
 
 class StrideGenerator {
 public:
@@ -56,12 +57,14 @@ public:
   static std::unique_ptr<ExprAST> createExpr(ASTNode node);
 
   static std::unique_ptr<FunctionAST>
-  createFunctionDeclaration(std::shared_ptr<DeclarationNode> funcDecl, ASTNode tree, ScopeStack *scope,
+  createFunctionDeclaration(std::shared_ptr<DeclarationNode> funcDecl,
+                            ASTNode tree, ScopeStack *scope,
                             StrideCompiler &state);
 
-  static void generatePlatformFunctionSignature(std::shared_ptr<DeclarationNode> decl,
-                                       std::vector<ASTNode> &frameworkScope,
-                                       StrideCompiler &state);
+  static void
+  generatePlatformFunctionSignature(std::shared_ptr<DeclarationNode> decl,
+                                    std::vector<ASTNode> &frameworkScope,
+                                    StrideCompiler &state);
 
 private:
   static GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream,
@@ -74,5 +77,6 @@ private:
   static DefaultVariant getDefaultValue(std::shared_ptr<DeclarationNode> decl,
                                         StrideCompiler &state);
 };
+} // namespace strd
 
 #endif // STRIDEGENERATOR_HPP

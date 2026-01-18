@@ -13,6 +13,7 @@ class Value;
 
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 
+namespace strd {
 struct StrideExternalVariable {
   std::string name;
   llvm::Type *type;
@@ -23,7 +24,7 @@ public:
   StrideEnvironment(std::string strideroot = std::string());
 
   bool generateIr(std::string path);
-  bool generateIr(ASTNode root);
+  bool generateIr(strd::ASTNode root);
 
   bool compileInMemory();
   bool compileObjectToDisk(std::string path);
@@ -41,5 +42,6 @@ private:
   bool m_optimizeCode{true};
   bool generateCompiledObject(std::string path, std::string TargetTriple);
 };
+} // namespace strd
 
 #endif // STRIDEENVIRONMENT_HPP

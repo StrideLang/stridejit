@@ -21,6 +21,8 @@ EXPORT double __stride_Greater_d_dd(double a, double b) {
 }
 }
 
+using namespace strd;
+
 StrideCompiler::StrideCompiler() {
   TheContext = std::make_unique<llvm::LLVMContext>();
   TheModule = std::make_unique<llvm::Module>("StrideJit", *this->TheContext);
@@ -113,7 +115,8 @@ bool StrideCompiler::hasConfiguration(StrideConfig option) {
   return (m_configuration & option) == option;
 }
 
-llvm::Type *StrideCompiler::getLLVMType(std::shared_ptr<DeclarationNode> decl) {
+llvm::Type *
+StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl) {
   if (!decl) {
     return typesMap[""];
   }
@@ -123,8 +126,8 @@ llvm::Type *StrideCompiler::getLLVMType(std::shared_ptr<DeclarationNode> decl) {
   auto typePropNode = decl->getPropertyValue("type");
   std::string type = "_RealType";
   if (typePropNode) {
-    if (typePropNode->getNodeType() == AST::Block) {
-      type = std::static_pointer_cast<BlockNode>(typePropNode)->getName();
+    if (typePropNode->getNodeType() == strd::AST::Block) {
+      type = std::static_pointer_cast<strd::BlockNode>(typePropNode)->getName();
     } else {
       std::cout << __FILE__ << ":" << __LINE__ << "unsupported type"
                 << std::endl;

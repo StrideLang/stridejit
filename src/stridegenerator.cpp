@@ -13,6 +13,8 @@
 // llvm
 //#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 
+using namespace strd;
+
 StrideGenerator::GeneratedIRCode
 StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack *scope,
                                      StrideCompiler &state) {

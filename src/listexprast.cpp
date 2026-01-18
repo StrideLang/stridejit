@@ -28,21 +28,24 @@
 //#include "stride/parser/declarationnode.h"
 #include <stride/codegen/astfunctions.hpp>
 
-ListExprAST::ListExprAST(std::vector<ASTNode> elements)
+using namespace strd;
+
+ListExprAST::ListExprAST(std::vector<strd::ASTNode> elements)
     : elementNodes(elements) {
   bool consistent = true;
   bool isMutable = false;
   std::string previousType = "";
-  for (const auto &e : elementNodes) {
+  for (auto &e : elementNodes) {
     members.push_back(StrideGenerator::createExpr(e));
 
-    if (e->getNodeType() != AST::Int && e->getNodeType() != AST::Real &&
-        e->getNodeType() != AST::PortProperty) {
+    if (e->getNodeType() != strd::AST::Int &&
+        e->getNodeType() != strd::AST::Real &&
+        e->getNodeType() != strd::AST::PortProperty) {
       isMutable = true;
     }
     // TODO use type cast metadata to determine consistency
     // Currently reporting inconsistent even if type cast has made consistent
-    auto thisType = CodeQuery::resolveNodeOutDataType(e, {}, nullptr);
+    auto thisType = strd::CodeQuery::resolveNodeOutDataType(e, {}, nullptr);
     if ((previousType != "") && previousType != previousType) {
       consistent = false;
     }
@@ -60,9 +63,10 @@ llvm::Value *ListExprAST::codegen(StrideCompiler &state) {
   std::vector<double> values;
 
   for (const auto &elem : elementNodes) {
-    if (elem->getNodeType() == AST::Int || elem->getNodeType() == AST::Real) {
+    if (elem->getNodeType() == strd::AST::Int ||
+        elem->getNodeType() == strd::AST::Real) {
       // Literal number list.
-      double val = std::static_pointer_cast<ValueNode>(elem)->toReal();
+      double val = std::static_pointer_cast<strd::ValueNode>(elem)->toReal();
       values.push_back(val);
 
     } else {

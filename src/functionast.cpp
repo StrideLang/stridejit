@@ -31,6 +31,8 @@
 
 #include <iostream>
 
+using namespace strd;
+
 FunctionAST::FunctionAST(std::unique_ptr<PrototypeAST> Proto,
                          std::unique_ptr<ExprAST> Body_)
     : Proto(std::move(Proto)) {

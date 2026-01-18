@@ -2,6 +2,7 @@
 
 #include "stride/stridejit/stridecompiler.hpp"
 
+using namespace strd;
 // ----------------------
 
 llvm::Value *RealExprAST::codegen(StrideCompiler &state) {

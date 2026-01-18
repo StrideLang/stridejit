@@ -5,6 +5,7 @@
 // From stride parser
 #include "stride/parser/ast.h"
 
+namespace strd {
 class StrideCompiler;
 
 class ListExprAST : public ExprAST {
@@ -15,7 +16,7 @@ public:
     UNSUPPORTED
   };
 
-  ListExprAST(std::vector<ASTNode> elements);
+  ListExprAST(std::vector<strd::ASTNode> elements);
 
   llvm::Value *codegen(StrideCompiler &state) override;
   std::vector<std::unique_ptr<ExprAST>> &elements() { return members; }
@@ -23,7 +24,8 @@ public:
 
 private:
   std::vector<std::unique_ptr<ExprAST>> members;
-  std::vector<ASTNode> elementNodes;
+  std::vector<strd::ASTNode> elementNodes;
 
   Type mType{Type::UNSUPPORTED};
 };
+} // namespace strd

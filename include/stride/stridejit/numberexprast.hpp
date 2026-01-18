@@ -8,6 +8,7 @@
 #include <variant>
 #include <vector>
 
+namespace strd {
 class StrideCompiler;
 
 class RealExprAST : public ExprAST {
@@ -87,5 +88,6 @@ public:
 
   llvm::Value *codegen(StrideCompiler &state) override;
 };
+} // namespace strd
 
 #endif // NUMBEREXPRAST_HPP
