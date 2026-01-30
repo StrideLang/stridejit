@@ -7,7 +7,6 @@
 #include "stride/stridejit/stridegenerator.hpp"
 
 // stride
-#include "stride/codegen/astfunctions.hpp"
 #include "stride/codegen/astquery.hpp"
 
 // llvm
@@ -16,7 +15,7 @@
 
 // TEST(JIT, LoopIterator) {
 
-//  StrideEnvironment strenv;
+//  strd::StrideEnvironment strenv;
 
 //  auto ret =
 //      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "loop_iterator.stride");
@@ -58,7 +57,7 @@
 
 TEST(JIT, ReactionInModule) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret =
       strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "reaction_in_module.stride");
@@ -96,7 +95,7 @@ TEST(JIT, ReactionInModule) {
 
 TEST(JIT, Reset) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "reset.stride");
   EXPECT_TRUE(ret);
@@ -143,7 +142,7 @@ TEST(JIT, Reset) {
 
 TEST(JIT, DomainInit) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "domain_init.stride");
   EXPECT_TRUE(ret);
@@ -181,7 +180,7 @@ TEST(JIT, DomainInit) {
 
 TEST(JIT, Loop) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "loop.stride");
   EXPECT_TRUE(ret);
@@ -207,7 +206,7 @@ TEST(JIT, Loop) {
 
 TEST(JIT, PortPropertySize) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret =
       strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "port_property_size.stride");
@@ -234,7 +233,7 @@ TEST(JIT, PortPropertySize) {
 
 TEST(JIT, TypecastStream) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret =
       strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "typecast_stream.stride");
@@ -266,7 +265,7 @@ TEST(JIT, TypecastStream) {
 
 TEST(JIT, IntegerType) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret =
       strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "integer_type.stride");
@@ -297,7 +296,7 @@ TEST(JIT, IntegerType) {
 
 TEST(JIT, Bundles) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "bundles.stride");
   EXPECT_TRUE(ret);
@@ -328,7 +327,7 @@ TEST(JIT, Bundles) {
 
 TEST(JIT, CompileToDisk) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
   EXPECT_TRUE(ret);
@@ -338,8 +337,9 @@ TEST(JIT, CompileToDisk) {
 
 TEST(JIT, PackDomainExternalPointer) {
 
-  StrideEnvironment strenv;
-  strenv.state.setConfiguration(StrideConfig::PACK_DOMAIN_FUNCTION_EXTERNAL);
+  strd::StrideEnvironment strenv;
+  strenv.state.setConfiguration(
+      strd::StrideConfig::PACK_DOMAIN_FUNCTION_EXTERNAL);
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
   EXPECT_TRUE(ret);
   ret = strenv.compileInMemory();
@@ -377,8 +377,9 @@ TEST(JIT, PackDomainExternalPointer) {
 
 TEST(JIT, PackDomainExternal) {
 
-  StrideEnvironment strenv;
-  strenv.state.setConfiguration(StrideConfig::PACK_DOMAIN_FUNCTION_EXTERNAL);
+  strd::StrideEnvironment strenv;
+  strenv.state.setConfiguration(
+      strd::StrideConfig::PACK_DOMAIN_FUNCTION_EXTERNAL);
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
   EXPECT_TRUE(ret);
   ret = strenv.compileInMemory();
@@ -410,7 +411,7 @@ TEST(JIT, PackDomainExternal) {
 
 TEST(JIT, ReactionCondition) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret =
       strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "reactioncondition.stride");
@@ -448,7 +449,7 @@ TEST(JIT, ReactionCondition) {
 
 TEST(JIT, Reaction) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "reaction.stride");
   EXPECT_TRUE(ret);
@@ -481,7 +482,7 @@ TEST(JIT, Reaction) {
 
 TEST(JIT, PassThru) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
   EXPECT_TRUE(ret);
@@ -506,7 +507,7 @@ TEST(JIT, PassThru) {
 
 TEST(JIT, Stream) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "stream.stride");
   EXPECT_TRUE(ret);
@@ -524,7 +525,7 @@ TEST(JIT, Stream) {
 
 TEST(JIT, DomainFunctions) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
   EXPECT_TRUE(ret);
@@ -534,12 +535,13 @@ TEST(JIT, DomainFunctions) {
   EXPECT_EQ(strenv.state.domainArgs.size(), 1);
   EXPECT_EQ(strenv.state.domainArgs["TestDomain"].size(), 1);
   EXPECT_EQ(strenv.state.domainArgs["TestDomain"][0].name, "Out");
-  EXPECT_EQ(strenv.state.domainArgs["TestDomain"][0].type, DataType::DOUBLE);
+  EXPECT_EQ(strenv.state.domainArgs["TestDomain"][0].type,
+            strd::DataType::DOUBLE);
 }
 
 TEST(JIT, ModuleInternal) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
   auto ret =
       strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "module_internal.stride");
   EXPECT_TRUE(ret);
@@ -562,7 +564,7 @@ TEST(JIT, ModuleInternal) {
 
 TEST(JIT, CreateClass) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
   EXPECT_TRUE(ret);
@@ -585,7 +587,7 @@ TEST(JIT, CreateClass) {
 
 TEST(JIT, MathFunction) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "functions.stride");
   EXPECT_TRUE(ret);
@@ -608,7 +610,7 @@ TEST(JIT, MathFunction) {
 
 TEST(JIT, TwoStreams) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "twostreams.stride");
   EXPECT_TRUE(ret);
@@ -640,7 +642,7 @@ TEST(JIT, TwoStreams) {
 
 TEST(JIT, SwitchOut) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "switchout.stride");
   EXPECT_TRUE(ret);
   ret = strenv.compileInMemory();
@@ -671,7 +673,7 @@ TEST(JIT, SwitchOut) {
 
 TEST(JIT, List) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "listinput.stride");
   EXPECT_TRUE(ret);
   ret = strenv.compileInMemory();
@@ -698,7 +700,7 @@ TEST(JIT, List) {
 
 TEST(JIT, Domains) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "domains.stride");
   EXPECT_TRUE(ret);
@@ -722,7 +724,7 @@ TEST(JIT, Domains) {
 
 TEST(JIT, IO) {
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "io.stride");
   EXPECT_TRUE(ret);
@@ -754,30 +756,31 @@ TEST(JIT, IO) {
 
 TEST(Function, Simple) {
 
-  ASTNode tree;
-  tree = AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
   EXPECT_NE(tree, nullptr);
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto stream = tree->getChildren()[2];
 
-  auto addFunc = std::static_pointer_cast<FunctionNode>(
-      std::static_pointer_cast<StreamNode>(
-          std::static_pointer_cast<StreamNode>(stream)->getRight())
+  auto addFunc = std::static_pointer_cast<strd::FunctionNode>(
+      std::static_pointer_cast<strd::StreamNode>(
+          std::static_pointer_cast<strd::StreamNode>(stream)->getRight())
           ->getLeft());
-  auto prev = std::static_pointer_cast<StreamNode>(stream)->getLeft();
+  auto prev = std::static_pointer_cast<strd::StreamNode>(stream)->getLeft();
 
-  auto next = std::static_pointer_cast<StreamNode>(
-                  std::static_pointer_cast<StreamNode>(stream)->getRight())
-                  ->getRight();
+  auto next =
+      std::static_pointer_cast<strd::StreamNode>(
+          std::static_pointer_cast<strd::StreamNode>(stream)->getRight())
+          ->getRight();
 
-  ScopeStack scope;
+  strd::ScopeStack scope;
   auto funcDecl =
-      ASTQuery::findDeclarationByName(addFunc->getName(), scope, tree);
+      strd::ASTQuery::findDeclarationByName(addFunc->getName(), scope, tree);
   EXPECT_NE(funcDecl, nullptr);
-  auto func = StrideGenerator::createFunctionDeclaration(funcDecl, tree, &scope,
-                                                         strenv.state);
+  auto func = strd::StrideGenerator::createFunctionDeclaration(
+      funcDecl, tree, &scope, strenv.state);
   auto *v = func->codegen(strenv.state);
   EXPECT_NE(v, nullptr);
 
@@ -802,29 +805,29 @@ TEST(Function, Simple) {
 //    }
 
 TEST(Value, Assignment) {
-  auto decl = std::make_shared<DeclarationNode>("G", "signal", nullptr,
-                                                __FILE__, __LINE__);
-  auto value1 = std::make_shared<ValueNode>(3.3, __FILE__, __LINE__);
-  auto block = std::make_shared<BlockNode>("G", __FILE__, __LINE__);
+  auto decl = std::make_shared<strd::DeclarationNode>("G", "signal", nullptr,
+                                                      __FILE__, __LINE__);
+  auto value1 = std::make_shared<strd::ValueNode>(3.3, __FILE__, __LINE__);
+  auto block = std::make_shared<strd::BlockNode>("G", __FILE__, __LINE__);
 
-  auto str = std::make_shared<StreamNode>(value1, block, __FILE__, __LINE__);
+  auto str =
+      std::make_shared<strd::StreamNode>(value1, block, __FILE__, __LINE__);
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   strenv.state.NamedValues[decl->getName()] =
-      RealExprAST(0.0).codegen(strenv.state);
+      strd::RealExprAST(0.0).codegen(strenv.state);
 
   auto left = str->getLeft();
   auto right = str->getRight();
-  std::unique_ptr<ExprAST> n1, n2;
-  if (left->getNodeType() == AST::Real) {
-    n1 = std::make_unique<RealExprAST>(
-        std::static_pointer_cast<ValueNode>(left)->getRealValue());
+  std::unique_ptr<strd::ExprAST> n1, n2;
+  if (left->getNodeType() == strd::AST::Real) {
+    n1 = std::make_unique<strd::RealExprAST>(
+        std::static_pointer_cast<strd::ValueNode>(left)->getRealValue());
   }
-  if (right->getNodeType() == AST::Block) {
-    strenv.state
-        .NamedValues[std::static_pointer_cast<BlockNode>(right)->getName()] =
-        n1->codegen(strenv.state);
+  if (right->getNodeType() == strd::AST::Block) {
+    strenv.state.NamedValues[std::static_pointer_cast<strd::BlockNode>(right)
+                                 ->getName()] = n1->codegen(strenv.state);
   }
   EXPECT_TRUE(strenv.state.NamedValues["G"]->getType()->isDoubleTy());
   llvm::ConstantFP *CFP =
@@ -834,34 +837,34 @@ TEST(Value, Assignment) {
 }
 
 TEST(Expressions, FloatLiterals) {
-  auto value1 = std::make_shared<ValueNode>(3.0, __FILE__, __LINE__);
-  auto value2 = std::make_shared<ValueNode>(5.1, __FILE__, __LINE__);
+  auto value1 = std::make_shared<strd::ValueNode>(3.0, __FILE__, __LINE__);
+  auto value2 = std::make_shared<strd::ValueNode>(5.1, __FILE__, __LINE__);
 
-  auto expr = std::make_shared<ExpressionNode>(ExpressionNode::Add, value1,
-                                               value2, __FILE__, __LINE__);
+  auto expr = std::make_shared<strd::ExpressionNode>(
+      strd::ExpressionNode::Add, value1, value2, __FILE__, __LINE__);
 
-  StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
   auto left = expr->getLeft();
   auto right = expr->getRight();
-  std::unique_ptr<ExprAST> n1, n2;
+  std::unique_ptr<strd::ExprAST> n1, n2;
 
-  if (left->getNodeType() == AST::Real) {
-    n1 = std::make_unique<RealExprAST>(
-        std::static_pointer_cast<ValueNode>(left)->getRealValue());
-  } else if (left->getNodeType() == AST::Block) {
-    n1 = std::make_unique<VariableExprAST>(
-        std::static_pointer_cast<BlockNode>(left)->getName());
+  if (left->getNodeType() == strd::AST::Real) {
+    n1 = std::make_unique<strd::RealExprAST>(
+        std::static_pointer_cast<strd::ValueNode>(left)->getRealValue());
+  } else if (left->getNodeType() == strd::AST::Block) {
+    n1 = std::make_unique<strd::VariableExprAST>(
+        std::static_pointer_cast<strd::BlockNode>(left)->getName());
   }
 
-  if (right->getNodeType() == AST::Real) {
-    n2 = std::make_unique<RealExprAST>(
-        std::static_pointer_cast<ValueNode>(right)->getRealValue());
-  } else if (right->getNodeType() == AST::Block) {
-    n2 = std::make_unique<VariableExprAST>(
-        std::static_pointer_cast<BlockNode>(right)->getName());
+  if (right->getNodeType() == strd::AST::Real) {
+    n2 = std::make_unique<strd::RealExprAST>(
+        std::static_pointer_cast<strd::ValueNode>(right)->getRealValue());
+  } else if (right->getNodeType() == strd::AST::Block) {
+    n2 = std::make_unique<strd::VariableExprAST>(
+        std::static_pointer_cast<strd::BlockNode>(right)->getName());
   }
-  auto binExpr = BinaryExprAST('+', std::move(n1), std::move(n2));
+  auto binExpr = strd::BinaryExprAST('+', std::move(n1), std::move(n2));
   auto *v = binExpr.codegen(strenv.state);
   EXPECT_TRUE(v->getType()->isDoubleTy());
   llvm::ConstantFP *CFP = llvm::dyn_cast<llvm::ConstantFP>(v);
