@@ -57,7 +57,7 @@ add_library(StrideJit
 )
 
 target_compile_options(StrideJit PRIVATE -fPIC)
-target_link_libraries(StrideJit PUBLIC StrideParser StrideCodegen)
+target_link_libraries(StrideJit PUBLIC StrideParser StrideUtils StrideCodegen)
 target_include_directories(StrideJit PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 #add_dependencies(StrideJit llvm)
 

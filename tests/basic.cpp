@@ -7,7 +7,7 @@
 #include "stride/stridejit/stridegenerator.hpp"
 
 // stride
-#include "stride/codegen/astquery.hpp"
+#include "stride/utils/astquery.h"
 
 // llvm
 #include "llvm/ExecutionEngine/JITSymbol.h"

@@ -3,9 +3,10 @@
 #include <iostream>
 
 // stride
-#include "stride/codegen/astfunctions.hpp"
-#include "stride/codegen/astquery.hpp"
 #include "stride/codegen/coderesolver.hpp"
+#include "stride/utils/astfunctions.h"
+#include "stride/utils/astquery.h"
+
 
 // stridejit
 #include "stride/stridejit/strideenvironment.hpp"

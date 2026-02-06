@@ -7,8 +7,9 @@
 #include "stride/stridejit/stridegenerator.hpp"
 
 // stride
-#include "stride/codegen/astquery.hpp"
 #include "stride/codegen/codeanalysis.hpp"
+#include "stride/utils/astquery.h"
+
 
 // llvm
 //#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
@@ -439,7 +440,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                     argTypes.push_back(state.getLLVMType(argDecl));
                   } else {
                     std::cerr << "ERROR falling back on double type. Arg type "
-                                 "nto found"
+                                 "not found for funcDecl"
                               << std::endl;
                     argTypes.push_back(
                         llvm::Type::getDoubleTy(*state.TheContext));
@@ -463,9 +464,9 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                 if (!funcDecl->getPropertyValue("blocks")) {
                   // FIXME this will happen for platform functions where the
                   // inputs and output types are not in the blocks port.
-                  std::cerr
-                      << "ERROR falling back on double type. Arg type not found"
-                      << std::endl;
+                  std::cerr << "ERROR falling back on double type. Arg type "
+                               "not found for block"
+                            << std::endl;
                   argTypes.push_back(
                       llvm::Type::getDoubleTy(*state.TheContext));
                 } else {
@@ -477,8 +478,8 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                   if (argDecl) {
                     argTypes.push_back(state.getLLVMType(argDecl));
                   } else {
-                    std::cerr << "ERROR falling back on double type. Arg type "
-                                 "not found"
+                    std::cerr << "ERROR falling back on double type. block "
+                                 "declaration not found"
                               << std::endl;
                     argTypes.push_back(
                         llvm::Type::getDoubleTy(*state.TheContext));
@@ -1062,7 +1063,7 @@ void StrideGenerator::generatePlatformFunctionSignature(
         if (state.typesMap.find(inputType) != state.typesMap.end()) {
           parameters.push_back(state.typesMap[inputType]);
         } else {
-          std::cerr << "Type not mapped: " << inputType << std::endl;
+          std::cerr << "Input Type not mapped: " << inputType << std::endl;
         }
       }
     }

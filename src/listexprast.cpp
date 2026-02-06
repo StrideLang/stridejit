@@ -26,7 +26,7 @@
 
 #include "stride/codegen/codequery.hpp"
 //#include "stride/parser/declarationnode.h"
-#include <stride/codegen/astfunctions.hpp>
+#include "stride/utils/astfunctions.h"
 
 using namespace strd;
 
