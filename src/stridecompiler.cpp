@@ -39,6 +39,7 @@ StrideCompiler::StrideCompiler() {
   // Initialize types map
   typesMap["_RealType"] = llvm::Type::getDoubleTy(*TheContext);
   typesMap["_DoubleType"] = llvm::Type::getDoubleTy(*TheContext);
+  typesMap["_FloatType"] = llvm::Type::getFloatTy(*TheContext);
   typesMap["_IntType"] = llvm::Type::getInt32Ty(*TheContext);
   typesMap["_SwitchType"] = llvm::Type::getInt1Ty(*TheContext);
 
@@ -64,6 +65,8 @@ std::optional<ExternalFunction> StrideCompiler::getExternalFunction(
               }
             }
             if (allTypesMatch) {
+              std::cout << "Found external candidate for " << strideName
+                        << std::endl;
               return candidate;
             }
             if (!out) {
@@ -100,7 +103,38 @@ StrideCompiler::CreateEntryBlockAlloca(llvm::Function *TheFunction,
                                        llvm::Type *dataType) {
   llvm::IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
                          TheFunction->getEntryBlock().begin());
-  return TmpB.CreateAlloca(dataType, nullptr, VarName);
+  auto *Alloca = TmpB.CreateAlloca(dataType, nullptr, VarName);
+  pointerElementTypes[Alloca] = dataType;
+  return Alloca;
+}
+
+llvm::Type *StrideCompiler::getElementType(llvm::Value *V) {
+  if (!V)
+    return nullptr;
+  if (auto *alloca = llvm::dyn_cast<llvm::AllocaInst>(V)) {
+    return alloca->getAllocatedType();
+  }
+  if (auto *global = llvm::dyn_cast<llvm::GlobalVariable>(V)) {
+    return global->getValueType();
+  }
+  if (auto *arg = llvm::dyn_cast<llvm::Argument>(V)) {
+    if (auto *PF = arg->getParent()) {
+      return PF->getFunctionType()->getParamType(arg->getArgNo());
+      // Wait, for pointers, we might need the pointee type.
+      // But arguments are often pointers to types.
+    }
+  }
+  auto it = pointerElementTypes.find(V);
+  if (it != pointerElementTypes.end()) {
+    return it->second;
+  }
+#if LLVM_VERSION_MAJOR < 17
+  if (V->getType()->isPointerTy()) {
+    // This will emit a warning but work in older LLVMs
+    return V->getType()->getPointerElementType();
+  }
+#endif
+  return nullptr;
 }
 
 void StrideCompiler::setConfiguration(StrideConfig option, bool enable) {

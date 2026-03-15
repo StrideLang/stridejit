@@ -10,7 +10,6 @@
 #include "stride/codegen/codeanalysis.hpp"
 #include "stride/utils/astquery.h"
 
-
 // llvm
 //#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 
@@ -557,13 +556,12 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                         double defaultValue =
                             std::static_pointer_cast<ValueNode>(defaultNode)
                                 ->getRealValue();
-                        auto varInit = std::make_unique<BinaryExprAST>(
+                        auto varReal = std::make_unique<BinaryExprAST>(
                             '=',
-                            std::move(std::make_unique<VariableExprAST>(
-                                resetNodeDecl->getName())),
-                            std::move(
-                                std::make_unique<RealExprAST>(defaultValue)));
-                        Expressions.push_back(std::move(varInit));
+                            std::make_unique<VariableExprAST>(
+                                resetNodeDecl->getName()),
+                            std::make_unique<RealExprAST>(defaultValue));
+                        Expressions.push_back(std::move(varReal));
                       } else if (typeName == "_IntType" &&
                                  defaultNode->getNodeType() == AST::Int) {
                         int32_t defaultValue =
@@ -571,10 +569,9 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                                 ->getIntValue();
                         auto varInit = std::make_unique<BinaryExprAST>(
                             '=',
-                            std::move(std::make_unique<VariableExprAST>(
-                                resetNodeDecl->getName())),
-                            std::move(
-                                std::make_unique<IntExprAST>(defaultValue)));
+                            std::make_unique<VariableExprAST>(
+                                resetNodeDecl->getName()),
+                            std::make_unique<IntExprAST>(defaultValue));
                         Expressions.push_back(std::move(varInit));
                       } else {
                         assert(0 == 1);
@@ -1080,7 +1077,7 @@ void StrideGenerator::generatePlatformFunctionSignature(
         }
       }
     }
-    { // For report
+    {
       auto name = std::static_pointer_cast<ValueNode>(functionNameNode)
                       ->getStringValue();
       llvm::FunctionType *FT =

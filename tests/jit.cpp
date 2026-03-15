@@ -1,11 +1,11 @@
 #include "gtest/gtest.h"
 
 // stridejit
-#include "strideenvironment.hpp"
-#include "stridegenerator.hpp"
+#include "stride/stridejit/strideenvironment.hpp"
+#include "stride/stridejit/stridegenerator.hpp"
 
 // stride
-#include "astfunctions.h"
+#include "stride/utils/astfunctions.h"
 
 // llvm
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
@@ -15,13 +15,13 @@ using namespace llvm;
 
 TEST(JIT, Create) {
 
-  ASTNode tree;
-  tree = ASTFunctions::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
   EXPECT_NE(tree, nullptr);
 
-  StrideEnvironment strenv;
-  ScopeStack scope;
-  StrideGenerator::generateCode(tree, &scope, strenv.state);
+  strd::StrideEnvironment strenv;
+  strd::ScopeStack scope;
+  strd::StrideGenerator::generateCode(tree, &scope, strenv.state);
   strenv.state.TheModule->dump();
 
   InitializeNativeTarget();

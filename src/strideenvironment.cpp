@@ -7,7 +7,6 @@
 #include "stride/utils/astfunctions.h"
 #include "stride/utils/astquery.h"
 
-
 // stridejit
 #include "stride/stridejit/strideenvironment.hpp"
 #include "stride/stridejit/stridegenerator.hpp"
@@ -26,13 +25,23 @@
 #include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
 //#include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
 //#include "llvm/ExecutionEngine/SectionMemoryManager.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/LLVMContext.h"
+
+#if LLVM_VERSION_MAJOR >= 17
+#include "llvm/Analysis/CGSCCAnalysisManager.h"
+#include "llvm/Analysis/LoopAnalysisManager.h"
+#include "llvm/Passes/OptimizationLevel.h"
+#include "llvm/Passes/PassBuilder.h"
+
+#else
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
+#endif
 
 // JIT
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
@@ -57,6 +66,9 @@ bool StrideEnvironment::generateIr(std::string path) {
   llvm::InitializeNativeTargetAsmPrinter();
   ASTNode tree;
   tree = AST::parseFile(path.c_str());
+  if (!tree) {
+    return false;
+  }
   auto systemNodes = ASTQuery::getSystemNodes(tree);
   if (systemNodes.size() == 0) {
     auto systemNode =
@@ -143,9 +155,49 @@ bool StrideEnvironment::generateIr(ASTNode root) {
   //  }
 
   if (m_optimizeCode) {
+#if LLVM_VERSION_MAJOR >= 17
+    // New Pass Manager
+    llvm::LoopAnalysisManager LAM;
+    llvm::FunctionAnalysisManager FAM;
+    llvm::CGSCCAnalysisManager CGAM;
+    llvm::ModuleAnalysisManager MAM;
+
+    llvm::PassBuilder PB;
+
+    PB.registerModuleAnalyses(MAM);
+    PB.registerCGSCCAnalyses(CGAM);
+    PB.registerFunctionAnalyses(FAM);
+    PB.registerLoopAnalyses(LAM);
+    PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+
+    llvm::ModulePassManager MPM =
+        PB.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
+
+    MPM.run(*state.TheModule, MAM);
+#else
+    // Legacy Pass Manager
     std::unique_ptr<llvm::legacy::FunctionPassManager> TheFPM;
     TheFPM = std::make_unique<llvm::legacy::FunctionPassManager>(
         state.TheModule.get());
+
+    { // Potential for loop vectorization?
+      // From:
+      // https://discourse.llvm.org/t/how-to-generate-ir-so-that-the-loop-vectorizer-can-vectorize-it/69096
+      //      llvm::LoopAnalysisManager     lam;
+      //      llvm::FunctionAnalysisManager fam;
+      //      llvm::CGSCCAnalysisManager    cgam;
+      //      llvm::ModuleAnalysisManager   mam;
+      //      llvm::PassBuilder pb;
+      //      pb.registerModuleAnalyses(mam);
+      //      pb.registerCGSCCAnalyses(cgam);
+      //      pb.registerFunctionAnalyses(fam);
+      //      pb.registerLoopAnalyses(lam);
+      //      pb.crossRegisterProxies(lam, fam, cgam, mam);
+      //      llvm::ModulePassManager mpm =
+      //      pb.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
+      //      mpm.addPass(llvm::createModuleToFunctionPassAdaptor(llvm::LoopVectorizePass()));
+      //      mpm.run(*data->module, mam);
+    }
 
     // Do simple "peephole" optimizations and bit-twiddling optzns.
     TheFPM->add(llvm::createInstructionCombiningPass());
@@ -156,35 +208,12 @@ bool StrideEnvironment::generateIr(ASTNode root) {
     // Simplify the control flow graph (deleting unreachable blocks, etc).
     TheFPM->add(llvm::createCFGSimplificationPass());
 
-    { // Potential for loop vectorization?
-      // From:
-      // https://discourse.llvm.org/t/how-to-generate-ir-so-that-the-loop-vectorizer-can-vectorize-it/69096
-      //      llvm::LoopAnalysisManager     lam;
-      //      llvm::FunctionAnalysisManager fam;
-      //      llvm::CGSCCAnalysisManager    cgam;
-      //      llvm::ModuleAnalysisManager   mam;
-
-      //      llvm::PassBuilder pb;
-
-      //      pb.registerModuleAnalyses(mam);
-      //      pb.registerCGSCCAnalyses(cgam);
-      //      pb.registerFunctionAnalyses(fam);
-      //      pb.registerLoopAnalyses(lam);
-      //      pb.crossRegisterProxies(lam, fam, cgam, mam);
-
-      //      llvm::ModulePassManager mpm =
-      //      pb.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
-
-      //      mpm.addPass(llvm::createModuleToFunctionPassAdaptor(llvm::LoopVectorizePass()));
-
-      //      mpm.run(*data->module, mam);
-    }
-
     TheFPM->doInitialization();
 
     for (auto &F : *state.TheModule) {
       TheFPM->run(F);
     }
+#endif
   }
   if (mVerbose) {
     state.TheModule->dump();

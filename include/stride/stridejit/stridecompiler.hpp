@@ -2,12 +2,17 @@
 #define STRIDECOMPILER_HPP
 
 #include <map>
+#include <memory>
 #include <optional>
+#include <string>
+#include <unordered_map>
 #include <variant>
+#include <vector>
 
 #include "stride/parser/declarationnode.h"
 #include "stride/stridejit/functionast.hpp"
 
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/IRBuilder.h"
 
 // forward declarations for llvm
@@ -71,6 +76,8 @@ public:
                                            llvm::StringRef VarName,
                                            llvm::Type *dataType);
 
+  llvm::Type *getElementType(llvm::Value *V);
+
   std::unique_ptr<ExprAST> LogError(const char *Str) {
     fprintf(stderr, "Error: %s\n", Str);
     return nullptr;
@@ -96,6 +103,9 @@ public:
   std::unordered_map<std::string, llvm::Type *> typesMap;
 
   std::unordered_map<std::string, std::vector<DomainArg>> domainArgs;
+
+  // Track pointer element types for opaque pointers (LLVM >= 17)
+  std::map<llvm::Value *, llvm::Type *> pointerElementTypes;
 
 private:
   uint64_t m_configuration{NO_OPTIONS};
