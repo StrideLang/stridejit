@@ -1,5 +1,5 @@
 
-_domainDefinition TestDomain {
+_domainDefinition RootDomain {
 	framework: _JitFramework
 	# requiresResources: [_RootContext]
 	# providesResources: [_DomainFunction]
@@ -7,10 +7,10 @@ _domainDefinition TestDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal In[16] { domain: TestDomain }
+        signal In[16] { domain: RootDomain }
     ]
     outputs: [
-        signal Out[2] { domain: TestDomain }
+        signal Out[2] { domain: RootDomain }
     ]
 	domainFunctionCode: ''
 }
@@ -36,7 +36,7 @@ module PortProperty {
 
 signal InternalList[4] {
     default: [1,2,3,4]
-    domain: TestDomain
+    domain: RootDomain
 }
 
 In >> PortProperty() >> Out[0];

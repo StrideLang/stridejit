@@ -48,10 +48,10 @@ public:
 
   using GeneratedCode = std::map<std::string, DomainCode>;
 
-  static void generateCode(ASTNode tree, ScopeStack *scope,
+  static void generateCode(ASTNode tree, ScopeStack &scope,
                            StrideCompiler &state);
 
-  static GeneratedIRCode generateCodeForTree(ASTNode tree, ScopeStack *scope,
+  static GeneratedIRCode generateCodeForTree(ASTNode tree, ScopeStack &scope,
                                              StrideCompiler &state);
 
   static std::unique_ptr<ExprAST> createExpr(ASTNode node);
@@ -68,7 +68,7 @@ public:
 
 private:
   static GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream,
-                                        ASTNode tree, ScopeStack *scope,
+                                        ASTNode tree, ScopeStack &scope,
                                         StrideCompiler &state);
 
   static void setTypeCastMetadata(ASTNode node, ExprAST *V);

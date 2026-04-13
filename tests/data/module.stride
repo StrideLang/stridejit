@@ -1,4 +1,5 @@
-_domainDefinition TestDomain {
+# No system, so we need to call it RootDomain
+_domainDefinition RootDomain {
 	framework: _JitFramework
 	# requiresResources: [_RootContext]
 	# providesResources: [_DomainFunction]
@@ -8,23 +9,27 @@ _domainDefinition TestDomain {
     inputs: [
     ]
     outputs: [
-        signal Out { domain: TestDomain }
+        signal Out { domain: RootDomain type: _RealType}
     ]
 	domainFunctionCode: ''
 }
 
+alias PlatformDomain {
+    block: RootDomain
+}
+
 module AddTwo {
     ports: [
-        mainInputPort {
+        mainInputPort InputPort {
             block: Input
         }
-        mainOutputPort {
+        mainOutputPort OutputPort {
             block: Output
         }
     ]
     blocks: [
-        signal Input {}
-        signal Output {}
+        signal Input {domain: OutputPort.domain type:OutputPort.type}
+        signal Output {domain: OutputPort.domain type:OutputPort.type}
     ]
     streams: [
         Input + 2.0 >> Output;

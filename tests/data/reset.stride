@@ -1,5 +1,5 @@
 
-_domainDefinition TestDomain {
+_domainDefinition RootDomain {
 	framework: _JitFramework
 	# requiresResources: [_RootContext]
 	# providesResources: [_DomainFunction]
@@ -7,15 +7,15 @@ _domainDefinition TestDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal In {default: 3.0 reset: Reset domain: TestDomain}
+        signal In {default: 3.0 type: _RealType reset: Reset domain: RootDomain}
     ]
     outputs: [
-        signal Count {default: 0 type: _IntType reset: Reset domain: TestDomain}
+        signal Count {default: 0 type: _IntType reset: Reset domain: RootDomain}
     ]
 	domainFunctionCode: ''
 }
 
-trigger Reset {default: off  domain: TestDomain}
+trigger Reset {default: off  domain: RootDomain}
 
 [Count, 5] >> Equal() >> Reset;
 In + 2 >> In;

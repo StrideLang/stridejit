@@ -1,5 +1,5 @@
 
-_domainDefinition TestDomain {
+_domainDefinition RootDomain {
 	framework: _JitFramework
 	# requiresResources: [_RootContext]
 	# providesResources: [_DomainFunction]
@@ -7,10 +7,10 @@ _domainDefinition TestDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal In { domain: TestDomain }
+        signal In { domain: RootDomain }
     ]
     outputs: [
-        switch Out { domain: TestDomain }
+        switch Out { domain: RootDomain }
     ]
 	domainFunctionCode: ''
 }

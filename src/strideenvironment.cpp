@@ -75,47 +75,6 @@ bool StrideEnvironment::generateIr(std::string path) {
         std::make_shared<SystemNode>("JIT", 1, 0, __FILE__, __LINE__);
     tree->addChild(systemNode);
   }
-  // Add domain external signals to root scope
-  // The must be added before code resolver so they are available.
-  for (const auto &node : tree->getChildren()) {
-    if (node->getNodeType() == AST::Declaration) {
-      auto decl = std::static_pointer_cast<DeclarationNode>(node);
-      if (decl->getObjectType() == "_domainDefinition") {
-        auto inputsNode = decl->getPropertyValue("inputs");
-        for (const auto &inputNode : inputsNode->getChildren()) {
-          if (inputNode->getNodeType() == AST::Declaration ||
-              inputNode->getNodeType() == AST::BundleDeclaration) {
-            auto inputDecl =
-                std::static_pointer_cast<DeclarationNode>(inputNode);
-            if (inputDecl->getObjectType() == "signal" ||
-                inputDecl->getObjectType() == "switch") {
-              tree->addChild(inputNode);
-            } else {
-              std::cerr << "ERROR unexptected declaration for domain input "
-                           "declaration:"
-                        << AST::toText(inputNode) << std::endl;
-            }
-          }
-        }
-        auto outputsNode = decl->getPropertyValue("outputs");
-        for (const auto &outputNode : outputsNode->getChildren()) {
-          if (outputNode->getNodeType() == AST::Declaration ||
-              outputNode->getNodeType() == AST::BundleDeclaration) {
-            auto inputDecl =
-                std::static_pointer_cast<DeclarationNode>(outputNode);
-            if (inputDecl->getObjectType() == "signal" ||
-                inputDecl->getObjectType() == "switch") {
-              tree->addChild(outputNode);
-            } else {
-              std::cerr << "ERROR unexptected declaration for domain output "
-                           "declaration:"
-                        << AST::toText(outputNode) << std::endl;
-            }
-          }
-        }
-      }
-    }
-  }
 
   CodeResolver resolver(tree, ASTFunctions::getDefaultStrideRoot());
   resolver.process();
@@ -149,7 +108,7 @@ bool StrideEnvironment::generateIr(ASTNode root) {
   if (!ASTFunctions::preprocess(root, &globalScope)) {
     return false;
   }
-  StrideGenerator::generateCode(root, &globalScope, state);
+  StrideGenerator::generateCode(root, globalScope, state);
   //  if (mVerbose) {
   //    state.TheModule->dump();
   //  }

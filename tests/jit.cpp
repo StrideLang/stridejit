@@ -1,10 +1,12 @@
 #include "gtest/gtest.h"
 
 // stridejit
+#include "stride/codegen/coderesolver.hpp"
 #include "stride/stridejit/strideenvironment.hpp"
 #include "stride/stridejit/stridegenerator.hpp"
 
 // stride
+#include "stride/codegen/codeanalysis.hpp"
 #include "stride/utils/astfunctions.h"
 
 // llvm
@@ -21,7 +23,11 @@ TEST(JIT, Create) {
 
   strd::StrideEnvironment strenv;
   strd::ScopeStack scope;
-  strd::StrideGenerator::generateCode(tree, &scope, strenv.state);
+
+  strd::CodeResolver resolver{tree, ""};
+  resolver.process();
+
+  strd::StrideGenerator::generateCode(tree, scope, strenv.state);
   strenv.state.TheModule->dump();
 
   InitializeNativeTarget();
@@ -55,7 +61,7 @@ TEST(JIT, Create) {
           llvm::orc::ThreadSafeModule(std::move(strenv.state.TheModule),
                                       std::move(strenv.state.TheContext)))) {
   }
-  auto EntrySym = (*JIT)->lookup("TestDomain_process");
+  auto EntrySym = (*JIT)->lookup("RootDomain_process");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
   }
