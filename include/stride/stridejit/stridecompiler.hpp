@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "stride/parser/declarationnode.h"
+#include "stride/parser/functionnode.h"
 #include "stride/stridejit/functionast.hpp"
 
 #include "llvm/Config/llvm-config.h"
@@ -69,6 +70,10 @@ public:
                       bool allowConversion = false);
 
   llvm::Type *getLLVMType(std::shared_ptr<strd::DeclarationNode> decl);
+  llvm::Type *
+  getLLVMTypeForCodegenBlock(std::shared_ptr<strd::DeclarationNode> decl,
+                             std::shared_ptr<DeclarationNode> funcDecl,
+                             std::shared_ptr<FunctionNode> functionInstance);
 
   llvm::Function *getFunctionInModule(std::string Name);
 

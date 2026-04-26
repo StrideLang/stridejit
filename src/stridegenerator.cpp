@@ -479,8 +479,8 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                     argTypes.push_back(state.getLLVMType(argDecl));
                   } else {
                     std::cerr << "ERROR falling back on double type. block "
-                                 "declaration not found"
-                              << std::endl;
+                                 "declaration not found for "
+                              << ve->getName() << std::endl;
                     argTypes.push_back(
                         llvm::Type::getDoubleTy(*state.TheContext));
                   }
@@ -609,8 +609,68 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       }
     } else if (current->getNodeType() == AST::Function) {
       auto func = std::static_pointer_cast<FunctionNode>(current);
-      auto funcDecl =
-          ASTQuery::findDeclarationByName(func->getName(), scope, tree);
+      std::shared_ptr<DeclarationNode> funcDecl;
+
+      auto decls = ASTQuery::findAllDeclarations(func->getName(), scope, tree);
+      for (const auto &decl : decls) {
+        // TODO move this function to codegen
+        if (decl->getObjectType() == "platformModule") {
+          auto inputs = decl->getPropertyValue("inputs");
+          auto outputs = decl->getPropertyValue("outputs");
+          bool matches = true;
+          if (inputs) {
+            auto streamInput = func->getCompilerProperty("mainInput");
+            if (!streamInput) {
+              matches = false;
+              std::cerr << "ERROR Expected input for " << func->getName()
+                        << " in " << stream->toText() << std::endl;
+            }
+            if (inputs->getNodeType() == AST::List &&
+                streamInput->getNodeType() == AST::List) {
+              auto inputNodes = inputs->getChildren();
+              auto streamInputNodes = streamInput->getChildren();
+              auto types = CodeAnalysis::getInputDataTypes(func, scope, tree);
+              // if (inputNodes.size() == streamInputNodes.size()) {
+              //   for (int i = 0; i < inputNodes.size(); i++) {
+              //     if (inputNodes[i]->getNodeType() == AST::String &&
+              //         streamInputNodes[i]->getNodeType() == AST::String) {
+              //       if (std::static_pointer_cast<ValueNode>(inputNodes[i])
+              //               ->getStringValue() ==
+              //           std::static_pointer_cast<ValueNode>(streamInputNodes[i])
+              //               ->getStringValue()) {
+              //       }
+              //     }
+              //   }
+              // if (type->getNodeType() == AST::Block) {
+              // }
+              // } else {
+              //   matches = false;
+              //   std::cerr << "ERROR Input list size mismatch " <<
+              //   func->getName()
+              //             << " in " << stream->toText() << std::endl;
+              // }
+            } else {
+              matches = false;
+              std::cerr << "ERROR Expected lists for inputs for "
+                        << func->getName() << std::endl;
+            }
+          }
+          if (outputs) {
+          }
+          // if (matches) {
+          funcDecl = decl;
+          // }
+        } else {
+          // TODO valide I/O type for regular modules.
+          funcDecl = decl;
+          break;
+        }
+      }
+      if (!funcDecl) {
+        std::cerr << "ERROR can't find/match declaration for "
+                  << func->getName() << std::endl;
+        continue;
+      }
 
       std::vector<std::unique_ptr<ExprAST>> mainInArgs;
       std::vector<llvm::Type *> mainInArgTypes;
@@ -635,12 +695,15 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               mainInArgs.emplace_back(std::move(*elem));
               auto elemDecl = ASTQuery::findDeclarationByName(
                   ASTQuery::getNodeName(*nodeIt), scope, tree);
+              // auto dataType =
+              //     CodeAnalysis::getOutputDataTypes(*nodeIt, scope, tree);
+
               if (elemDecl) {
-                mainInArgTypes.push_back(state.getLLVMType(elemDecl));
+                mainInArgTypes.push_back(
+                    state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
               } else if ((*nodeIt)->getNodeType() == AST::Int) {
                 mainInArgTypes.push_back(
                     llvm::Type::getInt32Ty(*state.TheContext));
-
               } else if ((*nodeIt)->getNodeType() == AST::Real) {
                 mainInArgTypes.push_back(
                     llvm::Type::getDoubleTy(*state.TheContext));
@@ -667,6 +730,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
           } else if (v->getType() == ListExprAST::Type::IMMUTABLE_CONSISTENT) {
             mainInArgs.emplace_back(
                 std::move(generated[domainName].expr.back()));
+            // FIXME set correct type
             mainInArgTypes.push_back(llvm::PointerType::get(
                 llvm::Type::getDoubleTy(*state.TheContext), 0));
           } else {
@@ -679,9 +743,18 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
             mainInArgs.emplace_back(
                 std::move(generated[domainName].expr.back()));
             generated[domainName].expr.pop_back();
-            // FIXME set correct type
-            mainInArgTypes.push_back(
-                llvm::Type::getDoubleTy(*state.TheContext));
+            auto prevTypes =
+                CodeAnalysis::getOutputDataTypes(prev, scope, tree);
+            for (const auto &prevType : prevTypes) {
+
+              auto typeName = ASTQuery::getNodeName(prevType);
+              if (state.typesMap.find(typeName) != state.typesMap.end()) {
+                mainInArgTypes.push_back(state.typesMap[typeName]);
+              } else {
+                std::cerr << "ERROR: Unsupported type: " << typeName
+                          << std::endl;
+              }
+            }
           } else {
             std::cerr << "ERROR: No code generated for domain: " << domainName
                       << std::endl;
@@ -739,7 +812,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         if (funcDecl) {
 
           std::unique_ptr<FunctionAST> newFuncDecl =
-              createFunctionDeclaration(funcDecl, tree, &scope, state);
+              createFunctionDeclaration(funcDecl, func, tree, &scope, state);
           std::vector<std::unique_ptr<ExprAST>> ExternalArgs;
           if (newFuncDecl) {
             for (const auto &arg : newFuncDecl->getProto().getExternalArgs()) {
@@ -829,7 +902,8 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
 }
 
 std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
-    std::shared_ptr<DeclarationNode> funcDecl, ASTNode tree, ScopeStack *scope,
+    std::shared_ptr<DeclarationNode> funcDecl,
+    std::shared_ptr<FunctionNode> funcInstance, ASTNode tree, ScopeStack *scope,
     StrideCompiler &state) {
   // FIXME validate declaration type. Only callable objects are accepted.
 
@@ -855,7 +929,11 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
         auto blockDecl =
             ASTQuery::findDeclarationByName(portBlockName, {}, tree);
         if (blockDecl) {
-          type = state.getLLVMType(blockDecl);
+          type = state.getLLVMTypeForCodegenBlock(blockDecl, funcDecl,
+                                                  funcInstance);
+        } else {
+          std::cerr << "Block declaration not found for: " << portBlockName
+                    << std::endl;
         }
         Args.push_back(
             PrototypeArg{portBlockName, llvm::PointerType::get(type, 0)});
@@ -869,7 +947,11 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
         auto blockDecl =
             ASTQuery::findDeclarationByName(portBlockName, {}, tree);
         if (blockDecl) {
-          type = state.getLLVMType(blockDecl);
+          type = state.getLLVMTypeForCodegenBlock(blockDecl, funcDecl,
+                                                  funcInstance);
+        } else {
+          std::cerr << "Block declaration not found for: " << portBlockName
+                    << std::endl;
         }
         OutArgs.push_back(
             PrototypeArg{portBlockName, llvm::PointerType::get(type, 0)});
@@ -883,7 +965,11 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
         auto blockDecl =
             ASTQuery::findDeclarationByName(portBlockName, {}, tree);
         if (blockDecl) {
-          type = state.getLLVMType(blockDecl);
+          type = state.getLLVMTypeForCodegenBlock(blockDecl, funcDecl,
+                                                  funcInstance);
+        } else {
+          std::cerr << "Block declaration not found for: " << portBlockName
+                    << std::endl;
         }
         Args.push_back(
             PrototypeArg{portBlockName, llvm::PointerType::get(type, 0)});
@@ -897,7 +983,11 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
         auto blockDecl =
             ASTQuery::findDeclarationByName(portBlockName, {}, tree);
         if (blockDecl) {
-          type = state.getLLVMType(blockDecl);
+          type = state.getLLVMTypeForCodegenBlock(blockDecl, funcDecl,
+                                                  funcInstance);
+        } else {
+          std::cerr << "Block declaration not found for: " << portBlockName
+                    << std::endl;
         }
         OutArgs.push_back(
             PrototypeArg{portBlockName, llvm::PointerType::get(type, 0)});

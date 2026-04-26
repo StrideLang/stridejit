@@ -781,7 +781,7 @@ TEST(Function, Simple) {
       strd::ASTQuery::findDeclarationByName(addFunc->getName(), scope, tree);
   EXPECT_NE(funcDecl, nullptr);
   auto func = strd::StrideGenerator::createFunctionDeclaration(
-      funcDecl, tree, &scope, strenv.state);
+      funcDecl, addFunc, tree, &scope, strenv.state);
   auto *v = func->codegen(strenv.state);
   EXPECT_NE(v, nullptr);
 

@@ -58,6 +58,7 @@ public:
 
   static std::unique_ptr<FunctionAST>
   createFunctionDeclaration(std::shared_ptr<DeclarationNode> funcDecl,
+                            std::shared_ptr<FunctionNode> funcInstance,
                             ASTNode tree, ScopeStack *scope,
                             StrideCompiler &state);
 

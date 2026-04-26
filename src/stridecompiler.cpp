@@ -2,6 +2,7 @@
 
 #include "stride/parser/blocknode.h"
 #include "stride/stridejit/stridecompiler.hpp"
+#include "stride/utils/astquery.h"
 
 //#include "llvm/ADT/APFloat.h"
 //#include "llvm/ADT/STLExtras.h"
@@ -163,7 +164,55 @@ StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl) {
     if (typePropNode->getNodeType() == strd::AST::Block) {
       type = std::static_pointer_cast<strd::BlockNode>(typePropNode)->getName();
     } else {
-      std::cout << __FILE__ << ":" << __LINE__ << "unsupported type"
+      std::cout << __FILE__ << ":" << __LINE__ << " : unsupported type"
+                << std::endl;
+    }
+  }
+  if (decl->getObjectType() == "reaction") {
+    return typesMap["_SwitchType"];
+  }
+  return typesMap[type];
+}
+
+llvm::Type *StrideCompiler::getLLVMTypeForCodegenBlock(
+    std::shared_ptr<DeclarationNode> decl,
+    std::shared_ptr<DeclarationNode> funcDecl,
+    std::shared_ptr<FunctionNode> functionInstance) {
+  if (!decl || !functionInstance) {
+    return typesMap[""];
+  }
+  if (decl->getObjectType() == "switch" || decl->getObjectType() == "trigger") {
+    return typesMap["_SwitchType"];
+  }
+  auto typePropNode = decl->getPropertyValue("type");
+  std::string type = "_RealType";
+  if (typePropNode) {
+    if (typePropNode->getNodeType() == strd::AST::Block) {
+      type = std::static_pointer_cast<strd::BlockNode>(typePropNode)->getName();
+    } else if (typePropNode->getNodeType() == strd::AST::PortProperty) {
+      auto typeProp =
+          std::static_pointer_cast<strd::PortPropertyNode>(typePropNode);
+      if (funcDecl->getObjectType() == "platformModule") {
+        auto inputBlock = funcDecl->getCompilerProperty("inputBlock");
+        if (inputBlock) {
+        }
+      }
+      auto inputPortBlock =
+          strd::ASTQuery::getModuleMainInputPortBlock(funcDecl);
+      if (inputPortBlock && typeProp &&
+          inputPortBlock->getName() == typeProp->getName()) {
+        if (typeProp->getPortName() != "type") {
+          std::cerr << "ERROR invalid port for type for " << decl->toText()
+                    << std::endl;
+          return typesMap[type];
+        }
+        auto portConnection = functionInstance->getPropertyValue("inputBlock");
+        // auto type = portConnection->getCompilerProperty("declaration");
+        // if (type) {
+        // }
+      }
+    } else {
+      std::cout << __FILE__ << ":" << __LINE__ << " : unsupported type"
                 << std::endl;
     }
   }
