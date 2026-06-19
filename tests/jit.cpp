@@ -66,7 +66,7 @@ TEST(JIT, Create) {
     std::cerr << "No entry" << std::endl;
   }
 
-  auto *Entry = (void (*)(...))EntrySym->getAddress();
+  auto *Entry = EntrySym->toPtr<void (*)(...)>();
 
   double out = 0;
 

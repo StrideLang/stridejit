@@ -2,12 +2,14 @@
 #define EXPRAST_HPP
 
 #include <map>
+#include <optional>
 #include <string>
 #include <variant>
 
 namespace llvm {
 class Value;
-}
+class Type;
+} // namespace llvm
 
 namespace strd {
 using DefaultVariant = std::variant<double, int32_t, bool>;
@@ -20,7 +22,8 @@ public:
 
   virtual ~ExprAST() = default;
 
-  virtual llvm::Value *codegen(StrideCompiler &state) = 0;
+  virtual std::pair<llvm::Value *, std::optional<llvm::Type *>>
+  codegen(StrideCompiler &state) = 0;
 
   std::string typecast;
 };

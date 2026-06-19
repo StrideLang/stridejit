@@ -33,7 +33,8 @@ public:
   std::unique_ptr<llvm::orc::LLJIT> JIT;
   bool mVerbose{true};
 
-  llvm::Expected<llvm::JITEvaluatedSymbol> getFunction(std::string);
+  llvm::Expected<llvm::orc::ExecutorAddr> getFunction(std::string);
+  template <typename T> T *getGlobal(std::string varName);
 
 private:
   bool loadLibrary(const char *libName, std::string &err);
@@ -42,6 +43,22 @@ private:
   bool m_optimizeCode{true};
   bool generateCompiledObject(std::string path, std::string TargetTriple);
 };
+
+template <typename T> T *StrideEnvironment::getGlobal(std::string varName) {
+  auto Symbol = JIT->lookup(varName);
+
+  if (Symbol) {
+    int *host_ptr = nullptr;
+    try {
+      host_ptr = Symbol->toPtr<T *>();
+    } catch (...) {
+      // std::cerr << "Can't cast variable to type" << std::endl;
+    }
+    return host_ptr;
+  }
+  return nullptr;
+}
+
 } // namespace strd
 
 #endif // STRIDEENVIRONMENT_HPP

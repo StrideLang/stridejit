@@ -14,26 +14,30 @@
 // llvm
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
-//#include "llvm/ExecutionEngine/Orc/CompileOnDemandLayer.h"
-//#include "llvm/ExecutionEngine/Orc/CompileUtils.h"
+// #include "llvm/ExecutionEngine/Orc/CompileOnDemandLayer.h"
+// #include "llvm/ExecutionEngine/Orc/CompileUtils.h"
 #include "llvm/ExecutionEngine/Orc/Core.h"
-//#include "llvm/ExecutionEngine/Orc/EPCIndirectionUtils.h"
+// #include "llvm/ExecutionEngine/Orc/EPCIndirectionUtils.h"
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
-//#include "llvm/ExecutionEngine/Orc/ExecutorProcessControl.h"
-//#include "llvm/ExecutionEngine/Orc/IRCompileLayer.h"
-//#include "llvm/ExecutionEngine/Orc/IRTransformLayer.h"
+// #include "llvm/ExecutionEngine/Orc/ExecutorProcessControl.h"
+// #include "llvm/ExecutionEngine/Orc/IRCompileLayer.h"
+// #include "llvm/ExecutionEngine/Orc/IRTransformLayer.h"
 #include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
-//#include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
-//#include "llvm/ExecutionEngine/SectionMemoryManager.h"
+// #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
+// #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/LLVMContext.h"
 
 #if LLVM_VERSION_MAJOR >= 17
-#include "llvm/Analysis/CGSCCAnalysisManager.h"
+#include "llvm/Analysis/CGSCCPassManager.h"
+// #include "llvm/Analysis/CGSCCAnalysisManager.h"
 #include "llvm/Analysis/LoopAnalysisManager.h"
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Passes/OptimizationLevel.h"
 #include "llvm/Passes/PassBuilder.h"
+#include "llvm/Support/TargetSelect.h"
 
 #else
 #include "llvm/IR/LegacyPassManager.h"
@@ -45,10 +49,10 @@
 
 // JIT
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
-//#include "llvm/ExecutionEngine/Orc/ObjectTransformLayer.h"
+// #include "llvm/ExecutionEngine/Orc/ObjectTransformLayer.h"
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 
-//#include "llvm/Support/InitLLVM.h"
+// #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/TargetSelect.h"
 
 using namespace strd;
@@ -67,6 +71,9 @@ bool StrideEnvironment::generateIr(std::string path) {
   ASTNode tree;
   tree = AST::parseFile(path.c_str());
   if (!tree) {
+    for (auto &error : AST::getParseErrors()) {
+      std::cerr << error.getErrorText() << std::endl;
+    }
     return false;
   }
   auto systemNodes = ASTQuery::getSystemNodes(tree);
@@ -187,7 +194,7 @@ bool StrideEnvironment::compileInMemory() {
     std::cerr << " No machine builder" << std::endl;
     return false;
   }
-  JTMB->setCodeModel(llvm::CodeModel::Small);
+  // JTMB->setCodeModel(llvm::CodeModel::Small);
 
   auto JIT_ =
       llvm::orc::LLJITBuilder()
@@ -233,9 +240,9 @@ bool StrideEnvironment::compileInMemory() {
   llvm::orc::SymbolMap M;
   llvm::orc::MangleAndInterner Mangle(JIT->getExecutionSession(),
                                       JIT->getDataLayout());
-  M[Mangle("__stride_Greater_d_dd")] = llvm::JITEvaluatedSymbol(
-      llvm::pointerToJITTargetAddress(&__stride_Greater_d_dd),
-      llvm::JITSymbolFlags());
+  M[Mangle("__stride_Greater_d_dd")] = llvm::orc::ExecutorSymbolDef(
+      llvm::orc::ExecutorAddr::fromPtr(&__stride_Greater_d_dd),
+      llvm::JITSymbolFlags::Exported);
   llvm::cantFail(JIT->getMainJITDylib().define(llvm::orc::absoluteSymbols(M)));
 
   if (auto Err = JIT->addIRModule(llvm::orc::ThreadSafeModule(
@@ -245,8 +252,8 @@ bool StrideEnvironment::compileInMemory() {
   return true;
 }
 
-#include "llvm/Support/Host.h"
 #include "llvm/Support/TargetSelect.h"
+#include "llvm/TargetParser/Host.h"
 
 bool StrideEnvironment::compileObjectToDisk(std::string path) {
   auto fspath = std::filesystem::path(path);
@@ -286,36 +293,36 @@ bool StrideEnvironment::compileObjectToDisk(std::string path) {
     }
   }
 
-  LLVMInitializeAArch64TargetInfo();
-  LLVMInitializeX86TargetInfo();
-  LLVMInitializeARMTargetInfo();
-  LLVMInitializeWebAssemblyTargetInfo();
+  llvm::InitializeAllTargetInfos();
+  llvm::InitializeAllTargets();
+  llvm::InitializeAllTargetMCs();
+  llvm::InitializeAllAsmPrinters();
 
-  LLVMInitializeAArch64Target();
-  LLVMInitializeX86Target();
-  LLVMInitializeARMTarget();
-  LLVMInitializeWebAssemblyTarget();
+  // LLVMInitializeAArch64TargetInfo();
+  // LLVMInitializeX86TargetInfo();
+  // LLVMInitializeARMTargetInfo();
+  // LLVMInitializeWebAssemblyTargetInfo();
 
-  LLVMInitializeAArch64TargetMC();
-  LLVMInitializeX86TargetMC();
-  LLVMInitializeARMTargetMC();
-  LLVMInitializeWebAssemblyTargetMC();
+  // LLVMInitializeAArch64Target();
+  // LLVMInitializeX86Target();
+  // LLVMInitializeARMTarget();
+  // LLVMInitializeWebAssemblyTarget();
 
-  LLVMInitializeAArch64AsmParser();
-  LLVMInitializeX86AsmParser();
-  LLVMInitializeARMAsmParser();
-  LLVMInitializeWebAssemblyAsmParser();
+  // LLVMInitializeAArch64TargetMC();
+  // LLVMInitializeX86TargetMC();
+  // LLVMInitializeARMTargetMC();
+  // LLVMInitializeWebAssemblyTargetMC();
 
-  LLVMInitializeAArch64AsmPrinter();
-  LLVMInitializeX86AsmPrinter();
-  LLVMInitializeARMAsmPrinter();
-  LLVMInitializeWebAssemblyAsmPrinter();
+  // LLVMInitializeAArch64AsmParser();
+  // LLVMInitializeX86AsmParser();
+  // LLVMInitializeARMAsmParser();
+  // LLVMInitializeWebAssemblyAsmParser();
 
-  //  llvm::InitializeAllTargetInfos();
-  //  llvm::InitializeAllTargets();
-  //  llvm::InitializeAllTargetMCs();
-  //  llvm::InitializeAllAsmParsers();
-  //  llvm::InitializeAllAsmPrinters();
+  // LLVMInitializeAArch64AsmPrinter();
+  // LLVMInitializeX86AsmPrinter();
+  // LLVMInitializeARMAsmPrinter();
+  // LLVMInitializeWebAssemblyAsmPrinter();
+
   std::string stbuf;
   llvm::raw_string_ostream sstr(stbuf);
   llvm::TargetRegistry::printRegisteredTargetsForVersion(sstr);
@@ -373,11 +380,13 @@ bool StrideEnvironment::generateCompiledObject(std::string path,
     return false;
   }
   llvm::TargetOptions opt;
-  auto RM = llvm::Optional<llvm::Reloc::Model>();
-  auto TargetMachine =
-      Target->createTargetMachine(TargetTriple, CPU, Features, opt, RM);
+  auto RM = std::optional<llvm::Reloc::Model>();
+  auto TargetMachine = Target->createTargetMachine(
+      llvm::Triple(TargetTriple), CPU, Features, opt, RM,
+      llvm::CodeModel::Large, // 👈 Force Large Code Model here
+      llvm::CodeGenOptLevel::Default);
   state.TheModule->setDataLayout(TargetMachine->createDataLayout());
-  state.TheModule->setTargetTriple(TargetTriple);
+  state.TheModule->setTargetTriple(llvm::Triple(TargetTriple));
 
   auto fspath = std::filesystem::path(path);
   fspath.append(TargetTriple + "/");
@@ -392,7 +401,7 @@ bool StrideEnvironment::generateCompiledObject(std::string path,
     return false;
   }
   llvm::legacy::PassManager pass;
-  auto FileType = llvm::CGFT_ObjectFile;
+  auto FileType = llvm::CodeGenFileType::ObjectFile;
 
   if (TargetMachine->addPassesToEmitFile(pass, dest, nullptr, FileType)) {
     std::cerr << "TargetMachine can't emit a file of this type";
@@ -439,7 +448,7 @@ bool StrideEnvironment::loadLibrary(const char *libName, std::string &err) {
   return false;
 }
 
-llvm::Expected<llvm::JITEvaluatedSymbol>
+llvm::Expected<llvm::orc::ExecutorAddr>
 StrideEnvironment::getFunction(std::string functionName) {
   auto EntrySym = JIT->lookup(functionName.c_str());
   return EntrySym;

@@ -1,0 +1,55 @@
+_domainDefinition TestDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+    ]
+    outputs: [
+        signal Out[2] { domain: TestDomain type: _IntType}
+    ]
+	domainFunctionCode: ''
+}
+
+module AddTwo {
+    ports: [
+        mainInputPort {
+            block: Input
+        }
+        mainOutputPort {
+            block: Output
+        }
+    ]
+    blocks: [
+        signal Input { type: _IntType}
+        signal Output {type: _IntType}
+    ]
+    streams: [
+        2 + Input >> Output;
+    ]
+}
+
+
+3 >> AddTwo() >> Out[0];
+
+module Add {
+    ports: [
+        mainInputPort {
+            block: Input
+        }
+        mainOutputPort {
+            block: Output
+        }
+    ]
+    blocks: [
+        signal Input[2] { type: _IntType}
+        signal Output {type: _IntType}
+    ]
+    streams: [
+        Input[0] + Input[1] >> Output;
+    ]
+}
+
+[3, 5] >> Add() >> Out[1];

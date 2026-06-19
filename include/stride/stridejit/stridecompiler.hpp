@@ -6,15 +6,15 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
-#include <variant>
 #include <vector>
 
 #include "stride/parser/declarationnode.h"
 #include "stride/parser/functionnode.h"
 #include "stride/stridejit/functionast.hpp"
 
-#include "llvm/Config/llvm-config.h"
+// #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Module.h"
 
 // forward declarations for llvm
 namespace llvm {
@@ -81,7 +81,18 @@ public:
                                            llvm::StringRef VarName,
                                            llvm::Type *dataType);
 
+  // Globals in current name prefix
+  void createGlobal(std::shared_ptr<DeclarationNode> globalDecl);
+  std::pair<llvm::Value *, std::optional<llvm::Type *>>
+  getGlobal(std::string globalName);
+  bool globalExists(std::string globalName);
+
   llvm::Type *getElementType(llvm::Value *V);
+
+  // Name prefix. Used to name instances and globals
+  void pushName(std::string name);
+  void popName();
+  std::string getName();
 
   std::unique_ptr<ExprAST> LogError(const char *Str) {
     fprintf(stderr, "Error: %s\n", Str);
@@ -99,7 +110,8 @@ public:
   std::unique_ptr<llvm::LLVMContext> TheContext;
   std::unique_ptr<llvm::Module> TheModule;
   std::unique_ptr<llvm::IRBuilder<>> Builder;
-  std::map<std::string, llvm::Value *> NamedValues;
+  std::map<std::string, std::pair<llvm::Value *, std::optional<llvm::Type *>>>
+      NamedValues;
   std::map<std::string, llvm::Value *> PortBlockMap;
   std::map<std::string, std::unique_ptr<PrototypeAST>> FunctionProtos;
   std::map<char, int> BinopPrecedence;
@@ -112,9 +124,15 @@ public:
   // Track pointer element types for opaque pointers (LLVM >= 17)
   std::map<llvm::Value *, llvm::Type *> pointerElementTypes;
 
+  std::vector<std::string> m_nameStack;
+  uint32_t m_idCounter{0};
+
 private:
   uint64_t m_configuration{NO_OPTIONS};
+  std::map<std::string, std::pair<llvm::Value *, std::optional<llvm::Type *>>>
+      m_globals;
 };
+
 } // namespace strd
 
 #endif // STRIDECOMPILER_HPP

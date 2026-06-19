@@ -1,4 +1,4 @@
-_domainDefinition TestDomain {
+_domainDefinition RootDomain {
 	framework: _JitFramework
 	# requiresResources: [_RootContext]
 	# providesResources: [_DomainFunction]
@@ -8,12 +8,14 @@ _domainDefinition TestDomain {
     inputs: [
     ]
     outputs: [
-        signal Out { domain: TestDomain type: _RealType}
+        signal Out { domain: RootDomain default: 0 type: _IntType }
     ]
 	domainFunctionCode: ''
 }
 
-module AddTwo {
+signal A[2] {type: _IntType default: [5,2] domain: RootDomain}
+
+module Add {
     ports: [
         mainInputPort {
             block: Input
@@ -23,14 +25,12 @@ module AddTwo {
         }
     ]
     blocks: [
-        signal Input { type: _RealType }
-        signal Output { type: _RealType }
-        signal Internal { type: _RealType }
+        signal Input[2] { type: _IntType}
+        signal Output {type: _IntType}
     ]
     streams: [
-        2.0 >> Internal;
-        Internal + Input >> Output;
+        Input[0] + Input[1] >> Output;
     ]
 }
 
-3.0 >> AddTwo() >> Out;
+A >> Add() >> Out;

@@ -1,5 +1,4 @@
-
-_domainDefinition RootDomain {
+_domainDefinition TestDomain {
 	framework: _JitFramework
 	# requiresResources: [_RootContext]
 	# providesResources: [_DomainFunction]
@@ -7,12 +6,13 @@ _domainDefinition RootDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal In { domain: RootDomain type: _RealType }
+        signal In { domain: TestDomain default: 0 type: _IntType }
     ]
     outputs: [
-        switch Out { domain: RootDomain }
     ]
 	domainFunctionCode: ''
 }
 
-[In, 2.0] >> Greater() >> Out;
+signal A {type: _IntType default: 0 domain: TestDomain}
+
+In >> A;

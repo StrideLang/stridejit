@@ -4,17 +4,17 @@
 #include "stride/stridejit/stridecompiler.hpp"
 #include "stride/utils/astquery.h"
 
-//#include "llvm/ADT/APFloat.h"
-//#include "llvm/ADT/STLExtras.h"
+// #include "llvm/ADT/APFloat.h"
+// #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/BasicBlock.h"
-//#include "llvm/IR/Constants.h"
+// #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
-//#include "llvm/IR/Verifier.h"
+// #include "llvm/IR/Verifier.h"
 
 extern "C" {
 EXPORT double __stride_Greater_d_dd(double a, double b) {
@@ -107,6 +107,33 @@ StrideCompiler::CreateEntryBlockAlloca(llvm::Function *TheFunction,
   auto *Alloca = TmpB.CreateAlloca(dataType, nullptr, VarName);
   pointerElementTypes[Alloca] = dataType;
   return Alloca;
+}
+
+void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
+  auto namePrefix = getName();
+  std::string fullName;
+  if (namePrefix.size() > 0) {
+    fullName = getName() + "_";
+  }
+  fullName += globalDecl->getName();
+  llvm::Type *Type = getLLVMType(globalDecl);
+  // TODO initialize
+  llvm::Constant *Initializer = llvm::UndefValue::get(Type);
+  // llvm::ConstantInt::get(Int32Ty, 42);
+  llvm::GlobalVariable *MyGlobal = new llvm::GlobalVariable(
+      *TheModule, Type,
+      false, // Is it constant (read-only)? false = mutable
+      llvm::GlobalValue::ExternalLinkage, // Linkage type (External makes it
+      // visible to the JIT)
+      Initializer, fullName);
+
+  // Avoid optimization to force memory location
+  MyGlobal->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::None);
+  // Optional: Set data alignment for optimal CPU access
+  MyGlobal->setAlignment(llvm::MaybeAlign(4));
+  std::cout << "Created global: " << fullName << std::endl;
+
+  m_globals[globalDecl->getName()] = {MyGlobal, Type};
 }
 
 llvm::Type *StrideCompiler::getElementType(llvm::Value *V) {
@@ -220,4 +247,36 @@ llvm::Type *StrideCompiler::getLLVMTypeForCodegenBlock(
     return typesMap["_SwitchType"];
   }
   return typesMap[type];
+}
+
+void StrideCompiler::pushName(std::string name) {
+  char buf[4]; // 3 chars + 1 null terminator
+  std::snprintf(buf, sizeof(buf), "%03d", m_idCounter++);
+  m_nameStack.push_back(name + "_" + std::string(buf));
+}
+
+void StrideCompiler::popName() { m_nameStack.pop_back(); }
+
+std::string StrideCompiler::getName() {
+  std::string result = "";
+  for (const auto &name : m_nameStack) {
+    result += name + "_";
+  }
+  if (result.size() > 0) {
+    result.pop_back();
+  }
+  return result;
+}
+
+std::pair<llvm::Value *, std::optional<llvm::Type *>>
+strd::StrideCompiler::getGlobal(std::string globalName) {
+  if (globalExists(globalName)) {
+    auto global = m_globals[globalName];
+    return global;
+  }
+  return {nullptr, std::nullopt};
+}
+
+bool StrideCompiler::globalExists(std::string globalName) {
+  return m_globals.find(globalName) != m_globals.end();
 }

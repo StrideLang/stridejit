@@ -38,6 +38,7 @@ class PrototypeAST {
   std::string Name;
   std::vector<PrototypeArg> Args;
   std::vector<PrototypeArg> OutArgs;
+  std::vector<PrototypeArg> InternalArgs; // For internal scope variables.
   std::vector<PrototypeArg>
       ExternalArgs; // For upper scope in reactions and loops
   std::vector<PrototypeArg> UsedPortProperties;
@@ -47,11 +48,12 @@ class PrototypeAST {
 public:
   PrototypeAST(const std::string &Name, std::vector<PrototypeArg> OutArgs,
                std::vector<PrototypeArg> Args,
+               std::vector<PrototypeArg> InternalArgs,
                std::vector<PrototypeArg> ExternalArgs,
                std::vector<PrototypeArg> UsedPortProperties,
                bool IsOperator = false, unsigned Prec = 0)
-      : Name(Name), Args(Args), OutArgs(OutArgs), ExternalArgs(ExternalArgs),
-        UsedPortProperties(UsedPortProperties) {}
+      : Name(Name), Args(Args), OutArgs(OutArgs), InternalArgs(InternalArgs),
+        ExternalArgs(ExternalArgs), UsedPortProperties(UsedPortProperties) {}
 
   llvm::Function *codegen(StrideCompiler &state);
   const std::string &getName() const { return Name; }
@@ -59,7 +61,10 @@ public:
   bool isBinaryOp() const { return IsOperator && Args.size() == 2; }
   char getOperatorName() const;
   unsigned getBinaryPrecedence() const { return Precedence; }
+
+  std::vector<llvm::Type *> getUsedArgsTypes() const;
   std::vector<PrototypeArg> getExternalArgs() const;
+  std::vector<PrototypeArg> getInternalArgs() const;
 
   CallableType callType; // Set by parent FunctionAST before codegen()
   std::vector<PrototypeArg> getUsedPortProperties() const;
@@ -85,6 +90,10 @@ public:
   std::string terminateWhenName;
 
   CallableType callType;
+
+private:
+  void allocateLocalVariables(StrideCompiler &state,
+                              llvm::Function *TheFunction);
 };
 
 /// CallExprAST - Expression class for function calls.
@@ -96,20 +105,30 @@ public:
   CallExprAST(const std::string &Callee,
               std::vector<std::unique_ptr<ExprAST>> OutArgs,
               std::vector<std::unique_ptr<ExprAST>> InArgs,
+              std::vector<std::unique_ptr<ExprAST>> InternalArgs,
               std::vector<std::unique_ptr<ExprAST>> ExternalArgs,
-              std::vector<std::unique_ptr<ExprAST>> PortPropArgs)
+              std::vector<std::unique_ptr<ExprAST>> PortPropArgs,
+              std::vector<llvm::Type *> OutArgsDataType,
+              std::vector<llvm::Type *> InArgsDataType,
+              std::string instanceName)
       : Callee(Callee), InArgs(std::move(InArgs)), OutArgs(std::move(OutArgs)),
+        InternalArgs(std::move(InternalArgs)),
         ExternalArgs(std::move(ExternalArgs)),
-        PortPropArgs(std::move(PortPropArgs)) {}
+        PortPropArgs(std::move(PortPropArgs)), instanceName(instanceName) {}
 
-  llvm::Value *codegen(StrideCompiler &state) override;
+  std::pair<llvm::Value *, std::optional<llvm::Type *>>
+  codegen(StrideCompiler &state) override;
 
   CallableType callType;
 
   std::vector<std::unique_ptr<ExprAST>> InArgs;
   std::vector<std::unique_ptr<ExprAST>> OutArgs;
+  std::vector<std::unique_ptr<ExprAST>> InternalArgs;
+  std::vector<std::unique_ptr<ExprAST>> InArgsDataType;
+  std::vector<std::unique_ptr<ExprAST>> OutArgsDataType;
   std::vector<std::unique_ptr<ExprAST>> ExternalArgs;
   std::vector<std::unique_ptr<ExprAST>> PortPropArgs;
+  std::string instanceName;
   std::unique_ptr<ExprAST> ret;
 };
 
@@ -125,7 +144,8 @@ public:
         OutArgs(std::move(OutArgs)), ExternalArgs(std::move(ExternalArgs)),
         PortPropArgs(std::move(PortPropArgs)) {}
 
-  llvm::Value *codegen(StrideCompiler &state) override;
+  std::pair<llvm::Value *, std::optional<llvm::Type *>>
+  codegen(StrideCompiler &state) override;
 
   std::string command;
   std::vector<std::unique_ptr<ExprAST>> InArgs;

@@ -6,20 +6,18 @@
 #include "stride/stridejit/stridecompiler.hpp"
 #include "gtest/gtest.h"
 
-
 // llvm
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Value.h"
 
-
 namespace {
 
 TEST(ASTNodeTest, NumberExprDouble) {
   strd::StrideCompiler state;
   strd::RealExprAST num(3.14);
-  llvm::Value *v = num.codegen(state);
+  auto [v, t] = num.codegen(state);
 
   ASSERT_NE(v, nullptr);
   EXPECT_TRUE(v->getType()->isDoubleTy());
@@ -31,7 +29,7 @@ TEST(ASTNodeTest, NumberExprDouble) {
 TEST(ASTNodeTest, NumberExprInt32) {
   strd::StrideCompiler state;
   strd::IntExprAST num((int32_t)42);
-  llvm::Value *v = num.codegen(state);
+  auto [v, t] = num.codegen(state);
 
   ASSERT_NE(v, nullptr);
   EXPECT_TRUE(v->getType()->isIntegerTy(32));
@@ -43,7 +41,7 @@ TEST(ASTNodeTest, NumberExprInt32) {
 TEST(ASTNodeTest, NumberExprInt64) {
   strd::StrideCompiler state;
   strd::IntExprAST num((int64_t)1234567890123LL, 64);
-  llvm::Value *v = num.codegen(state);
+  auto [v, t] = num.codegen(state);
 
   ASSERT_NE(v, nullptr);
   EXPECT_TRUE(v->getType()->isIntegerTy(64));
@@ -55,7 +53,7 @@ TEST(ASTNodeTest, NumberExprInt64) {
 TEST(ASTNodeTest, BoolExprTrue) {
   strd::StrideCompiler state;
   strd::BoolExprAST b(true);
-  llvm::Value *v = b.codegen(state);
+  auto [v, t] = b.codegen(state);
 
   ASSERT_NE(v, nullptr);
   EXPECT_TRUE(v->getType()->isIntegerTy(1));
@@ -70,7 +68,7 @@ TEST(ASTNodeTest, BinaryExprAdd) {
   auto rhs = std::make_unique<strd::RealExprAST>(2.0);
   strd::BinaryExprAST bin('+', std::move(lhs), std::move(rhs));
 
-  llvm::Value *v = bin.codegen(state);
+  auto [v, t] = bin.codegen(state);
   ASSERT_NE(v, nullptr);
   EXPECT_TRUE(v->getType()->isDoubleTy());
   // Note: BinaryExprAST usually generates IR instructions, not just constants
@@ -90,7 +88,7 @@ TEST(ASTNodeExprTest, ListExprImmutableConsistent) {
 
   EXPECT_EQ(list.getType(), strd::ListExprAST::Type::IMMUTABLE_CONSISTENT);
 
-  llvm::Value *v = list.codegen(state);
+  auto [v, t] = list.codegen(state);
   ASSERT_NE(v, nullptr);
   EXPECT_TRUE(v->getType()->isArrayTy());
 }

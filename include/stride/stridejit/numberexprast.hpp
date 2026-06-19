@@ -16,7 +16,8 @@ class RealExprAST : public ExprAST {
 
 public:
   RealExprAST(double Val) : Val(Val) {}
-  llvm::Value *codegen(StrideCompiler &state) override;
+  std::pair<llvm::Value *, std::optional<llvm::Type *>>
+  codegen(StrideCompiler &state) override;
 };
 
 class IntExprAST : public ExprAST {
@@ -25,7 +26,8 @@ class IntExprAST : public ExprAST {
 
 public:
   IntExprAST(int64_t Val, int8_t numBits = 32) : Val(Val), NumBits(numBits) {}
-  llvm::Value *codegen(StrideCompiler &state) override;
+  std::pair<llvm::Value *, std::optional<llvm::Type *>>
+  codegen(StrideCompiler &state) override;
 };
 
 class BoolExprAST : public ExprAST {
@@ -33,7 +35,8 @@ class BoolExprAST : public ExprAST {
 
 public:
   BoolExprAST(int64_t Val) : Val(Val) {}
-  llvm::Value *codegen(StrideCompiler &state) override;
+  std::pair<llvm::Value *, std::optional<llvm::Type *>>
+  codegen(StrideCompiler &state) override;
 };
 
 /// VariableExprAST - Expression class for referencing a variable, like "a".
@@ -42,6 +45,14 @@ class VariableExprAST : public ExprAST {
   std::string Type;
   std::vector<std::variant<size_t, std::string>> Indeces;
 
+  enum Location {
+    LOCATION_GLOBAL,
+    LOCATION_STACK,
+    LOCATION_HEAP,
+  };
+
+  Location varLocation = LOCATION_GLOBAL;
+
 public:
   VariableExprAST(
       const std::string &Name,
@@ -49,7 +60,8 @@ public:
           std::vector<std::variant<size_t, std::string>>{})
       : Name(Name), Indeces(Indeces) {}
 
-  llvm::Value *codegen(StrideCompiler &state) override;
+  std::pair<llvm::Value *, std::optional<llvm::Type *>>
+  codegen(StrideCompiler &state) override;
   const std::string &getName() const { return Name; }
   std::vector<std::variant<size_t, std::string>> getIndeces() const;
 };
@@ -62,19 +74,22 @@ public:
   PortPropertyAST(const std::string &Name, const std::string &Property)
       : Name(Name), Property(Property) {}
 
-  llvm::Value *codegen(StrideCompiler &state) override;
+  std::pair<llvm::Value *, std::optional<llvm::Type *>>
+  codegen(StrideCompiler &state) override;
 };
 
 /// BinaryExprAST - Expression class for a binary operator.
 class BinaryExprAST : public ExprAST {
   char Op;
   std::unique_ptr<ExprAST> LHS, RHS;
+  // std::optional<llvm::Type *> LHT, RHT;
 
 public:
   BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS,
                 std::unique_ptr<ExprAST> RHS);
 
-  llvm::Value *codegen(StrideCompiler &state) override;
+  std::pair<llvm::Value *, std::optional<llvm::Type *>>
+  codegen(StrideCompiler &state) override;
 };
 
 class ResetExprAST : public ExprAST {
@@ -86,7 +101,8 @@ public:
   ResetExprAST(std::string Name, std::unique_ptr<ExprAST> Condition,
                std::vector<std::unique_ptr<ExprAST>> Expressions);
 
-  llvm::Value *codegen(StrideCompiler &state) override;
+  std::pair<llvm::Value *, std::optional<llvm::Type *>>
+  codegen(StrideCompiler &state) override;
 };
 } // namespace strd
 

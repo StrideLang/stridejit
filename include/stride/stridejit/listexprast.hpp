@@ -18,7 +18,8 @@ public:
 
   ListExprAST(std::vector<strd::ASTNode> elements);
 
-  llvm::Value *codegen(StrideCompiler &state) override;
+  std::pair<llvm::Value *, std::optional<llvm::Type *>>
+  codegen(StrideCompiler &state) override;
   std::vector<std::unique_ptr<ExprAST>> &elements() { return members; }
   Type getType() { return mType; }
 
