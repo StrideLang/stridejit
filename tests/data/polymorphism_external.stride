@@ -1,0 +1,23 @@
+_domainDefinition TestDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+        signal InReal { domain: TestDomain type: _RealType }
+        signal InInt { domain: TestDomain type: _IntType }
+    ]
+    outputs: [
+        switch Out { domain: TestDomain }
+    ]
+	domainFunctionCode: ''
+}
+
+switch CompInt { domain: TestDomain }
+switch CompReal { domain: TestDomain }
+
+[InInt, 0] >> Equal() >> CompInt;
+[InReal, 0] >> Equal() >> CompReal;
+

@@ -10,12 +10,14 @@ _domainDefinition RootDomain {
 		signal Int[2] {type: _IntType domain: RootDomain}
     ]
     outputs: [
-        signal Float[2] {type: _RealType domain: RootDomain}
+        signal Real[2] {type: _RealType domain: RootDomain}
     ]
 	domainFunctionCode: ''
 }
 
+# Casting literals:
 1.0 >> Int[0];
-3 >> Float[0];
-Float[0] + 1.0 >> Int[1];
-Int[1] + 1 >> Float[1]; 
+3 >> Real[0];
+# Casting expression output
+Real[0] + 1.0 >> Int[1];
+Int[1] + 1 >> Real[1]; 

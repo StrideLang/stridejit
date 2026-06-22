@@ -112,8 +112,8 @@ public:
               std::vector<llvm::Type *> InArgsDataType,
               std::string instanceName)
       : Callee(Callee), InArgs(std::move(InArgs)), OutArgs(std::move(OutArgs)),
-        InternalArgs(std::move(InternalArgs)),
-        ExternalArgs(std::move(ExternalArgs)),
+        InternalArgs(std::move(InternalArgs)), InArgsDataType(InArgsDataType),
+        OutArgsDataType(OutArgsDataType), ExternalArgs(std::move(ExternalArgs)),
         PortPropArgs(std::move(PortPropArgs)), instanceName(instanceName) {}
 
   std::pair<llvm::Value *, std::optional<llvm::Type *>>
@@ -124,8 +124,8 @@ public:
   std::vector<std::unique_ptr<ExprAST>> InArgs;
   std::vector<std::unique_ptr<ExprAST>> OutArgs;
   std::vector<std::unique_ptr<ExprAST>> InternalArgs;
-  std::vector<std::unique_ptr<ExprAST>> InArgsDataType;
-  std::vector<std::unique_ptr<ExprAST>> OutArgsDataType;
+  std::vector<llvm::Type *> InArgsDataType;
+  std::vector<llvm::Type *> OutArgsDataType;
   std::vector<std::unique_ptr<ExprAST>> ExternalArgs;
   std::vector<std::unique_ptr<ExprAST>> PortPropArgs;
   std::string instanceName;

@@ -97,6 +97,7 @@ endif()
 # StrideJIT ------------------------------
 set(STRIDEJIT_SRC
   src/exprast.cpp
+  src/binaryexprast.cpp
   src/listexprast.cpp
   src/numberexprast.cpp
   src/functionast.cpp
@@ -108,6 +109,7 @@ set(STRIDEJIT_SRC
 
 set(STRIDEJIT_HEADERS
   include/stride/stridejit/exprast.hpp
+  include/stride/stridejit/binaryexprast.hpp
   include/stride/stridejit/listexprast.hpp
   include/stride/stridejit/numberexprast.hpp
   include/stride/stridejit/functionast.hpp

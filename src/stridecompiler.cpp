@@ -117,9 +117,19 @@ void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
   }
   fullName += globalDecl->getName();
   llvm::Type *Type = getLLVMType(globalDecl);
+  if (globalDecl->getNodeType() == AST::BundleDeclaration) {
+    int size = ASTQuery::getBlockDeclaredSize(globalDecl, {}, nullptr);
+    if (size > 0) {
+      Type = llvm::ArrayType::get(Type, size);
+    } else {
+      std::cout << " Error: Undefined size for global not possible"
+                << std::endl;
+      return;
+    }
+  }
   // TODO initialize
   llvm::Constant *Initializer = llvm::UndefValue::get(Type);
-  // llvm::ConstantInt::get(Int32Ty, 42);
+
   llvm::GlobalVariable *MyGlobal = new llvm::GlobalVariable(
       *TheModule, Type,
       false, // Is it constant (read-only)? false = mutable
@@ -131,7 +141,7 @@ void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
   MyGlobal->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::None);
   // Optional: Set data alignment for optimal CPU access
   MyGlobal->setAlignment(llvm::MaybeAlign(4));
-  std::cout << "Created global: " << fullName << std::endl;
+  std::cout << "global: " << fullName << std::endl;
 
   m_globals[globalDecl->getName()] = {MyGlobal, Type};
 }

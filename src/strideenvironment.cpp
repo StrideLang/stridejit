@@ -54,6 +54,7 @@
 
 // #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace strd;
 
@@ -117,7 +118,8 @@ bool StrideEnvironment::generateIr(ASTNode root) {
   }
   StrideGenerator::generateCode(root, globalScope, state);
   //  if (mVerbose) {
-  //    state.TheModule->dump();
+  //    state.TheModule->print(llvm::outs(), nullptr);
+  //    llvm::outs() << "\n";
   //  }
 
   if (m_optimizeCode) {
@@ -182,7 +184,8 @@ bool StrideEnvironment::generateIr(ASTNode root) {
 #endif
   }
   if (mVerbose) {
-    state.TheModule->dump();
+    state.TheModule->print(llvm::outs(), nullptr);
+    llvm::outs() << "\n";
   }
   return true;
 }

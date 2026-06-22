@@ -48,7 +48,7 @@ template <typename T> T *StrideEnvironment::getGlobal(std::string varName) {
   auto Symbol = JIT->lookup(varName);
 
   if (Symbol) {
-    int *host_ptr = nullptr;
+    T *host_ptr = nullptr;
     try {
       host_ptr = Symbol->toPtr<T *>();
     } catch (...) {

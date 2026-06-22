@@ -38,5 +38,9 @@ The return value of the generated function is currently unused, it could be used
 Local variables are declared in the parent scope as described above and passed to the generated
 function. If variable is not read before it is written too, the compiler could consider and
 measure whether placing it in the function stack provides better performance.
+Input and output blocks are passed by reference.
 
 ### Reaction/Loop local variables
+
+Local variables are declared in the function scope, which triggers a reset on
+every call.

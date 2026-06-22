@@ -12,6 +12,7 @@
 // llvm
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 #include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 
@@ -28,7 +29,8 @@ TEST(JIT, Create) {
   resolver.process();
 
   strd::StrideGenerator::generateCode(tree, scope, strenv.state);
-  strenv.state.TheModule->dump();
+  strenv.state.TheModule->print(llvm::outs(), nullptr);
+  llvm::outs() << "\n";
 
   InitializeNativeTarget();
   InitializeNativeTargetAsmPrinter();

@@ -6,10 +6,10 @@ _domainDefinition RootDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-		signal List[20] { default: 1 }
+		signal List[20] { domain: RootDomain  default: 1  type: _IntType}
     ]
     outputs: [
-        signal Out { domain: RootDomain }
+        signal Out { domain: RootDomain type: _IntType }
     ]
 	domainFunctionCode: ''
 }
@@ -24,8 +24,8 @@ loop Add {
 		}
 	]
 	blocks: [
-		signal Input[InputPort.size] {}
-		signal Output {default: 0}
+		signal Input[InputPort.size] { type: _IntType }
+		signal Output {default: 0 type: _IntType }
 		signal Index { default: 0 type: _IntType reset: Reset }
 		switch Done { default: off }
 		# trigger Reset {}
