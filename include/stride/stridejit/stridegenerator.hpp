@@ -48,8 +48,7 @@ public:
 
   using GeneratedCode = std::map<std::string, DomainCode>;
 
-  static void generateCode(ASTNode tree, ScopeStack &scope,
-                           StrideCompiler &state);
+  static void compile(ASTNode tree, ScopeStack &scope, StrideCompiler &state);
 
   static GeneratedIRCode generateCodeForTree(ASTNode tree, ScopeStack &scope,
                                              StrideCompiler &state);
@@ -67,6 +66,10 @@ public:
                                     std::vector<ASTNode> &frameworkScope,
                                     StrideCompiler &state);
 
+  static GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream,
+                                        ASTNode tree, ScopeStack &scope,
+                                        StrideCompiler &state);
+
 private:
   static bool
   processPreviousFunction(std::shared_ptr<FunctionNode> prevFuncCall,
@@ -75,10 +78,6 @@ private:
                           StrideGenerator::GeneratedCode &generated,
                           std::string domainName, const ScopeStack &scope,
                           ASTNode tree, StrideCompiler &state);
-
-  static GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream,
-                                        ASTNode tree, ScopeStack &scope,
-                                        StrideCompiler &state);
 
   static void setTypeCastMetadata(ASTNode node, ExprAST *V);
 

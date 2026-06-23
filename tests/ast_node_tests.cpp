@@ -1,5 +1,6 @@
 #include "stride/parser/ast.h"
 #include "stride/parser/valuenode.h"
+#include "stride/stridejit/binaryexprast.hpp"
 #include "stride/stridejit/functionast.hpp"
 #include "stride/stridejit/listexprast.hpp"
 #include "stride/stridejit/numberexprast.hpp"

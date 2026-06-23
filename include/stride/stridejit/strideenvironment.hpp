@@ -23,25 +23,31 @@ class StrideEnvironment {
 public:
   StrideEnvironment(std::string strideroot = std::string());
 
+  // IR generator
   bool generateIr(std::string path);
   bool generateIr(strd::ASTNode root);
 
+  void processTree(ASTNode tree);
+
+  // JIT
+  void initializeJIT();
   bool compileInMemory();
   bool compileObjectToDisk(std::string path);
 
   StrideCompiler state;
   std::unique_ptr<llvm::orc::LLJIT> JIT;
-  bool mVerbose{true};
 
   llvm::Expected<llvm::orc::ExecutorAddr> getFunction(std::string);
   template <typename T> T *getGlobal(std::string varName);
 
 private:
   bool loadLibrary(const char *libName, std::string &err);
+  bool generateCompiledObject(std::string path, std::string TargetTriple);
 
+  // Configuration
   std::string m_strideRoot;
   bool m_optimizeCode{true};
-  bool generateCompiledObject(std::string path, std::string TargetTriple);
+  bool m_verbose{true};
 };
 
 template <typename T> T *StrideEnvironment::getGlobal(std::string varName) {

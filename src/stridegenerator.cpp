@@ -17,9 +17,8 @@
 
 using namespace strd;
 
-void StrideGenerator::generateCode(ASTNode tree, ScopeStack &scope,
-                                   StrideCompiler &state) {
-
+void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
+                              StrideCompiler &state) {
   GeneratedIRCode generatedIRCode = generateCodeForTree(tree, scope, state);
 
   std::vector<PrototypeArg> ExternalArgs; // Args to domain functions
@@ -529,76 +528,6 @@ bool StrideGenerator::processPreviousFunction(
   return true;
 }
 
-std::shared_ptr<DeclarationNode>
-matchDefinitionToTypes(std::vector<std::shared_ptr<DeclarationNode>> decls,
-                       std::shared_ptr<FunctionNode> func) {
-  // TODO move this to CodeAnalysis in stride Codegen library
-  std::shared_ptr<DeclarationNode> funcDecl;
-  for (const auto &decl : decls) {
-    // TODO move this function to codegen
-    if (decl->getObjectType() == "platformModule") {
-      auto inputs = decl->getPropertyValue("inputs");
-      auto outputs = decl->getPropertyValue("outputs");
-      bool matches = true;
-      if (inputs) {
-        auto streamInput = func->getCompilerProperty("mainInput");
-        if (!streamInput) {
-          // declaration has input, but function in stream does not
-          continue;
-        }
-        if (inputs->getNodeType() == AST::List) {
-          auto inputNodes = inputs->getChildren();
-
-          std::vector<ASTNode> streamInNodes;
-          if (streamInput->getNodeType() == AST::List) {
-            streamInNodes = streamInput->getChildren();
-          } else if (streamInput->getNodeType() == AST::Block) {
-            streamInNodes.push_back(streamInput);
-          } else {
-            matches = false;
-            std::cerr << " Unsupported input type for platform block: "
-                      << streamInput->toText() << std::endl;
-          }
-          // TODO validate signature
-          // auto types = CodeAnalysis::getInputDataTypes(func, scope, tree);
-          // if (inputNodes.size() == streamInputNodes.size()) {
-          //   for (int i = 0; i < inputNodes.size(); i++) {
-          //     if (inputNodes[i]->getNodeType() == AST::String &&
-          //         streamInputNodes[i]->getNodeType() == AST::String) {
-          //       if (std::static_pointer_cast<ValueNode>(inputNodes[i])
-          //               ->getStringValue() ==
-          //           std::static_pointer_cast<ValueNode>(streamInputNodes[i])
-          //               ->getStringValue()) {
-          //       }
-          //     }
-          //   }
-          // if (type->getNodeType() == AST::Block) {
-          // }
-          // } else {
-          //   matches = false;
-          //   std::cerr << "ERROR Input list size mismatch " <<
-          //   func->getName()
-          //             << " in " << stream->toText() << std::endl;
-          // }
-        } else {
-          matches = false;
-          std::cerr << "ERROR Expected lists for 'inputs' port for "
-                    << func->getName() << std::endl;
-        }
-      }
-      if (matches) {
-        funcDecl = decl;
-        break;
-      }
-    } else {
-      // TODO valide I/O type for regular modules.
-      funcDecl = decl;
-      break;
-    }
-  }
-  return funcDecl;
-}
-
 StrideGenerator::GeneratedCode
 StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                                   ASTNode tree, ScopeStack &scope,
@@ -706,7 +635,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       // Function
       auto func = std::static_pointer_cast<FunctionNode>(current);
       auto decls = ASTQuery::findAllDeclarations(func->getName(), scope, tree);
-      auto funcDecl = matchDefinitionToTypes(decls, func);
+      auto funcDecl = CodeAnalysis::matchDefinitionToTypes(decls, func);
 
       if (!funcDecl) {
         std::cerr << "ERROR can't find/match declaration for "

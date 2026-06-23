@@ -47,7 +47,7 @@ ListExprAST::ListExprAST(std::vector<strd::ASTNode> elements)
     // TODO use type cast metadata to determine consistency
     // Currently reporting inconsistent even if type cast has made consistent
     auto thisType = strd::CodeAnalysis::resolveNodeOutDataType(e, {}, nullptr);
-    if ((previousType != "") && previousType != previousType) {
+    if ((previousType != "") && previousType != thisType) {
       consistent = false;
     }
     previousType = thisType;

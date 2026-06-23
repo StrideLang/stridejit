@@ -18,9 +18,13 @@ if (STRIDEJIT_BUILD_TESTS)
     endif()
     set(TEST_SOURCES main.cpp
       basic.cpp
-      # jit.cpp
+      jit.cpp
+      expression_tests.cpp
+      compiler_tests.cpp
+      list_expression_tests.cpp
+      environment_tests.cpp
+      ast_node_tests.cpp
       # error_tests.cpp
-      # ast_node_tests.cpp
     )
     add_executable(stridejit_tests ${TEST_SOURCES})
 

@@ -23,9 +23,11 @@ public:
 class IntExprAST : public ExprAST {
   int64_t Val;
   uint8_t NumBits{32};
+  bool Signed{true};
 
 public:
-  IntExprAST(int64_t Val, int8_t numBits = 32) : Val(Val), NumBits(numBits) {}
+  IntExprAST(int64_t Val, int8_t numBits = 32, bool Signed = true)
+      : Val(Val), NumBits(numBits), Signed(Signed) {}
   std::pair<llvm::Value *, std::optional<llvm::Type *>>
   codegen(StrideCompiler &state) override;
 };

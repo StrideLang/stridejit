@@ -30,8 +30,18 @@ IntExprAST::codegen(StrideCompiler &state) {
           llvm::Type::getDoubleTy(*state.TheContext)};
     }
   }
-  return {llvm::ConstantInt::get(*state.TheContext, llvm::APInt(NumBits, Val)),
-          llvm::Type::getInt32Ty(*state.TheContext)};
+  if (NumBits == 64) {
+    return {llvm::ConstantInt::get(*state.TheContext,
+                                   llvm::APInt(NumBits, Val, Signed)),
+            llvm::Type::getInt64Ty(*state.TheContext)};
+  } else if (NumBits == 32) {
+    return {llvm::ConstantInt::get(
+                *state.TheContext,
+                llvm::APInt(NumBits, static_cast<int32_t>(Val), Signed)),
+            llvm::Type::getInt32Ty(*state.TheContext)};
+  }
+  std::cout << "IntExprAST::codegen Unsupported number of bits" << std::endl;
+  return {nullptr, nullptr};
 }
 
 std::vector<std::variant<size_t, std::string>>

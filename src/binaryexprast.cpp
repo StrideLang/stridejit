@@ -291,11 +291,60 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       }
       break;
     }
+    case '/': {
+      if ((*LType)->isDoubleTy() && (*RType)->isDoubleTy()) {
+        Val = state.Builder->CreateFDiv(L, R, "divtmp");
+        Type = llvm::Type::getDoubleTy(*state.TheContext);
+      } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
+        Val = state.Builder->CreateSDiv(L, R, "divtmp");
+        Type = llvm::Type::getInt32Ty(*state.TheContext);
+      }
+      break;
+    }
+    case ':': { // equal
+      if ((*LType)->isDoubleTy() && (*RType)->isDoubleTy()) {
+        L = state.Builder->CreateFCmpUEQ(L, R, "cmptmp");
+      } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
+        L = state.Builder->CreateICmpEQ(L, R, "cmptmp");
+      }
+      // Convert bool 0/1 to double 0.0 or 1.0
+      Val = state.Builder->CreateUIToFP(
+          L, llvm::Type::getDoubleTy(*state.TheContext), "booltmp");
+      Type = llvm::Type::getInt1Ty(*state.TheContext);
+
+      break;
+    }
+    case '!': { // not equal
+      if ((*LType)->isDoubleTy() && (*RType)->isDoubleTy()) {
+        L = state.Builder->CreateFCmpUNE(L, R, "cmptmp");
+      } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
+        L = state.Builder->CreateICmpNE(L, R, "cmptmp");
+      }
+      // Convert bool 0/1 to double 0.0 or 1.0
+      Val = state.Builder->CreateUIToFP(
+          L, llvm::Type::getDoubleTy(*state.TheContext), "booltmp");
+      Type = llvm::Type::getInt1Ty(*state.TheContext);
+
+      break;
+    }
     case '<': {
       if ((*LType)->isDoubleTy() && (*RType)->isDoubleTy()) {
         L = state.Builder->CreateFCmpULT(L, R, "cmptmp");
       } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
         L = state.Builder->CreateICmpULT(L, R, "cmptmp");
+      }
+      // Convert bool 0/1 to double 0.0 or 1.0
+      Val = state.Builder->CreateUIToFP(
+          L, llvm::Type::getDoubleTy(*state.TheContext), "booltmp");
+      Type = llvm::Type::getInt1Ty(*state.TheContext);
+
+      break;
+    }
+    case '>': {
+      if ((*LType)->isDoubleTy() && (*RType)->isDoubleTy()) {
+        L = state.Builder->CreateFCmpUGT(L, R, "cmptmp");
+      } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
+        L = state.Builder->CreateICmpUGT(L, R, "cmptmp");
       }
       // Convert bool 0/1 to double 0.0 or 1.0
       Val = state.Builder->CreateUIToFP(

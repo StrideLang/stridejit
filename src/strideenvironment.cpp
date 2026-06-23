@@ -66,17 +66,12 @@ StrideEnvironment::StrideEnvironment(std::string strideRoot)
   std::cout << "Using STRIDEROOT = " << m_strideRoot << std::endl;
 }
 
-bool StrideEnvironment::generateIr(std::string path) {
+void StrideEnvironment::initializeJIT() {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
-  ASTNode tree;
-  tree = AST::parseFile(path.c_str());
-  if (!tree) {
-    for (auto &error : AST::getParseErrors()) {
-      std::cerr << error.getErrorText() << std::endl;
-    }
-    return false;
-  }
+}
+
+void StrideEnvironment::processTree(ASTNode tree) {
   auto systemNodes = ASTQuery::getSystemNodes(tree);
   if (systemNodes.size() == 0) {
     auto systemNode =
@@ -86,7 +81,19 @@ bool StrideEnvironment::generateIr(std::string path) {
 
   CodeResolver resolver(tree, ASTFunctions::getDefaultStrideRoot());
   resolver.process();
+}
 
+bool StrideEnvironment::generateIr(std::string path) {
+  ASTNode tree;
+  tree = AST::parseFile(path.c_str());
+  if (!tree) {
+    for (auto &error : AST::getParseErrors()) {
+      std::cerr << error.getErrorText() << std::endl;
+    }
+    return false;
+  }
+
+  processTree(tree);
   return generateIr(tree);
 }
 
@@ -116,7 +123,7 @@ bool StrideEnvironment::generateIr(ASTNode root) {
   if (!ASTFunctions::preprocess(root, &globalScope)) {
     return false;
   }
-  StrideGenerator::generateCode(root, globalScope, state);
+  StrideGenerator::compile(root, globalScope, state);
   //  if (mVerbose) {
   //    state.TheModule->print(llvm::outs(), nullptr);
   //    llvm::outs() << "\n";
@@ -183,7 +190,7 @@ bool StrideEnvironment::generateIr(ASTNode root) {
     }
 #endif
   }
-  if (mVerbose) {
+  if (m_verbose) {
     state.TheModule->print(llvm::outs(), nullptr);
     llvm::outs() << "\n";
   }
@@ -191,6 +198,7 @@ bool StrideEnvironment::generateIr(ASTNode root) {
 }
 
 bool StrideEnvironment::compileInMemory() {
+  initializeJIT();
 
   auto JTMB = llvm::orc::JITTargetMachineBuilder::detectHost();
   if (!JTMB) {
@@ -214,8 +222,11 @@ bool StrideEnvironment::compileInMemory() {
           //                  return ObjLinkingLayer;
           //              })
           .create();
-  if (!JIT_)
+  if (!JIT_) {
+    std::cerr << "JIT coulf not be created. Have you called initializeJIT()?"
+              << std::endl;
     return false; // JIT.takeError();
+  }
   JIT = std::move(*JIT_);
   auto librarySearch =
       llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(
@@ -453,6 +464,11 @@ bool StrideEnvironment::loadLibrary(const char *libName, std::string &err) {
 
 llvm::Expected<llvm::orc::ExecutorAddr>
 StrideEnvironment::getFunction(std::string functionName) {
+  if (!JIT) {
+    return llvm::make_error<llvm::StringError>("JIT not available",
+                                               llvm::inconvertibleErrorCode());
+    ;
+  }
   auto EntrySym = JIT->lookup(functionName.c_str());
   return EntrySym;
 }
