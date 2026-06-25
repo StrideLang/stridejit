@@ -461,7 +461,7 @@ TEST(Function, Simple) {
 
   strd::StrideEnvironment strenv;
 
-  auto stream = tree->getChildren()[3];
+  auto stream = tree->getChildren()[2];
   ASSERT_EQ(stream->getNodeType(), strd::AST::Stream);
 
   auto addFunc = std::static_pointer_cast<strd::FunctionNode>(
@@ -932,66 +932,65 @@ TEST(JIT, Polymorphism) {
   EXPECT_TRUE(compReal);
 }
 
+TEST(JIT, PortPropertySize) {
+
+  strd::StrideEnvironment strenv;
+
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "port_property_size.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+
+  EXPECT_NE(Entry, nullptr);
+  int32_t In[16] = {0};
+  int32_t Out[2] = {0};
+  Entry(In, Out);
+
+  EXPECT_EQ(Out[0], 32);
+  EXPECT_EQ(Out[1], 8);
+}
+
+TEST(JIT, Loop) {
+
+  strd::StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "loop.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.JIT->lookup("RootDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+
+  EXPECT_NE(Entry, nullptr);
+  int32_t List[20] = {1000, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                      1,    1, 1, 1, 1, 1, 1, 1, 1, 100};
+  int32_t Out = 0;
+  Entry(List, &Out);
+
+  EXPECT_EQ(Out, 1118);
+}
+
 ///  -------------------------------------------------
 ///  -------------------------------------------------
 ///  All Above should pass
 ///  -------------------------------------------------
 ///  -------------------------------------------------
-
-// TEST(JIT, PortPropertySize) {
-
-//   strd::StrideEnvironment strenv;
-
-//   auto ret =
-//       strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
-//       "port_property_size.stride");
-//   EXPECT_TRUE(ret);
-//   ret = strenv.compileInMemory();
-//   EXPECT_TRUE(ret);
-
-//   llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-//       strenv.getFunction("RootDomain_process");
-
-//   if (!EntrySym) {
-//     std::cerr << "No entry" << std::endl;
-//   }
-
-//   auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-//   EXPECT_NE(Entry, nullptr);
-//   double In[16] = {0};
-//   double Out[2] = {0};
-//   Entry(In, Out);
-
-//   EXPECT_EQ(Out[0], 32);
-//   EXPECT_EQ(Out[1], 8);
-// }
-
-// TEST(JIT, Loop) {
-
-//   strd::StrideEnvironment strenv;
-
-//   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "loop.stride");
-//   EXPECT_TRUE(ret);
-//   ret = strenv.compileInMemory();
-//   EXPECT_TRUE(ret);
-
-//   llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-//       strenv.JIT->lookup("RootDomain_process");
-//   if (!EntrySym) {
-//     std::cerr << "No entry" << std::endl;
-//   }
-
-//   auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-//   EXPECT_NE(Entry, nullptr);
-//   double List[20] = {1000, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//                      1,    1, 1, 1, 1, 1, 1, 1, 1, 100};
-//   double Out = 0;
-//   Entry(List, &Out);
-
-//   EXPECT_EQ(Out, 1118);
-// }
 
 // TEST(JIT, LoopIterator) {
 

@@ -28,7 +28,7 @@ TEST(JIT, Create) {
   strd::CodeResolver resolver{tree, ""};
   resolver.process();
 
-  strd::StrideGenerator::generateCode(tree, scope, strenv.state);
+  strd::StrideGenerator::generateCodeForTree(tree, scope, strenv.state);
   strenv.state.TheModule->print(llvm::outs(), nullptr);
   llvm::outs() << "\n";
 
@@ -63,7 +63,7 @@ TEST(JIT, Create) {
           llvm::orc::ThreadSafeModule(std::move(strenv.state.TheModule),
                                       std::move(strenv.state.TheContext)))) {
   }
-  auto EntrySym = (*JIT)->lookup("RootDomain_process");
+  auto EntrySym = (*JIT)->lookup("AddTwo");
   if (!EntrySym) {
     std::cerr << "No entry" << std::endl;
   }
@@ -71,7 +71,8 @@ TEST(JIT, Create) {
   auto *Entry = EntrySym->toPtr<void (*)(...)>();
 
   double out = 0;
+  double in = 3;
 
-  Entry(&out);
+  Entry(&out, &in);
   EXPECT_EQ(out, 5);
 }

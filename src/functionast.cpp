@@ -750,7 +750,6 @@ CallExprAST::codegen(StrideCompiler &state) {
     std::vector<llvm::Value *> CallArgsValues;
     for (const auto &p : CallArgs) {
       CallArgsValues.push_back(p.first);
-      std::cout << std::string(p.first->getName()) << ", ";
     }
     call =
         state.Builder->CreateCall(CalleeF, CallArgsValues, CalleeF->getName());
@@ -762,8 +761,6 @@ CallExprAST::codegen(StrideCompiler &state) {
     std::vector<llvm::Value *> CallArgsValues;
     for (const auto &p : CallArgs) {
       CallArgsValues.push_back(p.first);
-      p.first->print(llvm::outs());
-      llvm::outs() << "\n";
     }
     call =
         state.Builder->CreateCall(CalleeF, CallArgsValues, CalleeF->getName());

@@ -14,10 +14,6 @@ _domainDefinition RootDomain {
 	domainFunctionCode: ''
 }
 
-alias PlatformDomain {
-    block: RootDomain
-}
-
 module AddTwo {
     ports: [
         mainInputPort InputPort {

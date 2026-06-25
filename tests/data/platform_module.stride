@@ -1,0 +1,42 @@
+_domainDefinition TestDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+        signal InReal { domain: TestDomain type: _RealType }
+        signal InInt { domain: TestDomain type: _IntType }
+    ]
+    outputs: [
+        switch Out { domain: TestDomain }
+    ]
+	domainFunctionCode: ''
+}
+
+signal OutInt { type: _IntType }
+signal OutReal { type: _RealType }
+
+platformModule __Test1 {
+    inputs: [_IntType]
+	outputs: [_IntType]
+#    linkTo: []
+#    declarations: ['']
+    # initializations: ["// CPP Equal Init"]
+    processing: " = "
+    inherits: [_Signal]
+}
+
+platformModule __Test2 {
+    inputs: [_RealType]
+	outputs: [_RealType]
+#    linkTo: []
+#    declarations: ['']
+    # initializations: ["// CPP Equal Init"]
+    processing: " = "
+    inherits: [_Signal]
+}
+
+30 >> __Test1() >> OutInt;
+0.3 >> __Test2() >> OutReal;

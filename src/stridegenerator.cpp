@@ -977,7 +977,6 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
       funcDecl->getObjectType() == "loop") {
     // TODO grab correct scope, currently passing all.
     for (const auto &scopeEntry : *scope) {
-
       functionScope.back().second.insert(functionScope.back().second.begin(),
                                          scopeEntry.second.begin(),
                                          scopeEntry.second.end());
@@ -1094,9 +1093,13 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
         // declared internally according to whether it is read before it is
         // written to and whether this change is more performant. For now
         // al internal arguments are put in the function prototype.
-        auto type =
-            state.getLLVMTypeForCodegenBlock(decl, funcDecl, funcInstance);
-        InternalParams.push_back(PrototypeArg{name, type});
+        if (funcDecl->getObjectType() == "module") {
+          // Only modules keep state so they will have their internal variables
+          // stored externally.
+          auto type =
+              state.getLLVMTypeForCodegenBlock(decl, funcDecl, funcInstance);
+          InternalParams.push_back(PrototypeArg{name, type});
+        }
       }
     }
   }

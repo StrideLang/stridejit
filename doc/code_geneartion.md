@@ -44,3 +44,10 @@ Input and output blocks are passed by reference.
 
 Local variables are declared in the function scope, which triggers a reset on
 every call.
+
+# Scope
+
+All scope is local, i.e. within the same scope level, or within the same
+blocks/streams pair of properties inside a code generator.
+Inheriting from _DomainMember allows an object to be scoped in the parent scope
+as well as the root scope.
