@@ -954,7 +954,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
     std::shared_ptr<FunctionNode> funcInstance, ASTNode tree, ScopeStack *scope,
     StrideCompiler &state) {
 
-  // if (!ASTQuery::isCallable(funcDecl)) {
+  // if (!ASTQuery::isCallable(funcDecl, scope, tree)) {
   //   std::cerr << "ERROR: Can't create function for: " << funcDecl->toText()
   //             << std::endl
   //             << "is not _Callable." << std::endl;

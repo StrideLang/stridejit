@@ -7,10 +7,10 @@ _domainDefinition TestDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal In { domain: TestDomain }
+        signal In { domain: TestDomain type: _RealType }
     ]
     outputs: [
-        signal Out { domain: TestDomain }
+        signal Out { domain: TestDomain type: _RealType }
     ]
 	domainFunctionCode: ''
 }
