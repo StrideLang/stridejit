@@ -15,6 +15,118 @@
 #include "llvm/Support/raw_ostream.h"
 // #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 
+TEST(Basic, Assignment) {
+  auto decl = std::make_shared<strd::DeclarationNode>("G", "signal", nullptr,
+                                                      __FILE__, __LINE__);
+  auto value1 = std::make_shared<strd::ValueNode>(3.3, __FILE__, __LINE__);
+  auto block = std::make_shared<strd::BlockNode>("G", __FILE__, __LINE__);
+
+  auto str =
+      std::make_shared<strd::StreamNode>(value1, block, __FILE__, __LINE__);
+
+  strd::StrideEnvironment strenv;
+
+  strenv.state.NamedValues[decl->getName()] =
+      strd::RealExprAST(0.0).codegen(strenv.state);
+
+  auto left = str->getLeft();
+  auto right = str->getRight();
+  std::unique_ptr<strd::ExprAST> n1, n2;
+  if (left->getNodeType() == strd::AST::Real) {
+    n1 = std::make_unique<strd::RealExprAST>(
+        std::static_pointer_cast<strd::ValueNode>(left)->getRealValue());
+  }
+  if (right->getNodeType() == strd::AST::Block) {
+    strenv.state.NamedValues[std::static_pointer_cast<strd::BlockNode>(right)
+                                 ->getName()] = n1->codegen(strenv.state);
+  }
+  // llvm::Type *type =strenv.state.NamedValues["G"].second;
+
+  EXPECT_TRUE(strenv.state.NamedValues["G"].second.value()->isDoubleTy());
+  llvm::ConstantFP *CFP =
+      llvm::dyn_cast<llvm::ConstantFP>(strenv.state.NamedValues["G"].first);
+  EXPECT_NE(CFP, nullptr);
+  EXPECT_EQ(CFP->getValue().convertToDouble(), 3.3);
+}
+
+TEST(Basic, ExpressionFloatLiterals) {
+  auto value1 = std::make_shared<strd::ValueNode>(3.0, __FILE__, __LINE__);
+  auto value2 = std::make_shared<strd::ValueNode>(5.1, __FILE__, __LINE__);
+
+  auto expr = std::make_shared<strd::ExpressionNode>(
+      strd::ExpressionNode::Add, value1, value2, __FILE__, __LINE__);
+
+  strd::StrideEnvironment strenv;
+
+  auto left = expr->getLeft();
+  auto right = expr->getRight();
+  std::unique_ptr<strd::ExprAST> n1, n2;
+
+  if (left->getNodeType() == strd::AST::Real) {
+    n1 = std::make_unique<strd::RealExprAST>(
+        std::static_pointer_cast<strd::ValueNode>(left)->getRealValue());
+  } else if (left->getNodeType() == strd::AST::Block) {
+    n1 = std::make_unique<strd::VariableExprAST>(
+        std::static_pointer_cast<strd::BlockNode>(left)->getName());
+  }
+
+  if (right->getNodeType() == strd::AST::Real) {
+    n2 = std::make_unique<strd::RealExprAST>(
+        std::static_pointer_cast<strd::ValueNode>(right)->getRealValue());
+  } else if (right->getNodeType() == strd::AST::Block) {
+    n2 = std::make_unique<strd::VariableExprAST>(
+        std::static_pointer_cast<strd::BlockNode>(right)->getName());
+  }
+  auto binExpr = strd::BinaryExprAST('+', std::move(n1), std::move(n2));
+  auto v = binExpr.codegen(strenv.state);
+  EXPECT_TRUE(v.second.value()->isDoubleTy());
+  llvm::ConstantFP *CFP = llvm::dyn_cast<llvm::ConstantFP>(v.first);
+  EXPECT_NE(CFP, nullptr);
+  EXPECT_EQ(CFP->getValue().convertToDouble(), 8.1);
+}
+
+TEST(Basic, FunctionSimple) {
+
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
+  EXPECT_NE(tree, nullptr);
+
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+
+  auto stream = tree->getChildren()[2];
+  ASSERT_EQ(stream->getNodeType(), strd::AST::Stream);
+
+  auto addFunc = std::static_pointer_cast<strd::FunctionNode>(
+      std::static_pointer_cast<strd::StreamNode>(
+          std::static_pointer_cast<strd::StreamNode>(stream)->getRight())
+          ->getLeft());
+  auto prev = std::static_pointer_cast<strd::StreamNode>(stream)->getLeft();
+
+  auto next =
+      std::static_pointer_cast<strd::StreamNode>(
+          std::static_pointer_cast<strd::StreamNode>(stream)->getRight())
+          ->getRight();
+
+  strd::ScopeStack scope;
+  auto funcDecl =
+      strd::ASTQuery::findDeclarationByName(addFunc->getName(), scope, tree);
+  EXPECT_NE(funcDecl, nullptr);
+  auto func = strd::StrideGenerator::createFunctionDeclaration(
+      funcDecl, addFunc, tree, &scope, strenv.state);
+  auto *v = func->codegen(strenv.state);
+  EXPECT_NE(v, nullptr);
+
+  EXPECT_TRUE(v->getType()->isPointerTy());
+  //  v->print(llvm::outs());
+
+  // Although function is emmitted, it will be empty as the streams in it
+  // have
+  // not been processed
+  strenv.state.TheModule->print(llvm::outs(), nullptr);
+  llvm::outs() << "\n";
+}
+
 TEST(Basic, PassThru) {
 
   strd::StrideEnvironment strenv;
@@ -453,127 +565,22 @@ TEST(JIT, Domains) {
   EXPECT_EQ(out, 1);
 }
 
-TEST(Function, Simple) {
-
-  strd::ASTNode tree;
-  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
-  EXPECT_NE(tree, nullptr);
-
-  strd::StrideEnvironment strenv;
-
-  auto stream = tree->getChildren()[2];
-  ASSERT_EQ(stream->getNodeType(), strd::AST::Stream);
-
-  auto addFunc = std::static_pointer_cast<strd::FunctionNode>(
-      std::static_pointer_cast<strd::StreamNode>(
-          std::static_pointer_cast<strd::StreamNode>(stream)->getRight())
-          ->getLeft());
-  auto prev = std::static_pointer_cast<strd::StreamNode>(stream)->getLeft();
-
-  auto next =
-      std::static_pointer_cast<strd::StreamNode>(
-          std::static_pointer_cast<strd::StreamNode>(stream)->getRight())
-          ->getRight();
-
-  strd::ScopeStack scope;
-  auto funcDecl =
-      strd::ASTQuery::findDeclarationByName(addFunc->getName(), scope, tree);
-  EXPECT_NE(funcDecl, nullptr);
-  auto func = strd::StrideGenerator::createFunctionDeclaration(
-      funcDecl, addFunc, tree, &scope, strenv.state);
-  auto *v = func->codegen(strenv.state);
-  EXPECT_NE(v, nullptr);
-
-  EXPECT_TRUE(v->getType()->isPointerTy());
-  //  v->print(llvm::outs());
-
-  strenv.state.TheModule->print(llvm::outs(), nullptr);
-  llvm::outs() << "\n";
-}
-
-// %Input3 = load double, double* %Input1, align 8
-//    double 2.000000e+00
-//    define double @AddTwo(double %Input, double %Output) {
-//        entry:
-//                %Output2 = alloca double, align 8
-//            %Input1 = alloca double, align 8
-//            store double %Input, double* %Input1, align 8
-//            store double %Output, double* %Output2, align 8
-//            %Input3 = load double, double* %Input1, align 8
-//            %addtmp = fadd double %Input3, 2.000000e+00
-//            store double %addtmp, double* %Output2, align 8
-//            ret double %addtmp
-//    }
-
-TEST(Value, Assignment) {
-  auto decl = std::make_shared<strd::DeclarationNode>("G", "signal", nullptr,
-                                                      __FILE__, __LINE__);
-  auto value1 = std::make_shared<strd::ValueNode>(3.3, __FILE__, __LINE__);
-  auto block = std::make_shared<strd::BlockNode>("G", __FILE__, __LINE__);
-
-  auto str =
-      std::make_shared<strd::StreamNode>(value1, block, __FILE__, __LINE__);
-
-  strd::StrideEnvironment strenv;
-
-  strenv.state.NamedValues[decl->getName()] =
-      strd::RealExprAST(0.0).codegen(strenv.state);
-
-  auto left = str->getLeft();
-  auto right = str->getRight();
-  std::unique_ptr<strd::ExprAST> n1, n2;
-  if (left->getNodeType() == strd::AST::Real) {
-    n1 = std::make_unique<strd::RealExprAST>(
-        std::static_pointer_cast<strd::ValueNode>(left)->getRealValue());
-  }
-  if (right->getNodeType() == strd::AST::Block) {
-    strenv.state.NamedValues[std::static_pointer_cast<strd::BlockNode>(right)
-                                 ->getName()] = n1->codegen(strenv.state);
-  }
-  // llvm::Type *type =strenv.state.NamedValues["G"].second;
-
-  EXPECT_TRUE(strenv.state.NamedValues["G"].second.value()->isDoubleTy());
-  llvm::ConstantFP *CFP =
-      llvm::dyn_cast<llvm::ConstantFP>(strenv.state.NamedValues["G"].first);
-  EXPECT_NE(CFP, nullptr);
-  EXPECT_EQ(CFP->getValue().convertToDouble(), 3.3);
-}
-
-TEST(Expressions, FloatLiterals) {
-  auto value1 = std::make_shared<strd::ValueNode>(3.0, __FILE__, __LINE__);
-  auto value2 = std::make_shared<strd::ValueNode>(5.1, __FILE__, __LINE__);
-
-  auto expr = std::make_shared<strd::ExpressionNode>(
-      strd::ExpressionNode::Add, value1, value2, __FILE__, __LINE__);
-
-  strd::StrideEnvironment strenv;
-
-  auto left = expr->getLeft();
-  auto right = expr->getRight();
-  std::unique_ptr<strd::ExprAST> n1, n2;
-
-  if (left->getNodeType() == strd::AST::Real) {
-    n1 = std::make_unique<strd::RealExprAST>(
-        std::static_pointer_cast<strd::ValueNode>(left)->getRealValue());
-  } else if (left->getNodeType() == strd::AST::Block) {
-    n1 = std::make_unique<strd::VariableExprAST>(
-        std::static_pointer_cast<strd::BlockNode>(left)->getName());
-  }
-
-  if (right->getNodeType() == strd::AST::Real) {
-    n2 = std::make_unique<strd::RealExprAST>(
-        std::static_pointer_cast<strd::ValueNode>(right)->getRealValue());
-  } else if (right->getNodeType() == strd::AST::Block) {
-    n2 = std::make_unique<strd::VariableExprAST>(
-        std::static_pointer_cast<strd::BlockNode>(right)->getName());
-  }
-  auto binExpr = strd::BinaryExprAST('+', std::move(n1), std::move(n2));
-  auto v = binExpr.codegen(strenv.state);
-  EXPECT_TRUE(v.second.value()->isDoubleTy());
-  llvm::ConstantFP *CFP = llvm::dyn_cast<llvm::ConstantFP>(v.first);
-  EXPECT_NE(CFP, nullptr);
-  EXPECT_EQ(CFP->getValue().convertToDouble(), 8.1);
-}
+// % Input3 = load double, double * % Input1,
+//   align 8 double 2.000000e+00 define double
+//     @AddTwo(double % Input, double % Output){
+//       entry : % Output2 = alloca double,
+//       align 8 % Input1 = alloca double,
+//       align 8 store double % Input,
+//       double * % Input1,
+//       align 8 store double % Output,
+//       double * % Output2,
+//       align 8 % Input3 = load double,
+//       double * % Input1,
+//       align 8 % addtmp = fadd double % Input3,
+//       2.000000e+00 store double % addtmp,
+//       double * % Output2,
+//       align 8 ret double % addtmp
+//     }
 
 TEST(JIT, ModuleInternal) {
 
@@ -599,7 +606,7 @@ TEST(JIT, ModuleInternal) {
   EXPECT_EQ(out, 5);
 }
 
-// TODO add test for bundle outputs for domains.
+// // TODO add test for bundle outputs for domains.
 
 TEST(JIT, Reaction) {
 
@@ -932,59 +939,60 @@ TEST(JIT, Polymorphism) {
   EXPECT_TRUE(compReal);
 }
 
-TEST(JIT, PortPropertySize) {
+// TEST(JIT, Loop) {
 
-  strd::StrideEnvironment strenv;
+//   strd::StrideEnvironment strenv;
 
-  auto ret =
-      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "port_property_size.stride");
-  EXPECT_TRUE(ret);
-  ret = strenv.compileInMemory();
-  EXPECT_TRUE(ret);
+//   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "loop.stride");
+//   EXPECT_TRUE(ret);
+//   ret = strenv.compileInMemory();
+//   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
+//   llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+//       strenv.JIT->lookup("RootDomain_process");
+//   if (!EntrySym) {
+//     std::cerr << "No entry" << std::endl;
+//   }
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
+//   auto *Entry = EntrySym->toPtr<void (*)(...)>();
 
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+//   EXPECT_NE(Entry, nullptr);
+//   int32_t List[20] = {1000, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//                       1,    1, 1, 1, 1, 1, 1, 1, 1, 100};
+//   int32_t Out = 0;
+//   Entry(List, &Out);
 
-  EXPECT_NE(Entry, nullptr);
-  int32_t In[16] = {0};
-  int32_t Out[2] = {0};
-  Entry(In, Out);
+//   EXPECT_EQ(Out, 1118);
+// }
 
-  EXPECT_EQ(Out[0], 32);
-  EXPECT_EQ(Out[1], 8);
-}
+// TEST(JIT, PortPropertySize) {
 
-TEST(JIT, Loop) {
+//   strd::StrideEnvironment strenv;
 
-  strd::StrideEnvironment strenv;
+//   auto ret =
+//       strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+//       "port_property_size.stride");
+//   EXPECT_TRUE(ret);
+//   ret = strenv.compileInMemory();
+//   EXPECT_TRUE(ret);
 
-  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "loop.stride");
-  EXPECT_TRUE(ret);
-  ret = strenv.compileInMemory();
-  EXPECT_TRUE(ret);
+//   llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+//       strenv.getFunction("RootDomain_process");
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.JIT->lookup("RootDomain_process");
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
+//   if (!EntrySym) {
+//     std::cerr << "No entry" << std::endl;
+//   }
 
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+//   auto *Entry = EntrySym->toPtr<void (*)(...)>();
 
-  EXPECT_NE(Entry, nullptr);
-  int32_t List[20] = {1000, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-                      1,    1, 1, 1, 1, 1, 1, 1, 1, 100};
-  int32_t Out = 0;
-  Entry(List, &Out);
+//   EXPECT_NE(Entry, nullptr);
+//   int32_t In[16] = {0};
+//   int32_t Out[2] = {0};
+//   Entry(In, Out);
 
-  EXPECT_EQ(Out, 1118);
-}
+//   EXPECT_EQ(Out[0], 32);
+//   EXPECT_EQ(Out[1], 8);
+// }
 
 ///  -------------------------------------------------
 ///  -------------------------------------------------

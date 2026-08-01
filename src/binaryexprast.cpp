@@ -209,8 +209,13 @@ BinaryExprAST::codegen(StrideCompiler &state) {
           }
           const std::string *strIdx = std::get_if<std::string>(&idx);
           if (strIdx) {
-            idxList.push_back(state.NamedValues[*strIdx].first);
+            if (state.NamedValues.find(*strIdx) != state.NamedValues.end()) {
+              idxList.push_back(state.NamedValues[*strIdx].first);
+            } else {
+              assert(0 == 1); // we shouldn't get here
+            }
           }
+          // TODO explore using CreateInBoundsGEP when possible
           auto GEP = state.Builder->CreateGEP(LType.value(), L, idxList);
           L = state.Builder->CreateLoad(LType.value(), GEP, varExpr->getName());
         } else {
@@ -383,7 +388,7 @@ BoolExprAST::codegen(StrideCompiler &state) {
 
 std::pair<llvm::Value *, std::optional<llvm::Type *>>
 PortPropertyAST::codegen(StrideCompiler &state) {
-
+  // TODO mangle port property names to avoid clashes
   std::string portToken = Name + "_" + Property;
   if (state.NamedValues.find(portToken) == state.NamedValues.end()) {
     return {

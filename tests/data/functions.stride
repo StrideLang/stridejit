@@ -9,7 +9,7 @@ _domainDefinition RootDomain {
     inputs: [
     ]
     outputs: [
-        signal Out { domain: RootDomain }
+        signal Out { domain: RootDomain type: _RealType }
     ]
 	domainFunctionCode: ''
 }

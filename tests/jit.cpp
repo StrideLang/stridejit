@@ -25,8 +25,7 @@ TEST(JIT, Create) {
   strd::StrideEnvironment strenv;
   strd::ScopeStack scope;
 
-  strd::CodeResolver resolver{tree, ""};
-  resolver.process();
+  strenv.prepareTree(tree);
 
   strd::StrideGenerator::generateCodeForTree(tree, scope, strenv.state);
   strenv.state.TheModule->print(llvm::outs(), nullptr);

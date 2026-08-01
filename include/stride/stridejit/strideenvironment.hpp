@@ -27,7 +27,7 @@ public:
   bool generateIr(std::string path);
   bool generateIr(strd::ASTNode root);
 
-  void processTree(ASTNode tree);
+  void prepareTree(ASTNode tree);
 
   // JIT
   void initializeJIT();

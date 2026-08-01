@@ -36,9 +36,9 @@ enum class CallableType {
 ///
 class PrototypeAST {
   std::string Name;
-  std::vector<PrototypeArg> Args;
+  std::vector<PrototypeArg> InArgs;
   std::vector<PrototypeArg> OutArgs;
-  std::vector<PrototypeArg> InternalArgs; // For internal scope variables.
+  std::vector<PrototypeArg> InternalPersistentArgs; // For internal scope variables.
   std::vector<PrototypeArg>
       ExternalArgs; // For upper scope in reactions and loops
   std::vector<PrototypeArg> UsedPortProperties;
@@ -47,18 +47,19 @@ class PrototypeAST {
 
 public:
   PrototypeAST(const std::string &Name, std::vector<PrototypeArg> OutArgs,
-               std::vector<PrototypeArg> Args,
+               std::vector<PrototypeArg> InArgs,
                std::vector<PrototypeArg> InternalArgs,
                std::vector<PrototypeArg> ExternalArgs,
                std::vector<PrototypeArg> UsedPortProperties,
                bool IsOperator = false, unsigned Prec = 0)
-      : Name(Name), Args(Args), OutArgs(OutArgs), InternalArgs(InternalArgs),
-        ExternalArgs(ExternalArgs), UsedPortProperties(UsedPortProperties) {}
+      : Name(Name), InArgs(InArgs), OutArgs(OutArgs),
+        InternalPersistentArgs(InternalArgs), ExternalArgs(ExternalArgs),
+        UsedPortProperties(UsedPortProperties) {}
 
   llvm::Function *codegen(StrideCompiler &state);
   const std::string &getName() const { return Name; }
-  bool isUnaryOp() const { return IsOperator && Args.size() == 1; }
-  bool isBinaryOp() const { return IsOperator && Args.size() == 2; }
+  bool isUnaryOp() const { return IsOperator && InArgs.size() == 1; }
+  bool isBinaryOp() const { return IsOperator && InArgs.size() == 2; }
   char getOperatorName() const;
   unsigned getBinaryPrecedence() const { return Precedence; }
 
@@ -92,7 +93,7 @@ public:
   CallableType callType;
 
 private:
-  void allocateLocalVariables(StrideCompiler &state,
+  void allocateInternalVariables(StrideCompiler &state,
                               llvm::Function *TheFunction);
 };
 

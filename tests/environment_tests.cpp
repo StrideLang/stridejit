@@ -45,7 +45,7 @@ TEST(StrideEnvironmentTest, ProcessTreeWithValidAST) {
       strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
 
   if (tree != nullptr) {
-    EXPECT_NO_THROW(env.processTree(tree));
+    EXPECT_NO_THROW(env.prepareTree(tree));
   }
 }
 

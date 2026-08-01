@@ -71,7 +71,7 @@ void StrideEnvironment::initializeJIT() {
   llvm::InitializeNativeTargetAsmPrinter();
 }
 
-void StrideEnvironment::processTree(ASTNode tree) {
+void StrideEnvironment::prepareTree(ASTNode tree) {
   auto systemNodes = ASTQuery::getSystemNodes(tree);
   if (systemNodes.size() == 0) {
     auto systemNode =
@@ -93,7 +93,7 @@ bool StrideEnvironment::generateIr(std::string path) {
     return false;
   }
 
-  processTree(tree);
+  prepareTree(tree);
   return generateIr(tree);
 }
 
@@ -240,15 +240,12 @@ bool StrideEnvironment::compileInMemory() {
   if (!loadLibrary("m", err)) {
     std::cerr << "Failed to load m: " << err << std::endl;
   }
-  if (!loadLibrary("StrideLib", err)) {
-    std::cerr << "Failed to load StrideLib: " << err << std::endl;
-  }
+  // if (!loadLibrary("StrideLib", err)) {
+  //   std::cerr << "Failed to load StrideLib: " << err << std::endl;
+  // }
   if (!llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr, &err)) {
     std::cerr << "Failed to load current symbols: " << err << std::endl;
   }
-  //  if (!llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr, &err)) {
-  //    std::cerr << "Failed to load current symbols: " << err << std::endl;
-  //  }
   JIT->getMainJITDylib().addGenerator(llvm::cantFail(
       llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess('a')));
   llvm::orc::SymbolMap M;

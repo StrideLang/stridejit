@@ -10,7 +10,7 @@ _domainDefinition RootDomain {
         signal In { domain: RootDomain type: _RealType }
     ]
     outputs: [
-        switch Out { domain: RootDomain }
+        switch Out { domain: RootDomain type: _SwitchType }
     ]
 	domainFunctionCode: ''
 }

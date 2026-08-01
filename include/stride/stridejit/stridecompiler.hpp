@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "stride/codegen/codeanalysis.hpp"
 #include "stride/parser/declarationnode.h"
 #include "stride/parser/functionnode.h"
 #include "stride/stridejit/functionast.hpp"
@@ -115,6 +116,8 @@ public:
   std::map<std::string, llvm::Value *> PortBlockMap;
   std::map<std::string, std::unique_ptr<PrototypeAST>> FunctionProtos;
   std::map<char, int> BinopPrecedence;
+
+  CodeAnalysis::TypeTree m_intanceTree;
 
   std::unordered_map<std::string, std::vector<ExternalFunction>> functionMap;
   std::unordered_map<std::string, llvm::Type *> typesMap;

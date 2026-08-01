@@ -6,12 +6,44 @@ _domainDefinition RootDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal In {domain: RootDomain}
+        signal In {domain: RootDomain type: _RealType}
     ]
     outputs: [
-        signal Out {domain: RootDomain}
+        signal Out {domain: RootDomain type: _RealType}
     ]
 	domainFunctionCode: ''
+}
+
+module Greater {
+    ports: [
+        mainOutputPort OutputPort {
+            name:       'output'
+            block: Output
+        },
+        mainInputPort InputPort {
+            name:       'input'
+            block: Input
+            meta: "A list with the two values to be compared"
+        }
+    ]
+    blocks: [
+        signal Input[2] {domain: OutputPort.domain}
+		switch Output {domain: OutputPort.domain}
+    ]
+    streams: [
+       [Input[0], Input[1]] >> __Greater() >> Output;
+    ]
+    meta: "Compare two input values."
+}
+
+platformModule Greater@Int_Bool {
+    inputs: [_IntType, _IntType]
+	outputs: [_SwitchType]
+#    linkTo: []
+#    declarations: ['']
+    # initializations: ["// CPP Greater Init"]
+    processing: "icmp gt"
+    inherits: [_Signal]
 }
 
 module Max {
@@ -24,12 +56,11 @@ module Max {
         }
     ]
     blocks: [
-        signal Input {}
-        signal Output { default: 0 reset:Reset }
+        signal Input { type: _RealType domain: OutputPort.domain }
+        signal Output { type: _RealType domain: OutputPort.domain type: _RealType }
     ]
     streams: [
         [Input, 5.0] >> Greater() >> reaction { Input >> Output; };
-
     ]
 }
 

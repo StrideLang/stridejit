@@ -14,6 +14,39 @@ _domainDefinition RootDomain {
 	domainFunctionCode: ''
 }
 
+module Equal {
+    ports: [
+        mainOutputPort OutputPort {
+            name:       'output'
+            block: Output
+        },
+        mainInputPort InputPort {
+            name:       'input'
+            block: Input
+			meta: "A list with the two values to be compared"
+        }
+    ]
+    blocks: [
+        signal Input[2] {domain: OutputPort.domain}
+		switch Output {domain: OutputPort.domain}
+    ]
+    streams: [
+       [Input[0], Input[1]] >> __Equal() >> Output;
+    ]
+    meta: "Compare two input values."
+}
+
+platformModule __Equal@Int_Bool {
+    inputs: [_IntType, _IntType]
+	outputs: [_SwitchType]
+#    linkTo: []
+#    declarations: ['']
+    # initializations: ["// CPP Greater Init"]
+    processing: "icmp eq"
+    inherits: [_Signal]
+}
+
+
 loop Add {
 	ports: [
 		mainInputPort InputPort {
