@@ -64,7 +64,8 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
     // Create entry block stack allocation
     llvm::AllocaInst *alloca =
         state.CreateEntryBlockAlloca(TheFunction, varName, type);
-    // Register in NamedValues so VariableExprAST and assignments locate the alloca
+    // Register in NamedValues so VariableExprAST and assignments locate the
+    // alloca
     state.NamedValues[varName] = {alloca, type};
     // (Optional) Initialize default value if specified by the declaration
     auto defaultNode = decl->getPropertyValue("default");
@@ -72,8 +73,6 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
       // Create store instruction for default value if applicable
     }
   }
-
-
 }
 
 llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
@@ -733,7 +732,7 @@ CallExprAST::codegen(StrideCompiler &state) {
   llvm::outs() << "Call Arguments: ";
   for (const auto &arg : CallArgs) {
     arg.first->print(llvm::outs());
-    llvm::outs() << ", ";
+    llvm::outs() << "|, ";
   }
   llvm::outs() << "\n";
   llvm::outs().flush();

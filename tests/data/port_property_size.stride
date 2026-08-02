@@ -30,12 +30,12 @@ module PortProperty {
         signal Output { type: _IntType }
     ]
     streams: [
-        2 * InputPort.size >> Output;
+        (Input[0] + 2) * InputPort.size >> Output;
     ]
 }
 
 signal InternalList[4] {
-    default: [1,2,3,4]
+    default: [0, 1, 2, 3]
     domain: RootDomain
     type: _IntType
 }
