@@ -26,10 +26,11 @@ module Add {
     ]
     blocks: [
         signal Input[2] { type: _IntType}
+        signal Internal[2] {type: _IntType default: [1,2]}
         signal Output {type: _IntType}
     ]
     streams: [
-        Input[0] + Input[1] >> Output;
+        Internal[0] + Internal[1] + Input[0] + Input[1] >> Output;
     ]
 }
 

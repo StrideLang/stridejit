@@ -81,6 +81,14 @@ public:
   llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
                                            llvm::StringRef VarName,
                                            llvm::Type *dataType);
+  llvm::AllocaInst *CreateEntryBlockAllocaArray(llvm::Function *TheFunction,
+                                                llvm::StringRef VarName,
+                                                llvm::Type *dataType,
+                                                size_t size);
+  llvm::AllocaInst *
+  CreateEntryBlockAllocaArrayConst(llvm::Function *TheFunction,
+                                   llvm::StringRef VarName,
+                                   llvm::Type *dataType, size_t size);
 
   // Globals in current name prefix
   void createGlobal(std::shared_ptr<DeclarationNode> globalDecl);

@@ -109,6 +109,35 @@ StrideCompiler::CreateEntryBlockAlloca(llvm::Function *TheFunction,
   return Alloca;
 }
 
+llvm::AllocaInst *
+StrideCompiler::CreateEntryBlockAllocaArray(llvm::Function *TheFunction,
+                                            llvm::StringRef VarName,
+                                            llvm::Type *dataType, size_t size) {
+
+  llvm::ArrayType *arrayTy = llvm::ArrayType::get(dataType, size);
+  llvm::IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                         TheFunction->getEntryBlock().begin());
+
+  llvm::AllocaInst *arrayPtr = TmpB.CreateAlloca(arrayTy, nullptr, VarName);
+  // auto *Alloca = TmpB.CreateAlloca(dataType, nullptr, VarName);
+  pointerElementTypes[arrayPtr] = dataType;
+  return arrayPtr;
+}
+
+llvm::AllocaInst *StrideCompiler::CreateEntryBlockAllocaArrayConst(
+    llvm::Function *TheFunction, llvm::StringRef VarName, llvm::Type *dataType,
+    size_t size) {
+
+  llvm::ArrayType *arrayTy = llvm::ArrayType::get(dataType, size);
+  llvm::IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                         TheFunction->getEntryBlock().begin());
+
+  llvm::AllocaInst *arrayPtr = TmpB.CreateAlloca(arrayTy, nullptr, VarName);
+  // auto *Alloca = TmpB.CreateAlloca(dataType, nullptr, VarName);
+  pointerElementTypes[arrayPtr] = dataType;
+  return arrayPtr;
+}
+
 void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
   auto namePrefix = getName();
   std::string fullName;

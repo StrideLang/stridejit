@@ -30,6 +30,8 @@
 #include "stride/parser/blocknode.h"
 #include "stride/parser/valuenode.h"
 
+#include "stride/utils/astquery.h"
+
 #include <iostream>
 
 using namespace strd;
@@ -60,17 +62,160 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
   // Allocate non-persistent local internal variables on the stack
   for (const auto &decl : internalVariables) {
     std::string varName = decl->getName();
-    llvm::Type *type = state.getLLVMType(decl);
-    // Create entry block stack allocation
-    llvm::AllocaInst *alloca =
-        state.CreateEntryBlockAlloca(TheFunction, varName, type);
-    // Register in NamedValues so VariableExprAST and assignments locate the
-    // alloca
-    state.NamedValues[varName] = {alloca, type};
-    // (Optional) Initialize default value if specified by the declaration
     auto defaultNode = decl->getPropertyValue("default");
     if (defaultNode) {
-      // Create store instruction for default value if applicable
+      if (decl->getNodeType() == AST::Declaration) {
+        llvm::Type *type = state.getLLVMType(decl);
+        // Create entry block stack allocation
+        llvm::AllocaInst *alloca =
+            state.CreateEntryBlockAlloca(TheFunction, varName, type);
+        // Register in NamedValues so VariableExprAST and assignments locate the
+        // alloca
+        state.NamedValues[varName] = {alloca, type};
+
+        // Set default values. Should be initialized on every function call as
+        // they are not persistent
+        // Should we optmize here if values are not modified, or just defer to
+        // the compiler?
+        if (defaultNode->getNodeType() == AST::Int) {
+          llvm::Value *intVal = state.Builder->getInt64(
+              std::static_pointer_cast<ValueNode>(defaultNode)->getIntValue());
+          state.Builder->CreateStore(intVal, alloca);
+        } else if (defaultNode->getNodeType() == AST::Real) {
+          llvm::Value *realVal = llvm::ConstantFP::get(
+              *state.TheContext,
+              llvm::APFloat(std::static_pointer_cast<ValueNode>(defaultNode)
+                                ->getRealValue()));
+          state.Builder->CreateStore(realVal, alloca);
+        } else {
+          std::cerr << __FILE__ << ":" << __LINE__
+                    << " ERROR: type not supported for default" << std::endl;
+          assert(0 == 1);
+        }
+      } else if (decl->getNodeType() == AST::BundleDeclaration) {
+        llvm::Type *Int32Ty = state.Builder->getInt32Ty();
+        int size = ASTQuery::getBlockDeclaredSize(decl, {}, nullptr);
+        llvm::Type *type = state.getLLVMType(decl);
+
+        // TODO support non-literal bundle sizes. We need to have the tree here,
+        // or have previously passed the size so that we know it here.
+        llvm::AllocaInst *alloca =
+            state.CreateEntryBlockAllocaArray(TheFunction, varName, type, size);
+        // TODO optmize when possible for const arrays.
+        // llvm::AllocaInst *alloca =
+        //     state.CreateEntryBlockAllocaArrayConst(TheFunction, varName,
+        //     type, size);
+        if (defaultNode->getNodeType() == AST::Int) {
+          assert(0 == 1); // TODO implement
+          auto functionName = TheFunction->getName();
+
+          llvm::BasicBlock *EntryBB = &TheFunction->getEntryBlock();
+          state.Builder->SetInsertPoint(EntryBB);
+
+          // 2. Create Basic Blocks for the Loop
+          llvm::BasicBlock *CondBB = llvm::BasicBlock::Create(
+              *state.TheContext, functionName + "_loop.cond", TheFunction);
+          llvm::BasicBlock *BodyBB = llvm::BasicBlock::Create(
+              *state.TheContext, functionName + "_loop.body", TheFunction);
+          llvm::BasicBlock *IncBB = llvm::BasicBlock::Create(
+              *state.TheContext, functionName + "_loop.inc", TheFunction);
+          llvm::BasicBlock *EndBB = llvm::BasicBlock::Create(
+              *state.TheContext, functionName + "_loop.end", TheFunction);
+
+          // Jump from entry into the condition block
+          state.Builder->CreateBr(CondBB);
+
+          // --- CONDITION BLOCK (Host for the PHI Node) ---
+          state.Builder->SetInsertPoint(CondBB);
+
+          // Create the PHI node for loop index 'i'
+          // It takes 2 incoming values: one from EntryBB, one from IncBB
+          llvm::PHINode *CurrI = state.Builder->CreatePHI(Int32Ty, 2, "i");
+          CurrI->addIncoming(state.Builder->getInt32(0),
+                             EntryBB); // Initial value: i = 0
+
+          // TODO handle dynamic sizes
+          // Condition check:
+          llvm::Value *Cmp = state.Builder->CreateICmpSLT(
+              CurrI, state.Builder->getInt32(size), "cmp");
+          state.Builder->CreateCondBr(Cmp, BodyBB, EndBB);
+
+          // --- BODY BLOCK ---
+          state.Builder->SetInsertPoint(BodyBB);
+
+          llvm::Value *Val = state.Builder->getInt64(
+              std::static_pointer_cast<ValueNode>(defaultNode)->getIntValue());
+
+          // Compute pointer to arr[i] using two indices {0, i}
+          llvm::Value *IdxList[] = {state.Builder->getInt32(0), CurrI};
+          llvm::Value *ElemPtr = state.Builder->CreateInBoundsGEP(
+              type, alloca, IdxList, "elem.ptr");
+
+          // Store value into array memory
+          state.Builder->CreateStore(Val, ElemPtr);
+          state.Builder->CreateBr(IncBB);
+
+          // --- INCREMENT BLOCK ---
+          state.Builder->SetInsertPoint(IncBB);
+
+          // next_i = i + 1
+          llvm::Value *NextI = state.Builder->CreateAdd(
+              CurrI, state.Builder->getInt32(1), "next.i");
+
+          // Wire up the 2nd incoming value for the PHI node back in CondBB
+          CurrI->addIncoming(NextI, IncBB);
+
+          state.Builder->CreateBr(CondBB);
+
+          // --- END BLOCK ---
+          state.Builder->SetInsertPoint(EndBB);
+
+        } else if (defaultNode->getNodeType() == AST::Real) {
+          assert(0 == 1); // TODO implement
+          // llvm::Value *realVal = llvm::ConstantFP::get(
+          //     *state.TheContext,
+          //     llvm::APFloat(std::static_pointer_cast<ValueNode>(defaultNode)
+          //                       ->getRealValue()));
+          // state.Builder->CreateStore(realVal, alloca);
+        } else if (defaultNode->getNodeType() == AST::List) {
+
+          for (int i = 0; i < size; i++) {
+            llvm::Value *Val = nullptr;
+            if (type == state.Builder->getInt32Ty()) {
+              Val = state.Builder->getInt32(std::static_pointer_cast<ValueNode>(
+                                                defaultNode->getChildren()[i])
+                                                ->getIntValue());
+
+            } else if (type == state.Builder->getDoubleTy()) {
+              Val = llvm::ConstantFP::get(
+                  *state.TheContext,
+                  llvm::APFloat(std::static_pointer_cast<ValueNode>(
+                                    defaultNode->getChildren()[i])
+                                    ->getRealValue()));
+            }
+            assert(Val != nullptr);
+
+            // Compute pointer to arr[i] using two indices {0, i}
+            llvm::Value *IdxList[] = {state.Builder->getInt32(0),
+                                      state.Builder->getInt32(i)};
+            llvm::ArrayType *arrayTy = llvm::ArrayType::get(type, size);
+            llvm::Value *ElemPtr = state.Builder->CreateInBoundsGEP(
+                arrayTy, alloca, IdxList, "elem.ptr");
+
+            // Store value into array memory
+            state.Builder->CreateStore(Val, ElemPtr);
+          }
+
+        } else {
+          std::cerr << __FILE__ << ":" << __LINE__
+                    << " ERROR: type not supported for default" << std::endl;
+          assert(0 == 1);
+        }
+
+        // Register in NamedValues so VariableExprAST and assignments locate the
+        // alloca
+        state.NamedValues[varName] = {alloca, type};
+      }
     }
   }
 }

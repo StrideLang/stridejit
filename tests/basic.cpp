@@ -906,7 +906,7 @@ TEST(JIT, BundleDefaults) {
 
   EXPECT_NE(Entry, nullptr);
   Entry(&out);
-  EXPECT_EQ(out, 7);
+  EXPECT_EQ(out, 10);
 }
 
 TEST(JIT, Polymorphism) {
