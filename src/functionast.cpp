@@ -105,34 +105,53 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
         // llvm::AllocaInst *alloca =
         //     state.CreateEntryBlockAllocaArrayConst(TheFunction, varName,
         //     type, size);
-        if (defaultNode->getNodeType() == AST::Int) {
-          assert(0 == 1); // TODO implement
+        if (defaultNode->getNodeType() == AST::Int ||
+            defaultNode->getNodeType() == AST::Real) {
+          llvm::Value *Val = nullptr;
+          if (defaultNode->getNodeType() == AST::Int) {
+            int64_t intVal =
+                std::static_pointer_cast<ValueNode>(defaultNode)->getIntValue();
+            if (type->isFloatingPointTy()) {
+              Val = llvm::ConstantFP::get(type, static_cast<double>(intVal));
+            } else {
+              Val = llvm::ConstantInt::get(type, intVal);
+            }
+          } else {
+            double realVal = std::static_pointer_cast<ValueNode>(defaultNode)
+                                 ->getRealValue();
+            if (type->isIntegerTy()) {
+              Val = llvm::ConstantInt::get(type, static_cast<int64_t>(realVal));
+            } else {
+              Val = llvm::ConstantFP::get(type, realVal);
+            }
+          }
+
           auto functionName = TheFunction->getName();
+          llvm::BasicBlock *PreLoopBB = state.Builder->GetInsertBlock();
 
-          llvm::BasicBlock *EntryBB = &TheFunction->getEntryBlock();
-          state.Builder->SetInsertPoint(EntryBB);
-
-          // 2. Create Basic Blocks for the Loop
+          // Create Basic Blocks for the Loop
           llvm::BasicBlock *CondBB = llvm::BasicBlock::Create(
-              *state.TheContext, functionName + "_loop.cond", TheFunction);
+              *state.TheContext, functionName + "_" + varName + "_loop.cond",
+              TheFunction);
           llvm::BasicBlock *BodyBB = llvm::BasicBlock::Create(
-              *state.TheContext, functionName + "_loop.body", TheFunction);
+              *state.TheContext, functionName + "_" + varName + "_loop.body",
+              TheFunction);
           llvm::BasicBlock *IncBB = llvm::BasicBlock::Create(
-              *state.TheContext, functionName + "_loop.inc", TheFunction);
+              *state.TheContext, functionName + "_" + varName + "_loop.inc",
+              TheFunction);
           llvm::BasicBlock *EndBB = llvm::BasicBlock::Create(
-              *state.TheContext, functionName + "_loop.end", TheFunction);
+              *state.TheContext, functionName + "_" + varName + "_loop.end",
+              TheFunction);
 
-          // Jump from entry into the condition block
+          // Jump from preceding block into condition block
           state.Builder->CreateBr(CondBB);
 
           // --- CONDITION BLOCK (Host for the PHI Node) ---
           state.Builder->SetInsertPoint(CondBB);
 
           // Create the PHI node for loop index 'i'
-          // It takes 2 incoming values: one from EntryBB, one from IncBB
           llvm::PHINode *CurrI = state.Builder->CreatePHI(Int32Ty, 2, "i");
-          CurrI->addIncoming(state.Builder->getInt32(0),
-                             EntryBB); // Initial value: i = 0
+          CurrI->addIncoming(state.Builder->getInt32(0), PreLoopBB);
 
           // TODO handle dynamic sizes
           // Condition check:
@@ -143,13 +162,11 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
           // --- BODY BLOCK ---
           state.Builder->SetInsertPoint(BodyBB);
 
-          llvm::Value *Val = state.Builder->getInt64(
-              std::static_pointer_cast<ValueNode>(defaultNode)->getIntValue());
-
           // Compute pointer to arr[i] using two indices {0, i}
           llvm::Value *IdxList[] = {state.Builder->getInt32(0), CurrI};
+          llvm::ArrayType *arrayTy = llvm::ArrayType::get(type, size);
           llvm::Value *ElemPtr = state.Builder->CreateInBoundsGEP(
-              type, alloca, IdxList, "elem.ptr");
+              arrayTy, alloca, IdxList, "elem.ptr");
 
           // Store value into array memory
           state.Builder->CreateStore(Val, ElemPtr);
@@ -170,28 +187,27 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
           // --- END BLOCK ---
           state.Builder->SetInsertPoint(EndBB);
 
-        } else if (defaultNode->getNodeType() == AST::Real) {
-          assert(0 == 1); // TODO implement
-          // llvm::Value *realVal = llvm::ConstantFP::get(
-          //     *state.TheContext,
-          //     llvm::APFloat(std::static_pointer_cast<ValueNode>(defaultNode)
-          //                       ->getRealValue()));
-          // state.Builder->CreateStore(realVal, alloca);
         } else if (defaultNode->getNodeType() == AST::List) {
 
           for (int i = 0; i < size; i++) {
             llvm::Value *Val = nullptr;
-            if (type == state.Builder->getInt32Ty()) {
-              Val = state.Builder->getInt32(std::static_pointer_cast<ValueNode>(
-                                                defaultNode->getChildren()[i])
-                                                ->getIntValue());
-
-            } else if (type == state.Builder->getDoubleTy()) {
-              Val = llvm::ConstantFP::get(
-                  *state.TheContext,
-                  llvm::APFloat(std::static_pointer_cast<ValueNode>(
-                                    defaultNode->getChildren()[i])
-                                    ->getRealValue()));
+            auto child = defaultNode->getChildren()[i];
+            if (child->getNodeType() == AST::Int) {
+              int64_t v =
+                  std::static_pointer_cast<ValueNode>(child)->getIntValue();
+              if (type->isFloatingPointTy()) {
+                Val = llvm::ConstantFP::get(type, static_cast<double>(v));
+              } else {
+                Val = llvm::ConstantInt::get(type, v);
+              }
+            } else if (child->getNodeType() == AST::Real) {
+              double v =
+                  std::static_pointer_cast<ValueNode>(child)->getRealValue();
+              if (type->isIntegerTy()) {
+                Val = llvm::ConstantInt::get(type, static_cast<int64_t>(v));
+              } else {
+                Val = llvm::ConstantFP::get(type, v);
+              }
             }
             assert(Val != nullptr);
 
@@ -965,6 +981,48 @@ CallExprAST::codegen(StrideCompiler &state) {
   return {call, std::nullopt};
 }
 
+std::string
+LLVMCommandAST::substituteTokens(const std::string &processingTemplate,
+                                 const std::vector<std::string> &inTokens,
+                                 const std::vector<std::string> &outTokens,
+                                 const std::string &bundleIndexStr) {
+  std::string result = processingTemplate;
+
+  auto replaceAll = [](std::string &str, const std::string &from,
+                       const std::string &to) {
+    if (from.empty())
+      return;
+    size_t startPos = 0;
+    while ((startPos = str.find(from, startPos)) != std::string::npos) {
+      str.replace(startPos, from.length(), to);
+      startPos += to.length();
+    }
+  };
+
+  replaceAll(result, "%%bundle_index%%", bundleIndexStr);
+  replaceAll(result, "%bundle_index%", bundleIndexStr);
+  replaceAll(result, "bundle_index", bundleIndexStr);
+
+  for (size_t i = 0; i < outTokens.size(); ++i) {
+    replaceAll(result, "%%outtokens:" + std::to_string(i) + "%%", outTokens[i]);
+    replaceAll(result, "%outtokens:" + std::to_string(i) + "%", outTokens[i]);
+    replaceAll(result, "outtokens:" + std::to_string(i), outTokens[i]);
+  }
+  if (!outTokens.empty()) {
+    replaceAll(result, "%%outtokens%%", outTokens[0]);
+    replaceAll(result, "%outtokens%", outTokens[0]);
+    replaceAll(result, "outtokens", outTokens[0]);
+  }
+
+  for (size_t i = 0; i < inTokens.size(); ++i) {
+    replaceAll(result, "%%intokens:" + std::to_string(i) + "%%", inTokens[i]);
+    replaceAll(result, "%intokens:" + std::to_string(i) + "%", inTokens[i]);
+    replaceAll(result, "intokens:" + std::to_string(i), inTokens[i]);
+  }
+
+  return result;
+}
+
 std::pair<llvm::Value *, std::optional<llvm::Type *>>
 LLVMCommandAST::codegen(StrideCompiler &state) {
   std::vector<std::pair<llvm::Value *, std::optional<llvm::Type *>>> CallArgs;
@@ -1046,20 +1104,102 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
 
   llvm::Value *outval{nullptr};
   std::optional<llvm::Type *> outtype;
-  if (command == "icmp gt") {
-    outval = state.Builder->CreateICmpSGT(CallArgs[0].first, CallArgs[1].first);
+
+  std::vector<std::string> inTokens;
+  std::vector<std::string> outTokens;
+
+  for (size_t i = 0; i < InArgs.size() && i < CallArgs.size(); ++i) {
+    llvm::Value *val = CallArgs[i].first;
+    if (val->hasName() && !val->getName().empty()) {
+      inTokens.push_back("%" + val->getName().str());
+    } else if (auto *ci = llvm::dyn_cast<llvm::ConstantInt>(val)) {
+      inTokens.push_back(std::to_string(ci->getSExtValue()));
+    } else if (auto *fp = llvm::dyn_cast<llvm::ConstantFP>(val)) {
+      inTokens.push_back(std::to_string(fp->getValueAPF().convertToDouble()));
+    } else {
+      std::string varName = "in_arg_" + std::to_string(i);
+      val->setName(varName);
+      inTokens.push_back("%" + varName);
+    }
+  }
+
+  for (size_t i = 0; i < OutArgs.size(); ++i) {
+    outTokens.push_back("%out_" + std::to_string(i));
+  }
+  if (outTokens.empty()) {
+    outTokens.push_back("%res");
+  }
+
+  std::string bundleIndexStr = "0";
+  std::string substituted =
+      substituteTokens(command, inTokens, outTokens, bundleIndexStr);
+  std::cout << "Substituted LLVM IR text: " << substituted << std::endl;
+
+  // Dispatch: llvm:: prefix means a native LLVM IR instruction.
+  // Format: "llvm::<mnemonic> [operands...]"
+  if (substituted.rfind("llvm::", 0) == 0) {
+    std::string instr = substituted.substr(6); // strip "llvm::"
+    llvm::Value *lhs = CallArgs.size() > 0 ? CallArgs[0].first : nullptr;
+    llvm::Value *rhs = CallArgs.size() > 1 ? CallArgs[1].first : nullptr;
+
+    if (instr.rfind("icmp sgt", 0) == 0) {
+      outval = state.Builder->CreateICmpSGT(lhs, rhs);
+    } else if (instr.rfind("icmp eq", 0) == 0) {
+      outval = state.Builder->CreateICmpEQ(lhs, rhs);
+    } else if (instr.rfind("icmp slt", 0) == 0) {
+      outval = state.Builder->CreateICmpSLT(lhs, rhs);
+    } else if (instr.rfind("fcmp ogt", 0) == 0) {
+      outval = state.Builder->CreateFCmpOGT(lhs, rhs);
+    } else if (instr.rfind("fcmp oeq", 0) == 0) {
+      outval = state.Builder->CreateFCmpOEQ(lhs, rhs);
+    } else if (instr.rfind("fcmp olt", 0) == 0) {
+      outval = state.Builder->CreateFCmpOLT(lhs, rhs);
+    } else {
+      std::cerr << __FILE__ << ":" << __LINE__
+                << " ERROR: unknown llvm:: instruction: " << instr << std::endl;
+      assert(0 == 1);
+    }
     outtype = llvm::Type::getInt1Ty(*state.TheContext);
-  } else if (command == "icmp eq") {
-    outval = state.Builder->CreateICmpEQ(CallArgs[0].first, CallArgs[1].first);
-    outtype = llvm::Type::getInt1Ty(*state.TheContext);
-  } else if (command == "fcmp ogt") {
-    outval = state.Builder->CreateFCmpOGT(CallArgs[0].first, CallArgs[1].first);
-    outtype = llvm::Type::getInt1Ty(*state.TheContext);
-  } else if (command == "fcmp oeq") {
-    outval = state.Builder->CreateFCmpOEQ(CallArgs[0].first, CallArgs[1].first);
-    outtype = llvm::Type::getInt1Ty(*state.TheContext);
+
+  } else if (substituted.find('@') != std::string::npos) {
+    // External C function call: "@funcName"
+    size_t atPos = substituted.find('@');
+    size_t endPos = substituted.find_first_of("( \t\r\n", atPos);
+    std::string funcName = substituted.substr(
+        atPos + 1, (endPos == std::string::npos) ? std::string::npos
+                                                 : endPos - (atPos + 1));
+
+    std::vector<llvm::Type *> argTypes;
+    std::vector<llvm::Value *> argVals;
+    for (const auto &arg : CallArgs) {
+      argVals.push_back(arg.first);
+      argTypes.push_back(arg.first->getType());
+    }
+
+    llvm::Type *retType = llvm::Type::getInt32Ty(*state.TheContext);
+    if (substituted.find("void") != std::string::npos) {
+      retType = llvm::Type::getVoidTy(*state.TheContext);
+    }
+
+    llvm::Function *CalleeF = state.TheModule->getFunction(funcName);
+    if (!CalleeF) {
+      llvm::FunctionType *FT =
+          llvm::FunctionType::get(retType, argTypes, false);
+      CalleeF = llvm::Function::Create(FT, llvm::Function::ExternalLinkage,
+                                       funcName, *state.TheModule);
+    }
+
+    outval = state.Builder->CreateCall(CalleeF, argVals,
+                                       retType->isVoidTy() ? "" : funcName);
+    if (!retType->isVoidTy()) {
+      outtype = retType;
+    }
+
   } else {
-    assert(0 == 1); // FIXME implement
+    std::cerr << __FILE__ << ":" << __LINE__
+              << " ERROR: unrecognised command format: " << substituted
+              << std::endl;
+    assert(0 == 1);
   }
 
   return {outval, outtype};

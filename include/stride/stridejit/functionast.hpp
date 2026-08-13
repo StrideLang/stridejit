@@ -38,7 +38,8 @@ class PrototypeAST {
   std::string Name;
   std::vector<PrototypeArg> InArgs;
   std::vector<PrototypeArg> OutArgs;
-  std::vector<PrototypeArg> InternalPersistentArgs; // For internal scope variables.
+  std::vector<PrototypeArg>
+      InternalPersistentArgs; // For internal scope variables.
   std::vector<PrototypeArg>
       ExternalArgs; // For upper scope in reactions and loops
   std::vector<PrototypeArg> UsedPortProperties;
@@ -94,7 +95,7 @@ public:
 
 private:
   void allocateInternalVariables(StrideCompiler &state,
-                              llvm::Function *TheFunction);
+                                 llvm::Function *TheFunction);
 };
 
 /// CallExprAST - Expression class for function calls.
@@ -154,7 +155,14 @@ public:
   std::vector<std::unique_ptr<ExprAST>> ExternalArgs;
   std::vector<std::unique_ptr<ExprAST>> PortPropArgs;
   std::unique_ptr<ExprAST> ret;
+
+private:
+  std::string substituteTokens(const std::string &processingTemplate,
+                               const std::vector<std::string> &inTokens,
+                               const std::vector<std::string> &outTokens = {},
+                               const std::string &bundleIndexStr = "0");
 };
+
 } // namespace strd
 
 #endif // FUNCTIONAST_HPP

@@ -876,7 +876,7 @@ TEST(JIT, BundleDefaults) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  int32_t out = true;
+  int32_t out[3];
   {
     llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
         strenv.getFunction("RootDomain_init");
@@ -906,7 +906,8 @@ TEST(JIT, BundleDefaults) {
 
   EXPECT_NE(Entry, nullptr);
   Entry(&out);
-  EXPECT_EQ(out, 10);
+  EXPECT_EQ(out[0], 10);
+  EXPECT_EQ(out[1], 13);
 }
 
 TEST(JIT, Polymorphism) {
