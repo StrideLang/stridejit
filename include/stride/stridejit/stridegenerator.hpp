@@ -46,6 +46,19 @@ public:
     std::vector<std::shared_ptr<DeclarationNode>> GlobalSignals;
   };
 
+  struct ArgGroup {
+    std::vector<std::unique_ptr<ExprAST>> args;
+    std::vector<llvm::Type *> argTypes;
+  };
+  struct FunctionArgs {
+    ArgGroup MainIn;
+    ArgGroup MainOut;
+    ArgGroup PropertyIn;
+    ArgGroup PropertyOut;
+    ArgGroup Internal;
+    ArgGroup External;
+  };
+
   using GeneratedCode = std::map<std::string, DomainCode>;
 
   static void compile(ASTNode tree, ScopeStack &scope, StrideCompiler &state);
@@ -80,6 +93,24 @@ private:
                           ASTNode tree, StrideCompiler &state);
 
   static void setTypeCastMetadata(ASTNode node, ExprAST *V);
+
+  static void collectInputArgs(FunctionArgs &args,
+                               CodeAnalysis::TypeTree *typeTree,
+                               StrideCompiler &state,
+                               std::vector<std::unique_ptr<ExprAST>> &exprs,
+                               ScopeStack &scope, ASTNode tree,
+                               std::shared_ptr<DeclarationNode> funcDecl,
+                               std::shared_ptr<FunctionNode> func);
+
+  static bool resolveIOParamsFromDefinition(
+      std::shared_ptr<DeclarationNode> funcDecl,
+      std::shared_ptr<FunctionNode> funcInstance, ASTNode tree,
+      ScopeStack &functionScope, StrideCompiler &state,
+      std::vector<PrototypeArg> &InParams, std::vector<PrototypeArg> &OutParams,
+      std::vector<PrototypeArg> &InternalParams,
+      std::vector<PrototypeArg> &InternalPersistentParams,
+      std::vector<PrototypeArg> &ExternalParams,
+      std::vector<std::shared_ptr<DeclarationNode>> &usedInternalVariables);
 
   // helper functions
   static DefaultVariant getDefaultValue(std::shared_ptr<DeclarationNode> decl,
