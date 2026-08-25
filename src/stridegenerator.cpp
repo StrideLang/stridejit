@@ -1048,17 +1048,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
   if (functionScope.size() == 0) {
     functionScope.push_back({nullptr, {}});
   }
-  if (funcDecl->getObjectType() == "reaction" ||
-      funcDecl->getObjectType() == "loop") {
-    // TODO grab correct scope, currently passing all.
-    for (const auto &scopeEntry : *scope) {
-      functionScope.back().second.insert(functionScope.back().second.begin(),
-                                         scopeEntry.second.begin(),
-                                         scopeEntry.second.end());
-    }
-  } else {
-    functionScope.push_back({funcDecl, {}});
-  }
+  functionScope.push_back({funcDecl, {}});
   auto blocks = funcDecl->getPropertyValue("blocks");
   if (blocks) {
     for (const auto &blockDecl : blocks->getChildren()) {
@@ -1109,11 +1099,11 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
   bool ioParamsResolved = resolveIOParamsFromDefinition(
       funcDecl, funcInstance, tree, functionScope, state, InParams, OutParams,
       InternalParams, InternalPersistentParams, ExternalParams, usedInternalVariables);
-
-  auto *nodeTree = state.m_intanceTree.find(funcInstance);
-
+  
+  // If IO parameters are not resolved, infer them from connections
+  if (!ioParamsResolved) {
+    auto *nodeTree = state.m_intanceTree.find(funcInstance);
   if (nodeTree) {
-    if (!ioParamsResolved) {
       for (const auto &var : nodeTree->input) {
         auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
         auto type =
@@ -1145,7 +1135,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
         auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
         auto type =
             state.getLLVMTypeForCodegenBlock(decl, funcDecl, funcInstance);
-        InternalPersistentParams.push_back(
+      ExternalParams.push_back(
             PrototypeArg{ASTQuery::getNodeName(var.first), type});
       }
 

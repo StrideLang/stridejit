@@ -36,7 +36,7 @@ module Greater {
     meta: "Compare two input values."
 }
 
-platformModule Greater@Int_Bool {
+platformModule __Greater@Int_Bool {
     inputs: [_IntType, _IntType]
 	outputs: [_SwitchType]
 #    linkTo: []
