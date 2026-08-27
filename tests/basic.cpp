@@ -994,6 +994,52 @@ TEST(JIT, PortPropertySize) {
   EXPECT_EQ(Out[1], 8);
 }
 
+TEST(JIT, PlatformFunction) {
+
+  strd::StrideEnvironment strenv;
+
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "platform_module.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("TestDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+
+  ASSERT_NE(Entry, nullptr);
+  double InReal = 3.0;
+  int32_t InInt = 2;
+  bool Out = false;
+  Entry(&InReal, &InInt, &Out);
+  auto varInt = strenv.JIT->lookup("OutInt");
+  if (!varInt) {
+    std::cerr << "TestDomain_OutInt not found" << std::endl;
+  }
+  int32_t vInt = *((int32_t *)varInt->getValue());
+  EXPECT_EQ(vInt, 2);
+
+  auto varReal = strenv.JIT->lookup("OutReal");
+  if (!varReal) {
+    std::cerr << "TestDomain_OutReal not found" << std::endl;
+  }
+  double vReal = *((double *)varReal->getValue());
+  EXPECT_EQ(vReal, 5.5);
+
+  auto varWrapped = strenv.JIT->lookup("OutWrapped");
+  if (!varWrapped) {
+    std::cerr << "TestDomain_OutWrapped not found" << std::endl;
+  }
+  double vWrapped = *((double *)varWrapped->getValue());
+  EXPECT_EQ(vWrapped, 5.5);
+}
+
 ///  -------------------------------------------------
 ///  -------------------------------------------------
 ///  All Above should pass

@@ -15,8 +15,10 @@ _domainDefinition TestDomain {
 	domainFunctionCode: ''
 }
 
-signal OutInt { type: _IntType }
-signal OutReal { type: _RealType }
+signal OutInt { domain: TestDomain type: _IntType }
+signal OutReal { domain: TestDomain type: _RealType }
+signal OutWrapped { domain: TestDomain type: _RealType }
+
 
 platformModule __Test1 {
     inputs: [_IntType]
@@ -34,9 +36,28 @@ platformModule __Test2 {
 #    linkTo: []
 #    declarations: ['']
     # initializations: ["// CPP Equal Init"]
-    processing: " = "
+    processing: " %%outtokens:0%% = llvm::fadd float %%intokens:0%%, 2.500000e+00 "
     inherits: [_Signal]
 }
 
-30 >> __Test1() >> OutInt;
-0.3 >> __Test2() >> OutReal;
+module Wrapper {
+    ports: [
+        mainInputPort InputPort {
+            block: Input
+        }
+        mainOutputPort OutputPort {
+            block: Output
+        }
+    ]
+    blocks: [
+        signal Input {domain: OutputPort.domain type: _RealType}
+        signal Output {domain: OutputPort.domain type: _RealType}
+    ]
+    streams: [
+        Input >> __Test2() >> Output;
+    ]
+}
+
+InInt >> __Test1() >> OutInt;
+InReal >> __Test2() >> OutReal;
+InReal >> Wrapper() >> OutWrapped;

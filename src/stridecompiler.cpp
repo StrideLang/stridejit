@@ -61,6 +61,8 @@ std::optional<ExternalFunction> StrideCompiler::getExternalFunction(
             bool allTypesMatch = true;
             for (int i = 0; i < argTypes.size(); i++) {
               if (argTypes[i] != llvmFType->getParamType(i)) {
+                std::cout << "Type mismatch for " << strideName << " arg " << i
+                          << std::endl;
                 allTypesMatch = false;
                 break;
               }
@@ -71,12 +73,15 @@ std::optional<ExternalFunction> StrideCompiler::getExternalFunction(
               return candidate;
             }
             if (!out) {
-              // for now remember first function that matches output type
-              // This should be evaluated to find the best match according to
-              // type casting
               out = candidate;
             }
+          } else {
+            std::cout << "Param count mismatch for " << strideName
+                      << " expected " << llvmFType->getNumParams() << " got "
+                      << argTypes.size() << std::endl;
           }
+        } else {
+          std::cout << "Return type mismatch for " << strideName << std::endl;
         }
       }
     }

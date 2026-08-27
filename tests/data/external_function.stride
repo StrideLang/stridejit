@@ -35,15 +35,15 @@ module Greater {
     meta: "Compare two input values."
 }
 
-platformModule Greater@Int_Bool {
-    inputs: [_IntType, _IntType]
-	outputs: [_SwitchType]
-#    linkTo: []
-#    declarations: ['']
-    # initializations: ["// CPP Greater Init"]
-    processing: "icmp gt"
-    inherits: [_Signal]
-}
+# platformModule Greater@Int_Bool {
+#     inputs: [_IntType, _IntType]
+# 	outputs: [_SwitchType]
+# #    linkTo: []
+# #    declarations: ['']
+#     # initializations: ["// CPP Greater Init"]
+#     processing: "icmp gt"
+#     inherits: [_Signal]
+# }
 
 signal A {type: _IntType default: 5 domain: RootDomain}
 signal B {type: _IntType default: 2 domain: RootDomain}
