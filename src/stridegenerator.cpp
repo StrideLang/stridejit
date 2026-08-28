@@ -600,48 +600,77 @@ void StrideGenerator::collectInputArgs(
           for (auto elemExpr = v->elements().begin();
                elemExpr != v->elements().end(); elemExpr++) {
             args.MainIn.args.emplace_back(std::move(*elemExpr));
-            auto elemDecl = ASTQuery::findDeclarationByName(
-                ASTQuery::getNodeName(*nodeIt), scope, tree);
-
-            if (elemDecl) {
-              args.MainIn.argTypes.push_back(
-                  state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
-            } else if ((*nodeIt)->getNodeType() == AST::Int) {
-              // TODO get types from framework
-              args.MainIn.argTypes.push_back(
-                  llvm::Type::getInt32Ty(*state.TheContext));
-            } else if ((*nodeIt)->getNodeType() == AST::Real) {
-              args.MainIn.argTypes.push_back(
-                  llvm::Type::getDoubleTy(*state.TheContext));
-            } else if ((*nodeIt)->getNodeType() == AST::PortProperty) {
-              auto pp = std::static_pointer_cast<PortPropertyNode>(*nodeIt);
-              if (pp->getPortName() == "size") {
+            std::string typeStr = CodeAnalysis::resolveNodeOutDataType(*nodeIt, scope, tree);
+            if (!typeStr.empty()) {
+              if (typeStr == "_IntType") {
                 args.MainIn.argTypes.push_back(
                     llvm::Type::getInt32Ty(*state.TheContext));
-              } else if (pp->getPortName() == "rate") {
+              } else if (typeStr == "_SwitchType") {
+                args.MainIn.argTypes.push_back(
+                    llvm::Type::getInt1Ty(*state.TheContext));
+              } else {
                 args.MainIn.argTypes.push_back(
                     llvm::Type::getDoubleTy(*state.TheContext));
-              } else {
-                assert(0 == 1);
               }
             } else {
-              // Fallback. We shouldn't get here when things are fully
-              // implemented
-              args.MainIn.argTypes.push_back(
-                  state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
-              std::cerr << __FILE__ << ":" << __LINE__
-                        << " Unsupported type for: " << (*nodeIt)->toText()
-                        << std::endl;
-            }
+              auto elemDecl = ASTQuery::findDeclarationByName(
+                  ASTQuery::getNodeName(*nodeIt), scope, tree);
 
+              if (elemDecl) {
+                args.MainIn.argTypes.push_back(
+                    state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
+              } else if ((*nodeIt)->getNodeType() == AST::Int) {
+                // TODO get types from framework
+                args.MainIn.argTypes.push_back(
+                    llvm::Type::getInt32Ty(*state.TheContext));
+              } else if ((*nodeIt)->getNodeType() == AST::Real) {
+                args.MainIn.argTypes.push_back(
+                    llvm::Type::getDoubleTy(*state.TheContext));
+              } else if ((*nodeIt)->getNodeType() == AST::PortProperty) {
+                auto pp = std::static_pointer_cast<PortPropertyNode>(*nodeIt);
+                if (pp->getPortName() == "size") {
+                  args.MainIn.argTypes.push_back(
+                      llvm::Type::getInt32Ty(*state.TheContext));
+                } else if (pp->getPortName() == "rate") {
+                  args.MainIn.argTypes.push_back(
+                      llvm::Type::getDoubleTy(*state.TheContext));
+                } else {
+                  std::cerr << __FILE__ << ":" << __LINE__ << ":Port property not supported: " << pp->getPortName() << std::endl;
+                  args.MainIn.argTypes.push_back(
+                      llvm::Type::getDoubleTy(*state.TheContext));
+                }
+              } else {
+                // Fallback. We shouldn't get here when things are fully
+                // implemented
+                args.MainIn.argTypes.push_back(
+                    state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
+                std::cerr << __FILE__ << ":" << __LINE__
+                          << " Unsupported type for: " << (*nodeIt)->toText()
+                          << std::endl;
+              }
+            }
             nodeIt++;
           }
         } else if (v->getType() == ListExprAST::Type::IMMUTABLE_CONSISTENT) {
           args.MainIn.args.emplace_back(std::move(exprs.back()));
-          auto elemDecl = ASTQuery::findDeclarationByName(
-              ASTQuery::getNodeName(*nodeIt), scope, tree);
-          args.MainIn.argTypes.push_back(
-              state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
+          std::string typeStr = CodeAnalysis::resolveNodeOutDataType(*nodeIt, scope, tree);
+          if (!typeStr.empty()) {
+            if (typeStr == "_IntType") {
+              args.MainIn.argTypes.push_back(
+                  llvm::Type::getInt32Ty(*state.TheContext));
+            } else if (typeStr == "_SwitchType") {
+              args.MainIn.argTypes.push_back(
+                  llvm::Type::getInt1Ty(*state.TheContext));
+            } else {
+              args.MainIn.argTypes.push_back(
+                  llvm::Type::getDoubleTy(*state.TheContext));
+            }
+          } else {
+            auto elemDecl = ASTQuery::findDeclarationByName(
+                ASTQuery::getNodeName(*nodeIt), scope, tree);
+            args.MainIn.argTypes.push_back(
+                state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
+          }
         } else {
           // Not supported
           std::cerr << "ERROR: List type not supported" << std::endl;
@@ -1031,7 +1060,7 @@ bool StrideGenerator::resolveIOParamsFromDefinition(
             break;
           }
           auto typeNode = blockDeclNode->getPropertyValue("type");
-          if (!typeNode || typeNode->getNodeType() == AST::PortProperty) {
+          if (!typeNode) {
             canResolve = false;
             break;
           }

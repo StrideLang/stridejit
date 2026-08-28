@@ -249,7 +249,7 @@ llvm::Type *StrideCompiler::getLLVMTypeForCodegenBlock(
     std::shared_ptr<DeclarationNode> decl,
     std::shared_ptr<DeclarationNode> funcDecl,
     std::shared_ptr<FunctionNode> functionInstance) {
-  if (!decl || !functionInstance) {
+  if (!decl) {
     return typesMap[""];
   }
   if (decl->getObjectType() == "switch" || decl->getObjectType() == "trigger") {
@@ -277,10 +277,12 @@ llvm::Type *StrideCompiler::getLLVMTypeForCodegenBlock(
                     << std::endl;
           return typesMap[type];
         }
-        auto portConnection = functionInstance->getPropertyValue("inputBlock");
-        // auto type = portConnection->getCompilerProperty("declaration");
-        // if (type) {
-        // }
+        if (functionInstance) {
+          auto portConnection = functionInstance->getPropertyValue("inputBlock");
+          // auto type = portConnection->getCompilerProperty("declaration");
+          // if (type) {
+          // }
+        }
       }
     } else {
       std::cout << __FILE__ << ":" << __LINE__ << " : unsupported type"

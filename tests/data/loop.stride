@@ -27,7 +27,7 @@ module Equal {
         }
     ]
     blocks: [
-        signal Input[2] {domain: OutputPort.domain}
+        signal Input[2] {domain: OutputPort.domain type: _IntType}
 		switch Output {domain: OutputPort.domain}
     ]
     streams: [
@@ -42,7 +42,7 @@ platformModule __Equal@Int_Bool {
 #    linkTo: []
 #    declarations: ['']
     # initializations: ["// CPP Greater Init"]
-    processing: "icmp eq"
+    processing: "%%outtokens:0%% = llvm::icmp eq %%intokens:0%%, %%intokens:1%%"
     inherits: [_Signal]
 }
 

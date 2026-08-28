@@ -1040,6 +1040,136 @@ TEST(JIT, PlatformFunction) {
   EXPECT_EQ(vWrapped, 5.5);
 }
 
+TEST(JIT, FunctionStandaloneModule) {
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
+  EXPECT_NE(tree, nullptr);
+
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+  strenv.state.m_intanceTree =
+      strd::CodeAnalysis::getStateStructInformation({}, tree);
+
+  strd::ScopeStack scope;
+  auto funcDecl = strd::ASTQuery::findDeclarationByName("AddTwo", scope, tree);
+  EXPECT_NE(funcDecl, nullptr);
+
+  auto func = strd::StrideGenerator::createFunctionDeclaration(
+      funcDecl, nullptr, tree, &scope, strenv.state);
+  EXPECT_NE(func, nullptr);
+
+  auto *v = func->codegen(strenv.state);
+  EXPECT_NE(v, nullptr);
+
+  // Ensure it generated an actual function with a body
+  auto *llvmFunc = llvm::dyn_cast<llvm::Function>(v);
+  EXPECT_NE(llvmFunc, nullptr);
+  EXPECT_FALSE(llvmFunc->isDeclaration());
+
+  // Compile and execute the generated standalone function
+  auto ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("AddTwo");
+  EXPECT_TRUE(static_cast<bool>(EntrySym));
+
+  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+  EXPECT_NE(Entry, nullptr);
+
+  double in = 3.0;
+  double out = 0.0;
+
+  Entry(&out, &in);
+  EXPECT_FLOAT_EQ(out, 5.0);
+}
+
+TEST(JIT, FunctionStandaloneReaction) {
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "reaction.stride");
+  EXPECT_NE(tree, nullptr);
+
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+  strenv.state.m_intanceTree =
+      strd::CodeAnalysis::getStateStructInformation({}, tree);
+
+  strd::ScopeStack scope;
+  auto funcDecl =
+      strd::ASTQuery::findDeclarationByName("Reaction", scope, tree);
+  EXPECT_NE(funcDecl, nullptr);
+
+  auto func = strd::StrideGenerator::createFunctionDeclaration(
+      funcDecl, nullptr, tree, &scope, strenv.state);
+  EXPECT_NE(func, nullptr);
+
+  auto *v = func->codegen(strenv.state);
+  EXPECT_NE(v, nullptr);
+
+  // Ensure it generated an actual function with a body
+  auto *llvmFunc = llvm::dyn_cast<llvm::Function>(v);
+  EXPECT_NE(llvmFunc, nullptr);
+  EXPECT_FALSE(llvmFunc->isDeclaration());
+
+  auto ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("Reaction");
+  EXPECT_TRUE(static_cast<bool>(EntrySym));
+
+  double out = 1.0;
+
+  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+  Entry(&out);
+  EXPECT_FLOAT_EQ(out, 4.0);
+}
+
+TEST(JIT, FunctionStandaloneLoop) {
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "loop.stride");
+  EXPECT_NE(tree, nullptr);
+
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+  strenv.state.m_intanceTree =
+      strd::CodeAnalysis::getStateStructInformation({}, tree);
+
+  strd::ScopeStack scope;
+  scope.push_back({nullptr, {}});
+  for (const auto &node : tree->getChildren()) {
+    if (node->getNodeType() == strd::AST::Declaration ||
+        node->getNodeType() == strd::AST::BundleDeclaration) {
+      auto decl = std::static_pointer_cast<strd::DeclarationNode>(node);
+      if (decl->getObjectType() == "platformModule") {
+        strd::StrideGenerator::generatePlatformFunctionSignature(
+            decl, scope.back().second, strenv.state);
+      }
+    }
+  }
+
+  auto funcDecl = strd::ASTQuery::findDeclarationByName("Add", scope, tree);
+  EXPECT_NE(funcDecl, nullptr);
+
+  auto func = strd::StrideGenerator::createFunctionDeclaration(
+      funcDecl, nullptr, tree, &scope, strenv.state);
+  EXPECT_NE(func, nullptr);
+
+  auto *v = func->codegen(strenv.state);
+  EXPECT_NE(v, nullptr);
+
+  // Ensure it generated an actual function with a body
+  auto *llvmFunc = llvm::dyn_cast<llvm::Function>(v);
+  EXPECT_NE(llvmFunc, nullptr);
+  EXPECT_FALSE(llvmFunc->isDeclaration());
+
+  auto ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym = strenv.getFunction("Add");
+  EXPECT_TRUE(static_cast<bool>(EntrySym));
+}
+
 ///  -------------------------------------------------
 ///  -------------------------------------------------
 ///  All Above should pass
