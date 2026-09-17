@@ -1065,27 +1065,15 @@ TEST(JIT, PlatformFunction) {
   double InReal = 3.0;
   int32_t InInt = 2;
   bool Out = false;
-  Entry(&InReal, &InInt, &Out);
-  auto varInt = strenv.JIT->lookup("OutInt");
-  if (!varInt) {
-    std::cerr << "TestDomain_OutInt not found" << std::endl;
-  }
-  int32_t vInt = *((int32_t *)varInt->getValue());
-  EXPECT_EQ(vInt, 2);
+  int32_t OutInt = 0;
+  double OutReal = 0.0;
+  double OutWrapped = 0.0;
 
-  auto varReal = strenv.JIT->lookup("OutReal");
-  if (!varReal) {
-    std::cerr << "TestDomain_OutReal not found" << std::endl;
-  }
-  double vReal = *((double *)varReal->getValue());
-  EXPECT_EQ(vReal, 5.5);
+  Entry(&InReal, &InInt, &Out, &OutInt, &OutReal, &OutWrapped);
 
-  auto varWrapped = strenv.JIT->lookup("OutWrapped");
-  if (!varWrapped) {
-    std::cerr << "TestDomain_OutWrapped not found" << std::endl;
-  }
-  double vWrapped = *((double *)varWrapped->getValue());
-  EXPECT_EQ(vWrapped, 5.5);
+  EXPECT_EQ(OutInt, 2);
+  EXPECT_DOUBLE_EQ(OutReal, 5.5);
+  EXPECT_DOUBLE_EQ(OutWrapped, 5.5);
 }
 
 TEST(JIT, FunctionStandaloneModuleSimple) {
