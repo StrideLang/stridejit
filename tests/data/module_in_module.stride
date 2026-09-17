@@ -1,0 +1,57 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+        signal In {domain: RootDomain type: _RealType}
+    ]
+    outputs: [
+        signal Out {domain: RootDomain type: _RealType}
+    ]
+	domainFunctionCode: ''
+}
+
+module TestModule {
+    ports: [
+        mainOutputPort OutputPort {
+            name:       'output'
+            block: Output
+        },
+        mainInputPort InputPort {
+            name:       'input'
+            block: Input
+            meta: "A list with the two values to be compared"
+        }
+    ]
+    blocks: [
+        signal Input {domain: OutputPort.domain}
+		switch Output {domain: OutputPort.domain}
+    ]
+    streams: [
+       Input >> Add5() >> Output;
+    ]
+    meta: "Compare two input values."
+}
+
+module Add5 {
+    ports: [
+        mainInputPort InputPort {
+            block: Input
+        },
+        mainOutputPort OutputPort {
+            block: Output
+        }
+    ]
+    blocks: [
+        signal Input { type: _RealType domain: OutputPort.domain }
+        signal Output { type: _RealType domain: OutputPort.domain }
+    ]
+    streams: [
+        Input + 5 >> Output;
+    ]
+}
+
+In >> TestModule() >> Out;

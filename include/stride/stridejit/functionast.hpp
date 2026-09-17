@@ -65,6 +65,8 @@ public:
   unsigned getBinaryPrecedence() const { return Precedence; }
 
   std::vector<llvm::Type *> getUsedArgsTypes() const;
+  const std::vector<PrototypeArg> &getInArgs() const { return InArgs; }
+  const std::vector<PrototypeArg> &getOutArgs() const { return OutArgs; }
   std::vector<PrototypeArg> getExternalArgs() const;
   std::vector<PrototypeArg> getInternalArgs() const;
 

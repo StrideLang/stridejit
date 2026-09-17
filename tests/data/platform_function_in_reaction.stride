@@ -1,0 +1,28 @@
+reaction Outer {
+    ports: [
+        mainOutputPort OutputPort {
+            name:       'output'
+            block: Output
+        },
+        propertyInputPort InputPort {
+            name:       'input'
+            block: Input
+        }
+    ]
+    blocks: [
+        signal Input {domain: OutputPort.domain type: _IntType}
+		switch Output {domain: OutputPort.domain type: _SwitchType}
+    ]
+    streams: [
+       Input >> __Inner() >> Output;
+    ]
+}
+
+platformModule __Inner {
+    inputs: [_IntType]
+	outputs: [_SwitchType]
+#    linkTo: []
+#    declarations: ['']
+    # initializations: ["// CPP Greater Init"]
+    processing: "%%outtokens:0% llvm::icmp gt %%intokens:0%%, 6"
+}

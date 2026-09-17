@@ -1,0 +1,25 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [ signal In {domain: RootDomain type: _RealType} ]
+    outputs: [ signal Out {domain: RootDomain type: _RealType} ]
+	domainFunctionCode: ''
+}
+module AddTwo {
+    ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
+    blocks: [ signal Input { type: _RealType domain: OutputPort.domain } signal Output { type: _RealType domain: OutputPort.domain } ]
+    streams: [ Input + 2.0 >> Output; ]
+}
+reaction TestReaction {
+    ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
+    blocks: [
+        signal Input { type: _RealType domain: OutputPort.domain }
+        signal Output { type: _RealType domain: OutputPort.domain }
+    ]
+    streams: [
+        Input >> AddTwo() >> Output;
+    ]
+}
+In >> TestReaction() >> Out;

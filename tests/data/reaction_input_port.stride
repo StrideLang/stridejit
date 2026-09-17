@@ -1,0 +1,27 @@
+_domainDefinition TestDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+        signal InReal { domain: TestDomain type: _RealType }
+    ]
+    outputs: [
+        switch Out { domain: TestDomain }
+    ]
+	domainFunctionCode: ''
+}
+
+reaction MyReaction {
+    ports: [
+        propertyInputPort MyProp { block: _MyProp }
+    ]
+    blocks: [
+        signal _MyProp { type: _RealType }
+    ]
+    streams: [
+        _MyProp >> Out;
+    ]
+}
+
+on >> MyReaction(MyProp: InReal);

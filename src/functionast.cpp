@@ -251,7 +251,8 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     TheFunction = P.codegen(state);
     TheFunction->print(llvm::outs());
     llvm::outs() << "\n";
-    state.FunctionProtos[Proto->getName()] = std::move(Proto);
+    std::string protoName = Proto->getName();
+    state.FunctionProtos[protoName] = std::move(Proto);
   }
   // If this is an operator, install it.
   if (P.isBinaryOp())
@@ -706,15 +707,27 @@ void processArgGroup(
     const std::vector<std::unique_ptr<ExprAST>> &ArgGroup,
     llvm::Function *CalleeF,
     std::vector<std::pair<llvm::Value *, std::optional<llvm::Type *>>>
-        &CallArgs) {
+        &CallArgs,
+    bool isOutputGroup = false,
+    std::vector<std::tuple<std::string, llvm::AllocaInst *, llvm::Type *>>
+        *tempOuts = nullptr) {
   for (unsigned i = 0, e = ArgGroup.size(); i != e; ++i) {
     auto [value, type] = ArgGroup[i]->codegen(state);
+    size_t paramIdx = CallArgs.size();
+    llvm::Argument *calleeArg = (paramIdx < CalleeF->arg_size())
+                                    ? CalleeF->getArg(paramIdx)
+                                    : nullptr;
+
     if (value->getType()->isTokenTy()) {
       auto *list = dynamic_cast<ListExprAST *>(ArgGroup[i].get());
       assert(list);
       for (const auto &expr : list->elements()) {
-        auto [val, type] = expr->codegen(state);
-        auto newArg = func(val, type, CalleeF->getArg(i), state);
+        auto [val, elemType] = expr->codegen(state);
+        size_t currentIdx = CallArgs.size();
+        llvm::Argument *currentArg = (currentIdx < CalleeF->arg_size())
+                                         ? CalleeF->getArg(currentIdx)
+                                         : nullptr;
+        auto newArg = currentArg ? func(val, elemType, currentArg, state) : val;
         if (!newArg) {
           std::cerr << "Can't process argument: "
                     << std::string(value->getName()) << std::endl;
@@ -722,9 +735,9 @@ void processArgGroup(
         }
         CallArgs.push_back(
             std::pair<llvm::Value *, std::optional<llvm::Type *>>{
-                std::move(newArg), type});
-        if (CallArgs.back().first->getType()->isPointerTy() &&
-            !CalleeF->getArg(i)->getType()->isPointerTy()) {
+                std::move(newArg), elemType});
+        if (currentArg && CallArgs.back().first->getType()->isPointerTy() &&
+            !currentArg->getType()->isPointerTy()) {
           CallArgs.back() =
               std::pair<llvm::Value *, std::optional<llvm::Type *>>{
                   state.Builder->CreateLoad(
@@ -769,31 +782,48 @@ void processArgGroup(
           llvm::outs() << "\n";
           auto *GEP = state.Builder->CreateGEP(type.value(), value, idxList);
           value = GEP;
-          //          value = state.Builder->CreateLoad(
-          //              value->getType()->getNonOpaquePointerElementType(),
-          //              GEP, varExpr->getName());
-        } else {
-          //          value = state.Builder->CreateLoad(
-          //              value->getType()->getNonOpaquePointerElementType(),
-          //              value);
         }
         newArgVal = value;
       } else {
-        newArgVal = func(value, type, CalleeF->getArg(i), state);
+        newArgVal = calleeArg ? func(value, type, calleeArg, state) : value;
       }
+
+      if (calleeArg && calleeArg->getType()->isPointerTy() &&
+          !newArgVal->getType()->isPointerTy()) {
+        llvm::Function *TheFunction =
+            state.Builder->GetInsertBlock()->getParent();
+        llvm::Type *elemTy =
+            type.has_value() ? type.value() : newArgVal->getType();
+        auto *varExpr = dynamic_cast<VariableExprAST *>(ArgGroup[i].get());
+        std::string varName = varExpr ? varExpr->getName() : "call_tmp";
+        llvm::AllocaInst *tempAlloc = state.CreateEntryBlockAlloca(
+            TheFunction, varName + "_tmp", elemTy);
+
+        if (isOutputGroup) {
+          newArgVal = tempAlloc;
+          if (tempOuts && varExpr) {
+            tempOuts->push_back({varExpr->getName(), tempAlloc, elemTy});
+          }
+        } else {
+          state.Builder->CreateStore(newArgVal, tempAlloc);
+          newArgVal = tempAlloc;
+        }
+      } else if (calleeArg && !calleeArg->getType()->isPointerTy() &&
+                 newArgVal->getType()->isPointerTy()) {
+        llvm::Type *loadTy =
+            type.has_value() ? type.value()
+                             : state.pointerElementTypes[newArgVal];
+        if (!loadTy)
+          loadTy = llvm::Type::getDoubleTy(*state.TheContext);
+        newArgVal = state.Builder->CreateLoad(loadTy, newArgVal, "");
+      }
+
       if (!newArgVal) {
         std::cerr << "Can't process argument: " << std::string(value->getName())
                   << std::endl;
         return;
       }
-      CallArgs.push_back({std::move(newArgVal), std::nullopt});
-      if (CallArgs.back().first->getType()->isPointerTy() &&
-          !CalleeF->getArg(i)->getType()->isPointerTy()) {
-        assert(type.has_value());
-        CallArgs.back() = {
-            state.Builder->CreateLoad(type.value(), CallArgs.back().first, ""),
-            std::nullopt};
-      }
+      CallArgs.push_back({std::move(newArgVal), type});
     }
   }
 }
@@ -810,14 +840,31 @@ CallExprAST::codegen(StrideCompiler &state) {
             << " -> " << instanceName << std::endl;
 
   std::vector<std::pair<llvm::Value *, std::optional<llvm::Type *>>> CallArgs;
+  std::vector<std::tuple<std::string, llvm::AllocaInst *, llvm::Type *>>
+      tempOuts;
   if (callType != CallableType::External) {
-    processArgGroup(state, OutArgs, CalleeF, CallArgs);
+    processArgGroup(state, OutArgs, CalleeF, CallArgs, true, &tempOuts);
   }
 
-  if (callType == CallableType::Module || callType == CallableType::Loop) {
+  auto protoIt = state.FunctionProtos.find(Callee);
+  size_t expectedInArgs = 0;
+  if (protoIt != state.FunctionProtos.end()) {
+    expectedInArgs = protoIt->second->getInArgs().size();
+  } else if (CalleeF) {
+    size_t outCount = OutArgs.size();
+    size_t portPropCount = PortPropArgs.size();
+    size_t externalCount = ExternalArgs.size();
+    if (CalleeF->arg_size() >= outCount + portPropCount + externalCount) {
+      expectedInArgs =
+          CalleeF->arg_size() - outCount - portPropCount - externalCount;
+    }
+  }
+
+  if (callType == CallableType::Module || callType == CallableType::Loop ||
+      (callType == CallableType::Reaction && expectedInArgs > 0)) {
 
     int outArgCount = CallArgs.size();
-    processArgGroup(state, InArgs, CalleeF, CallArgs);
+    processArgGroup(state, InArgs, CalleeF, CallArgs, false);
 
     // bundle main inputs if not external.
     // Modules and Loops take a single block, so
@@ -850,13 +897,13 @@ CallExprAST::codegen(StrideCompiler &state) {
       llvm::outs() << "\n";
     }
     // processArgGroup(state, InternalArgs, CalleeF, CallArgs);
-  } else if (callType == CallableType::Reaction) {
-    processArgGroup(state, ExternalArgs, CalleeF, CallArgs);
   } else if (callType == CallableType::External) {
     processArgGroup(state, InArgs, CalleeF, CallArgs);
     // processArgGroup(state, InternalArgs, CalleeF, CallArgs);
-  } else {
-    //    assert(0 == 1);
+  }
+
+  if (callType == CallableType::Reaction || !ExternalArgs.empty()) {
+    processArgGroup(state, ExternalArgs, CalleeF, CallArgs);
   }
   llvm::outs().flush();
 
@@ -877,21 +924,24 @@ CallExprAST::codegen(StrideCompiler &state) {
   }
   llvm::outs() << "\n";
   llvm::outs().flush();
-  if (callType == CallableType::Reaction) {
+  if (callType == CallableType::Reaction && expectedInArgs == 0 &&
+      !InArgs.empty()) {
     llvm::Value *CondV = InArgs[0]->codegen(state).first;
     CondV->print(llvm::outs());
     llvm::outs() << "\n";
-    // Convert condition to a bool by comparing non-equal to 0.0.
+    if (CondV->getType()->isPointerTy()) {
+      CondV = state.Builder->CreateLoad(
+          llvm::Type::getInt1Ty(*state.TheContext), CondV, "cond");
+    }
+    // Convert condition to a bool by comparing non-equal to 0.0 or 0.
     if (CondV->getType()->isDoubleTy()) {
-
       CondV = state.Builder->CreateFCmpONE(
           CondV, llvm::ConstantFP::get(*state.TheContext, llvm::APFloat(0.0)),
           "ifcond");
-
-    } else if (CondV->getType()->isIntegerTy()) {
+    } else if (CondV->getType()->isIntegerTy() &&
+               !CondV->getType()->isIntegerTy(1)) {
       CondV = state.Builder->CreateICmpNE(
-          CondV, llvm::ConstantInt::get(*state.TheContext, llvm::APInt(1, 0)),
-          "ifcond");
+          CondV, llvm::ConstantInt::get(CondV->getType(), 0), "ifcond");
     }
     llvm::Function *TheFunction = state.Builder->GetInsertBlock()->getParent();
     llvm::BasicBlock *ThenBB =
@@ -913,13 +963,6 @@ CallExprAST::codegen(StrideCompiler &state) {
     state.Builder->CreateBr(MergeBB);
     // ThenBB = state.Builder->GetInsertBlock();
     state.Builder->SetInsertPoint(MergeBB);
-  } else if (callType == CallableType::Loop) {
-    std::vector<llvm::Value *> CallArgsValues;
-    for (const auto &p : CallArgs) {
-      CallArgsValues.push_back(p.first);
-    }
-    call =
-        state.Builder->CreateCall(CalleeF, CallArgsValues, CalleeF->getName());
   } else {
     std::vector<llvm::Value *> CallArgsValues;
     for (const auto &p : CallArgs) {
@@ -938,19 +981,10 @@ CallExprAST::codegen(StrideCompiler &state) {
       }
     }
   } else {
-    for (unsigned i = 0, e = OutArgs.size(); i != e; ++i) {
-      llvm::Value *argValue = CallArgs[i].first;
-      if (CalleeF->getArg(i)->getType()->isTokenTy()) {
-        // Handle token type
-      } else {
-        if (CalleeF->getArg(i)->getType()->isPointerTy()) {
-          if (argValue->getType()->isPointerTy()) {
-            // Do nothing
-          } else {
-            state.Builder->CreateStore(argValue, CalleeF->getArg(i));
-          }
-        }
-      }
+    for (const auto &[varName, allocaInst, elemTy] : tempOuts) {
+      llvm::Value *loadedVal =
+          state.Builder->CreateLoad(elemTy, allocaInst, varName);
+      state.NamedValues[varName] = {loadedVal, elemTy};
     }
   }
 
