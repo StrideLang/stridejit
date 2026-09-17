@@ -1,0 +1,15 @@
+_domainDefinition RootDomain {
+    framework: _JitFramework
+    rate: -1
+    outputs: [ signal Out { domain: RootDomain type: _RealType } ]
+    domainFunctionCode: ''
+}
+
+reaction ReactionSimple {
+    streams: [
+        Out + 3.0 >> Out;
+    ]
+    domain: RootDomain
+}
+
+on >> ReactionSimple();

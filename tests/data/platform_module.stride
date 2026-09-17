@@ -11,13 +11,12 @@ _domainDefinition TestDomain {
     ]
     outputs: [
         switch Out { domain: TestDomain }
+        signal OutInt { domain: TestDomain type: _IntType }
+        signal OutReal { domain: TestDomain type: _RealType }
+        signal OutWrapped { domain: TestDomain type: _RealType }
     ]
 	domainFunctionCode: ''
 }
-
-signal OutInt { domain: TestDomain type: _IntType }
-signal OutReal { domain: TestDomain type: _RealType }
-signal OutWrapped { domain: TestDomain type: _RealType }
 
 
 platformModule __Test1 {

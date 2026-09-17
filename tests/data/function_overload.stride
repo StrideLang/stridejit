@@ -1,0 +1,32 @@
+_domainDefinition TestDomain {
+	framework: _JitFramework
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+        signal InReal { domain: TestDomain type: _RealType }
+        signal InInt { domain: TestDomain type: _IntType }
+    ]
+    outputs: [
+        signal OutInt { domain: TestDomain type: _IntType }
+        signal OutReal { domain: TestDomain type: _RealType }
+    ]
+	domainFunctionCode: ''
+}
+
+platformModule __OverloadTest@Int {
+    inputs: [_IntType]
+	outputs: [_IntType]
+    processing: " %%outtokens:0%% = llvm::add i32 %%intokens:0%%, 2 "
+    inherits: [_Signal]
+}
+
+platformModule __OverloadTest@Double {
+    inputs: [_RealType]
+	outputs: [_RealType]
+    processing: " %%outtokens:0%% = llvm::fadd double %%intokens:0%%, 2.500000e+00 "
+    inherits: [_Signal]
+}
+
+InInt >> __OverloadTest() >> OutInt;
+InReal >> __OverloadTest() >> OutReal;

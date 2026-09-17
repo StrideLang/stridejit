@@ -1,0 +1,30 @@
+_domainDefinition RootDomain {
+    framework: _JitFramework
+    rate: -1
+    outputs: [ signal Out { domain: RootDomain type: _IntType } ]
+    domainFunctionCode: ''
+}
+
+platformModule __Threshold@Int_Bool {
+    inputs: [_IntType]
+    outputs: [_SwitchType]
+    processing: "%%outtokens:0%% = llvm::icmp sgt %%intokens:0%%, 10"
+    inherits: [_Signal]
+}
+
+loop LoopSimple {
+    ports: [
+        mainOutputPort OutputPort { block: Output }
+    ]
+    blocks: [
+        signal Output { default: 0 type: _IntType }
+        switch Done { default: off }
+    ]
+    terminateWhen: Done
+    streams: [
+        Output + 1 >> Output;
+        Output >> __Threshold() >> Done;
+    ]
+}
+
+LoopSimple() >> Out;
