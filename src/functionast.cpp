@@ -519,6 +519,10 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
 
     if (terminateWhenName.size() > 0) {
       EndCond = state.NamedValues[terminateWhenName].first;
+      if (EndCond->getType()->isPointerTy()) {
+        EndCond = state.Builder->CreateLoad(
+            llvm::Type::getInt1Ty(*state.TheContext), EndCond, "term_cond");
+      }
     } else if (itIncrement != 0) {
       auto *newIteratorValue = state.Builder->CreateAdd(
           PHIVariables[itName],
