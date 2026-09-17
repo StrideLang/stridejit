@@ -201,3 +201,65 @@ TEST(NestedFunctions, ModuleInModule) {
   Entry(&in2, &out2);
   EXPECT_DOUBLE_EQ(out2, 15.5);
 }
+
+TEST(NestedFunctions, ReactionInModule) {
+  strd::StrideEnvironment strenv;
+
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "reaction_in_module.stride");
+  ASSERT_TRUE(ret);
+
+  ret = strenv.compileInMemory();
+  ASSERT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("RootDomain_process");
+  ASSERT_TRUE(static_cast<bool>(EntrySym));
+
+  auto *Entry = EntrySym->toPtr<void (*)(double *, double *)>();
+  ASSERT_NE(Entry, nullptr);
+
+  double in1 = 3.0;
+  double out1 = 1.0;
+  Entry(&in1, &out1);
+  EXPECT_DOUBLE_EQ(out1, 1.0);
+
+  double in2 = 6.0;
+  double out2 = 1.0;
+  Entry(&in2, &out2);
+  EXPECT_DOUBLE_EQ(out2, 6.0);
+
+  double in3 = 10.0;
+  double out3 = 1.0;
+  Entry(&in3, &out3);
+  EXPECT_DOUBLE_EQ(out3, 10.0);
+}
+
+TEST(NestedFunctions, LoopInModule) {
+  strd::StrideEnvironment strenv;
+
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "loop_in_module.stride");
+  ASSERT_TRUE(ret);
+
+  ret = strenv.compileInMemory();
+  ASSERT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("RootDomain_process");
+  ASSERT_TRUE(static_cast<bool>(EntrySym));
+
+  auto *Entry = EntrySym->toPtr<void (*)(int32_t *, int32_t *)>();
+  ASSERT_NE(Entry, nullptr);
+
+  int32_t list1[3] = {1, 2, 3};
+  int32_t out1 = 0;
+  Entry(list1, &out1);
+  EXPECT_EQ(out1, 6);
+
+  int32_t list2[3] = {10, 20, 30};
+  int32_t out2 = 0;
+  Entry(list2, &out2);
+  EXPECT_EQ(out2, 60);
+}
+

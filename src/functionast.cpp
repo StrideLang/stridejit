@@ -887,17 +887,29 @@ CallExprAST::codegen(StrideCompiler &state) {
             llvm::Type::getInt32Ty(*state.TheContext), i);
 
         llvm::Value *gepPtr = state.Builder->CreateInBoundsGEP(
-            elemType, arrayAlloc, {state.Builder->getInt32(0), index},
-            "array_element_ptr");
+            elemType, arrayAlloc, index, "array_element_ptr");
 
-        state.Builder->CreateStore(CallArgs[i].first, gepPtr);
+        llvm::Value *val = CallArgs[outArgCount + i].first;
+        if (val->getType()->isPointerTy()) {
+          llvm::Type *loadType = CallArgs[outArgCount + i].second.has_value()
+                                     ? CallArgs[outArgCount + i].second.value()
+                                     : elemType;
+          val = state.Builder->CreateLoad(loadType, val, "bundle_elem");
+        }
+        if (val->getType() != elemType) {
+          if (val->getType()->isIntegerTy() && elemType->isFloatingPointTy()) {
+            val = state.Builder->CreateSIToFP(val, elemType, "bundle_cast");
+          } else if (val->getType()->isFloatingPointTy() &&
+                     elemType->isIntegerTy()) {
+            val = state.Builder->CreateFPToSI(val, elemType, "bundle_cast");
+          }
+        }
+        state.Builder->CreateStore(val, gepPtr);
       }
-      llvm::Value *basePtr = state.Builder->CreateLoad(
-          state.Builder->getPtrTy(), arrayAlloc, "load_base_ptr");
       CallArgs.resize(outArgCount);
-      CallArgs.push_back({std::move(basePtr), elemType});
+      CallArgs.push_back({arrayAlloc, elemType});
       llvm::outs() << "Bundled inputs into: ";
-      basePtr->print(llvm::outs());
+      arrayAlloc->print(llvm::outs());
       llvm::outs() << "\n";
     }
     // processArgGroup(state, InternalArgs, CalleeF, CallArgs);
@@ -1154,10 +1166,13 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
   if (substituted == " = ") {
     outval = CallArgs.size() > 0 ? CallArgs[0].first : nullptr;
     outtype = CallArgs.size() > 0 ? CallArgs[0].second : std::nullopt;
-  } else if (substituted.find("llvm::") != std::string::npos) {
+  } else if (substituted.find("llvm::") != std::string::npos ||
+             substituted.rfind("icmp ", 0) == 0 ||
+             substituted.rfind("fcmp ", 0) == 0) {
     size_t llvmPos = substituted.find("llvm::");
-    std::string instr =
-        substituted.substr(llvmPos + 6); // strip up to and including "llvm::"
+    std::string instr = (llvmPos != std::string::npos)
+                            ? substituted.substr(llvmPos + 6)
+                            : substituted; // strip up to and including "llvm::"
     llvm::Value *lhs = nullptr;
     llvm::Value *rhs = nullptr;
 
@@ -1224,7 +1239,7 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
       rhs = CallArgs.size() > 1 ? CallArgs[1].first : nullptr;
     }
 
-    if (instr.rfind("icmp sgt", 0) == 0) {
+    if (instr.rfind("icmp sgt", 0) == 0 || instr.rfind("icmp gt", 0) == 0) {
       outval = state.Builder->CreateICmpSGT(lhs, rhs);
       outtype = llvm::Type::getInt1Ty(*state.TheContext);
     } else if (instr.rfind("icmp eq", 0) == 0) {

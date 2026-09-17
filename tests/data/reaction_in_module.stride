@@ -39,10 +39,14 @@ module Greater {
 platformModule __Greater@Int_Bool {
     inputs: [_IntType, _IntType]
 	outputs: [_SwitchType]
-#    linkTo: []
-#    declarations: ['']
-    # initializations: ["// CPP Greater Init"]
-    processing: "icmp gt"
+    processing: "%%outtokens:0%% = llvm::icmp sgt %%intokens:0%%, %%intokens:1%%"
+    inherits: [_Signal]
+}
+
+platformModule __Greater@Real_Bool {
+    inputs: [_RealType, _RealType]
+	outputs: [_SwitchType]
+    processing: "%%outtokens:0%% = llvm::fcmp ogt %%intokens:0%%, %%intokens:1%%"
     inherits: [_Signal]
 }
 

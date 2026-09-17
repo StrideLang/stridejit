@@ -51,10 +51,10 @@ loop MyLoop {
 		}
 	]
 	blocks: [
-		signal Input[InputPort.size] { type: _IntType }
-		signal Output {default: 0 type: _IntType }
-		signal Index { default: 0 type: _IntType reset: Reset }
-		switch Done { default: off }
+		signal Input[InputPort.size] { type: _IntType domain: OutputPort.domain }
+		signal Output {default: 0 type: _IntType domain: OutputPort.domain }
+		signal Index { default: 0 type: _IntType reset: Reset domain: OutputPort.domain }
+		switch Done { default: off domain: OutputPort.domain }
 	]
 	terminateWhen: Done
 	streams: [
