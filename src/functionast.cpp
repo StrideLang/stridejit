@@ -1166,13 +1166,10 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
   if (substituted == " = ") {
     outval = CallArgs.size() > 0 ? CallArgs[0].first : nullptr;
     outtype = CallArgs.size() > 0 ? CallArgs[0].second : std::nullopt;
-  } else if (substituted.find("llvm::") != std::string::npos ||
-             substituted.rfind("icmp ", 0) == 0 ||
-             substituted.rfind("fcmp ", 0) == 0) {
+  } else if (substituted.find("llvm::") != std::string::npos) {
     size_t llvmPos = substituted.find("llvm::");
-    std::string instr = (llvmPos != std::string::npos)
-                            ? substituted.substr(llvmPos + 6)
-                            : substituted; // strip up to and including "llvm::"
+    std::string instr =
+        substituted.substr(llvmPos + 6); // strip up to and including "llvm::"
     llvm::Value *lhs = nullptr;
     llvm::Value *rhs = nullptr;
 
@@ -1239,7 +1236,7 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
       rhs = CallArgs.size() > 1 ? CallArgs[1].first : nullptr;
     }
 
-    if (instr.rfind("icmp sgt", 0) == 0 || instr.rfind("icmp gt", 0) == 0) {
+    if (instr.rfind("icmp sgt", 0) == 0) {
       outval = state.Builder->CreateICmpSGT(lhs, rhs);
       outtype = llvm::Type::getInt1Ty(*state.TheContext);
     } else if (instr.rfind("icmp eq", 0) == 0) {

@@ -41,7 +41,7 @@ module Greater {
 # #    linkTo: []
 # #    declarations: ['']
 #     # initializations: ["// CPP Greater Init"]
-#     processing: "icmp gt"
+#     processing: "%%outtokens:0%% = llvm::icmp sgt %%intokens:0%%, %%intokens:1%%"
 #     inherits: [_Signal]
 # }
 
