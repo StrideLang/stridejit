@@ -600,7 +600,14 @@ void StrideGenerator::collectInputArgs(
           for (auto elemExpr = v->elements().begin();
                elemExpr != v->elements().end(); elemExpr++) {
             args.MainIn.args.emplace_back(std::move(*elemExpr));
-            std::string typeStr = CodeAnalysis::resolveNodeOutDataType(*nodeIt, scope, tree);
+            std::string typeStr;
+            auto typecastNode = (*nodeIt)->getCompilerProperty("typecast");
+            if (typecastNode && typecastNode->getNodeType() == AST::String) {
+              typeStr =
+                  std::static_pointer_cast<ValueNode>(typecastNode)->getStringValue();
+            } else {
+              typeStr = CodeAnalysis::resolveNodeOutDataType(*nodeIt, scope, tree);
+            }
             if (!typeStr.empty()) {
               if (typeStr == "_IntType") {
                 args.MainIn.argTypes.push_back(
@@ -653,7 +660,14 @@ void StrideGenerator::collectInputArgs(
           }
         } else if (v->getType() == ListExprAST::Type::IMMUTABLE_CONSISTENT) {
           args.MainIn.args.emplace_back(std::move(exprs.back()));
-          std::string typeStr = CodeAnalysis::resolveNodeOutDataType(*nodeIt, scope, tree);
+          std::string typeStr;
+          auto typecastNode = (*nodeIt)->getCompilerProperty("typecast");
+          if (typecastNode && typecastNode->getNodeType() == AST::String) {
+            typeStr =
+                std::static_pointer_cast<ValueNode>(typecastNode)->getStringValue();
+          } else {
+            typeStr = CodeAnalysis::resolveNodeOutDataType(*nodeIt, scope, tree);
+          }
           if (!typeStr.empty()) {
             if (typeStr == "_IntType") {
               args.MainIn.argTypes.push_back(

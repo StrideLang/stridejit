@@ -134,6 +134,27 @@ TEST(ListExprAST, MixedIntDoubleList) {
               type == strd::ListExprAST::Type::MUTABLE_CONSISTENT);
 }
 
+TEST(ListExprAST, MixedIntDoubleListWithTypecast) {
+  strd::StrideCompiler state;
+
+  auto n1 = std::make_shared<strd::ValueNode>(static_cast<int64_t>(1),
+                                              "test.stride", 1);
+  n1->setCompilerProperty(
+      "typecast",
+      std::make_shared<strd::ValueNode>("_RealType", "test.stride", 1));
+  auto n2 = std::make_shared<strd::ValueNode>(2.5, "test.stride", 2);
+
+  std::vector<strd::ASTNode> elements = {n1, n2};
+  strd::ListExprAST list(elements);
+
+  EXPECT_EQ(list.getType(), strd::ListExprAST::Type::IMMUTABLE_CONSISTENT);
+
+  auto [v, t] = list.codegen(state);
+  ASSERT_NE(v, nullptr);
+  EXPECT_TRUE(v->getType()->isArrayTy());
+}
+
+
 // ============================================================================
 // ListExprAST Consistency Tests
 // ============================================================================

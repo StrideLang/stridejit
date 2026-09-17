@@ -44,9 +44,14 @@ ListExprAST::ListExprAST(std::vector<strd::ASTNode> elements)
         e->getNodeType() != strd::AST::PortProperty) {
       isMutable = true;
     }
-    // TODO use type cast metadata to determine consistency
-    // Currently reporting inconsistent even if type cast has made consistent
-    auto thisType = strd::CodeAnalysis::resolveNodeOutDataType(e, {}, nullptr);
+    std::string thisType;
+    auto typecastNode = e->getCompilerProperty("typecast");
+    if (typecastNode && typecastNode->getNodeType() == strd::AST::String) {
+      thisType =
+          std::static_pointer_cast<strd::ValueNode>(typecastNode)->getStringValue();
+    } else {
+      thisType = strd::CodeAnalysis::resolveNodeOutDataType(e, {}, nullptr);
+    }
     if ((previousType != "") && previousType != thisType) {
       consistent = false;
     }
@@ -66,10 +71,21 @@ ListExprAST::codegen(StrideCompiler &state) {
   std::vector<int32_t> intValues;
   std::optional<llvm::Type *> dataType;
   for (const auto &elem : elementNodes) {
-    if (elem->getNodeType() == strd::AST::Real) {
+    std::string typecast;
+    if (auto typecastNode = elem->getCompilerProperty("typecast")) {
+      if (typecastNode->getNodeType() == strd::AST::String) {
+        typecast =
+            std::static_pointer_cast<strd::ValueNode>(typecastNode)->getStringValue();
+      }
+    }
+    if (elem->getNodeType() == strd::AST::Real || typecast == "_RealType") {
       // Literal number list.
-      double val =
-          std::static_pointer_cast<strd::ValueNode>(elem)->getRealValue();
+      double val = 0.0;
+      if (elem->getNodeType() == strd::AST::Real) {
+        val = std::static_pointer_cast<strd::ValueNode>(elem)->getRealValue();
+      } else if (elem->getNodeType() == strd::AST::Int) {
+        val = double(std::static_pointer_cast<strd::ValueNode>(elem)->getIntValue());
+      }
       values.push_back(val);
       if (dataType.has_value()) {
         if (dataType.value() != llvm::Type::getDoubleTy(*state.TheContext)) {
@@ -78,9 +94,13 @@ ListExprAST::codegen(StrideCompiler &state) {
       } else {
         dataType = llvm::Type::getDoubleTy(*state.TheContext);
       }
-    } else if (elem->getNodeType() == strd::AST::Int) {
-      int32_t val =
-          std::static_pointer_cast<strd::ValueNode>(elem)->getIntValue();
+    } else if (elem->getNodeType() == strd::AST::Int || typecast == "_IntType") {
+      int32_t val = 0;
+      if (elem->getNodeType() == strd::AST::Int) {
+        val = std::static_pointer_cast<strd::ValueNode>(elem)->getIntValue();
+      } else if (elem->getNodeType() == strd::AST::Real) {
+        val = int32_t(std::static_pointer_cast<strd::ValueNode>(elem)->getRealValue());
+      }
       intValues.push_back(val);
       if (dataType.has_value()) {
         if (dataType.value() != llvm::Type::getInt32Ty(*state.TheContext)) {

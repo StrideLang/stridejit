@@ -6,7 +6,6 @@ _domainDefinition TestDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal InInt { domain: TestDomain type: _IntType }
         signal InReal { domain: TestDomain type: _RealType }
     ]
     outputs: [
@@ -15,9 +14,6 @@ _domainDefinition TestDomain {
 	domainFunctionCode: ''
 }
 
-switch CompInt { domain: TestDomain }
 switch CompReal { domain: TestDomain }
 
-[InInt, 0] >> Equal() >> CompInt;
-[InReal, 0.0] >> Equal() >> CompReal;
-
+[InReal, 0] >> Equal() >> CompReal;

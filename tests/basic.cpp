@@ -689,45 +689,6 @@ TEST(JIT, Reaction) {
   //  EXPECT_EQ(Entry, nullptr);
 }
 
-// TEST(JIT, ReactionInModule) {
-
-//   strd::StrideEnvironment strenv;
-
-//   auto ret =
-//       strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
-//       "reaction_in_module.stride");
-//   EXPECT_TRUE(ret);
-//   ret = strenv.compileInMemory();
-//   EXPECT_TRUE(ret);
-
-//   llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-//       strenv.getFunction("RootDomain_process");
-//   if (!EntrySym) {
-//     std::cerr << "No entry" << std::endl;
-//   }
-
-//   auto *Entry = EntrySym->toPtr<void (*)(...)>();
-//   EXPECT_NE(Entry, nullptr);
-
-//   double In = 3.0;
-//   double Out = 1.0;
-
-//   Entry(&In, &Out);
-//   EXPECT_EQ(Out, 1.0);
-//   In = 4.0;
-//   Entry(&In, &Out);
-//   EXPECT_EQ(Out, 1.0);
-//   In = 5.0;
-//   Entry(&In, &Out);
-//   EXPECT_EQ(Out, 1.0);
-//   In = 6.0;
-//   Entry(&In, &Out);
-//   EXPECT_EQ(Out, 6.0);
-//   In = 10.0;
-//   Entry(&In, &Out);
-//   EXPECT_EQ(Out, 10.0);
-// }
-
 TEST(JIT, IntegerType) {
   // Depends on external function and reactions
 
@@ -914,6 +875,39 @@ TEST(JIT, TypecastStream) {
   EXPECT_DOUBLE_EQ(Real[1], 5.0);
 }
 
+TEST(JIT, TypecastList) {
+
+  strd::StrideEnvironment strenv;
+
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "typecast_list.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("TestDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+
+  double inReal = 5.0;
+  bool out = false;
+  Entry(&inReal, &out);
+
+  bool *compReal = strenv.getGlobal<bool>("CompReal");
+
+  EXPECT_TRUE(compReal);
+  EXPECT_FALSE(*compReal);
+
+  inReal = 0.0;
+  Entry(&inReal, &out);
+  EXPECT_TRUE(*compReal);
+}
+
 TEST(JIT, BundleDefaults) {
 
   strd::StrideEnvironment strenv;
@@ -958,61 +952,70 @@ TEST(JIT, BundleDefaults) {
   EXPECT_EQ(out[1], 13);
 }
 
-// TEST(JIT, Polymorphism) {
+TEST(JIT, Polymorphism) {
 
-//   strd::StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
-//   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
-//                                "polymorphism_external.stride");
-//   EXPECT_TRUE(ret);
-//   ret = strenv.compileInMemory();
-//   EXPECT_TRUE(ret);
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                               "polymorphism_external.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
 
-//   int32_t inInt = 5;
-//   double inReal = 5.0;
+  int32_t inInt = 5;
+  double inReal = 5.0;
 
-//   llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-//       strenv.getFunction("TestDomain_process");
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("TestDomain_process");
 
-//   if (!EntrySym) {
-//     std::cerr << "No entry" << std::endl;
-//   }
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
 
-//   auto *Entry = EntrySym->toPtr<void (*)(...)>();
-//   Entry(&inInt, &inReal);
+  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+  bool out = false;
+  Entry(&inInt, &inReal, &out);
 
-//   bool *compInt = strenv.getGlobal<bool>("CompInt");
-//   bool *compReal = strenv.getGlobal<bool>("CompReal");
+  bool *compInt = strenv.getGlobal<bool>("CompInt");
+  bool *compReal = strenv.getGlobal<bool>("CompReal");
 
-//   EXPECT_TRUE(compInt);
-//   EXPECT_TRUE(compReal);
-// }
+  EXPECT_TRUE(compInt);
+  EXPECT_TRUE(compReal);
+  EXPECT_FALSE(*compInt);
+  EXPECT_FALSE(*compReal);
 
-// TEST(JIT, Loop) {
+  inInt = 0;
+  inReal = 0.0;
+  Entry(&inInt, &inReal, &out);
+  EXPECT_TRUE(*compInt);
+  EXPECT_TRUE(*compReal);
+}
 
-//   strd::StrideEnvironment strenv;
+TEST(JIT, Loop) {
 
-//   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "loop.stride");
-//   EXPECT_TRUE(ret);
-//   ret = strenv.compileInMemory();
-//   EXPECT_TRUE(ret);
+  strd::StrideEnvironment strenv;
 
-//   llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-//       strenv.JIT->lookup("RootDomain_process");
-//   if (!EntrySym) {
-//     std::cerr << "No entry" << std::endl;
-//   }
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "loop.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
 
-//   auto *Entry = EntrySym->toPtr<void (*)(...)>();
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.JIT->lookup("RootDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
 
-//   EXPECT_NE(Entry, nullptr);
-//   int32_t List[20] = {1000, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//                       1,    1, 1, 1, 1, 1, 1, 1, 1, 100};
-//   int32_t Out = 0;
-//   Entry(List, &Out);
+  auto *Entry = EntrySym->toPtr<void (*)(...)>();
 
-//   EXPECT_EQ(Out, 1118);
-// }
+  EXPECT_NE(Entry, nullptr);
+  int32_t List[20] = {1000, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                      1,    1, 1, 1, 1, 1, 1, 1, 1, 100};
+  int32_t Out = 0;
+  Entry(List, &Out);
+
+  EXPECT_EQ(Out, 1118);
+}
 
 TEST(JIT, PortPropertySize) {
 
@@ -1356,6 +1359,45 @@ TEST(JIT, FunctionStandaloneLoop) {
   Entry(&out, in, size);
   EXPECT_EQ(out, 40);
 }
+
+// TEST(JIT, ReactionInModule) {
+
+//   strd::StrideEnvironment strenv;
+
+//   auto ret =
+//       strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+//       "reaction_in_module.stride");
+//   EXPECT_TRUE(ret);
+//   ret = strenv.compileInMemory();
+//   EXPECT_TRUE(ret);
+
+//   llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+//       strenv.getFunction("RootDomain_process");
+//   if (!EntrySym) {
+//     std::cerr << "No entry" << std::endl;
+//   }
+
+//   auto *Entry = EntrySym->toPtr<void (*)(...)>();
+//   EXPECT_NE(Entry, nullptr);
+
+//   double In = 3.0;
+//   double Out = 1.0;
+
+//   Entry(&In, &Out);
+//   EXPECT_EQ(Out, 1.0);
+//   In = 4.0;
+//   Entry(&In, &Out);
+//   EXPECT_EQ(Out, 1.0);
+//   In = 5.0;
+//   Entry(&In, &Out);
+//   EXPECT_EQ(Out, 1.0);
+//   In = 6.0;
+//   Entry(&In, &Out);
+//   EXPECT_EQ(Out, 6.0);
+//   In = 10.0;
+//   Entry(&In, &Out);
+//   EXPECT_EQ(Out, 10.0);
+// }
 
 ///  -------------------------------------------------
 ///  -------------------------------------------------
