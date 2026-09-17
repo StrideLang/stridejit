@@ -117,3 +117,31 @@ TEST(NestedFunctions, ModuleInReaction) {
   Entry(&in2, &out2);
   EXPECT_DOUBLE_EQ(out2, 12.5);
 }
+
+TEST(NestedFunctions, ReactionInReaction) {
+  strd::StrideEnvironment strenv;
+
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "reaction_in_reaction.stride");
+  ASSERT_TRUE(ret);
+
+  ret = strenv.compileInMemory();
+  ASSERT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("RootDomain_process");
+  ASSERT_TRUE(static_cast<bool>(EntrySym));
+
+  auto *Entry = EntrySym->toPtr<void (*)(double *, double *)>();
+  ASSERT_NE(Entry, nullptr);
+
+  double in1 = 5.0;
+  double out1 = 0.0;
+  Entry(&in1, &out1);
+  EXPECT_DOUBLE_EQ(out1, 7.0);
+
+  double in2 = 10.5;
+  double out2 = 0.0;
+  Entry(&in2, &out2);
+  EXPECT_DOUBLE_EQ(out2, 12.5);
+}
