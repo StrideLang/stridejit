@@ -1,0 +1,18 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+        signal In[16] {domain: RootDomain type: _RealType}
+        signal Index {domain: RootDomain default: 2 type: _IntType}
+    ]
+    outputs: [
+        signal Out[16] {domain: RootDomain type: _RealType}
+    ]
+	domainFunctionCode: ''
+}
+
+In[Index] >> Out[3];
+In[Index] + 1.5 >> Out[4];
+In[1] >> Out[Index];

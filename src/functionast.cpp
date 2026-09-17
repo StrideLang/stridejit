@@ -748,7 +748,17 @@ void processArgGroup(
           }
           const std::string *strIdx = std::get_if<std::string>(&idx);
           if (strIdx) {
-            idxList.push_back(state.NamedValues[*strIdx].first);
+            auto it = state.NamedValues.find(*strIdx);
+            if (it != state.NamedValues.end()) {
+              llvm::Value *indexVal = it->second.first;
+              if (indexVal->getType()->isPointerTy()) {
+                indexVal = state.Builder->CreateLoad(
+                    it->second.second.value(), indexVal, *strIdx);
+              }
+              idxList.push_back(indexVal);
+            } else {
+              assert(0 == 1);
+            }
           }
           if (!type.has_value()) {
             std::cerr << "No type for: " << std::string(value->getName())

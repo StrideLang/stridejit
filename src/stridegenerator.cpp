@@ -1107,10 +1107,16 @@ bool StrideGenerator::resolveIOParamsFromDefinition(
                                                          funcInstance);
             if (type) {
               PrototypeArg arg{blockName, type};
-              if (role == CodeAnalysis::NodeRole::Persistent) {
-                InternalPersistentParams.push_back(arg);
-              } else if (role == CodeAnalysis::NodeRole::External) {
+              auto funcType = ASTQuery::findTypeDeclaration(funcDecl, functionScope, tree);
+              bool isDomainMember = funcType ? ASTQuery::isDomainMember(funcType, functionScope, tree) : false;
+              bool isCodeGenerator = funcType ? ASTQuery::isCodeGenerator(funcType, functionScope, tree) : false;
+
+              if (role == CodeAnalysis::NodeRole::External) {
                 ExternalParams.push_back(arg);
+              } else if (isDomainMember && isCodeGenerator) {
+                usedInternalVariables.push_back(outBlockDecl);
+              } else if (role == CodeAnalysis::NodeRole::Persistent) {
+                InternalPersistentParams.push_back(arg);
               } else if (role == CodeAnalysis::NodeRole::Internal) {
                 if (outBlockDecl->getPropertyValue("persistent")) {
                   InternalPersistentParams.push_back(arg);
@@ -1218,11 +1224,17 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
             PrototypeArg{ASTQuery::getNodeName(var.first), type});
       }
 
+      auto fallbackFuncType = ASTQuery::findTypeDeclaration(funcDecl, functionScope, tree);
+      bool fallbackIsDomainMember = fallbackFuncType ? ASTQuery::isDomainMember(fallbackFuncType, functionScope, tree) : false;
+      bool fallbackIsCodeGenerator = fallbackFuncType ? ASTQuery::isCodeGenerator(fallbackFuncType, functionScope, tree) : false;
+
       for (const auto &var : nodeTree->internal) {
         auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
         auto type =
             state.getLLVMTypeForCodegenBlock(decl, funcDecl, funcInstance);
-        if (decl->getPropertyValue("persistent")) {
+        if (fallbackIsDomainMember && fallbackIsCodeGenerator) {
+          usedInternalVariables.push_back(decl);
+        } else if (decl->getPropertyValue("persistent")) {
           InternalPersistentParams.push_back(
               PrototypeArg{ASTQuery::getNodeName(var.first), type});
         } else {
@@ -1235,8 +1247,12 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
         auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
         auto type =
             state.getLLVMTypeForCodegenBlock(decl, funcDecl, funcInstance);
-        ExternalParams.push_back(
-            PrototypeArg{ASTQuery::getNodeName(var.first), type});
+        if (fallbackIsDomainMember && fallbackIsCodeGenerator) {
+          usedInternalVariables.push_back(decl);
+        } else {
+          ExternalParams.push_back(
+              PrototypeArg{ASTQuery::getNodeName(var.first), type});
+        }
       }
 
       for (const auto &var : nodeTree->external) {

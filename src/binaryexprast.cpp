@@ -85,7 +85,17 @@ BinaryExprAST::codegen(StrideCompiler &state) {
           }
           const std::string *strIdx = std::get_if<std::string>(&idx);
           if (strIdx) {
-            idxList.push_back(state.NamedValues[*strIdx].first);
+            auto it = state.NamedValues.find(*strIdx);
+            if (it != state.NamedValues.end()) {
+              llvm::Value *indexVal = it->second.first;
+              if (indexVal->getType()->isPointerTy()) {
+                indexVal = state.Builder->CreateLoad(
+                    it->second.second.value(), indexVal, *strIdx);
+              }
+              idxList.push_back(indexVal);
+            } else {
+              assert(0 == 1);
+            }
           }
           auto *GEP = state.Builder->CreateGEP(Type, Val, idxList);
           Val = state.Builder->CreateLoad(Type, GEP, varExpr->getName());
@@ -121,7 +131,17 @@ BinaryExprAST::codegen(StrideCompiler &state) {
           }
           const std::string *strIdx = std::get_if<std::string>(&idx);
           if (strIdx) {
-            idxList.push_back(state.NamedValues[*strIdx].first);
+            auto it = state.NamedValues.find(*strIdx);
+            if (it != state.NamedValues.end()) {
+              llvm::Value *indexVal = it->second.first;
+              if (indexVal->getType()->isPointerTy()) {
+                indexVal = state.Builder->CreateLoad(
+                    it->second.second.value(), indexVal, *strIdx);
+              }
+              idxList.push_back(indexVal);
+            } else {
+              assert(0 == 1);
+            }
           }
           if (Type->isArrayTy()) {
             Type = static_cast<llvm::ArrayType *>(Type)->getElementType();
@@ -209,8 +229,14 @@ BinaryExprAST::codegen(StrideCompiler &state) {
           }
           const std::string *strIdx = std::get_if<std::string>(&idx);
           if (strIdx) {
-            if (state.NamedValues.find(*strIdx) != state.NamedValues.end()) {
-              idxList.push_back(state.NamedValues[*strIdx].first);
+            auto it = state.NamedValues.find(*strIdx);
+            if (it != state.NamedValues.end()) {
+              llvm::Value *indexVal = it->second.first;
+              if (indexVal->getType()->isPointerTy()) {
+                indexVal = state.Builder->CreateLoad(
+                    it->second.second.value(), indexVal, *strIdx);
+              }
+              idxList.push_back(indexVal);
             } else {
               assert(0 == 1); // we shouldn't get here
             }
@@ -243,7 +269,17 @@ BinaryExprAST::codegen(StrideCompiler &state) {
           }
           const std::string *strIdx = std::get_if<std::string>(&idx);
           if (strIdx) {
-            idxList.push_back(state.NamedValues[*strIdx].first);
+            auto it = state.NamedValues.find(*strIdx);
+            if (it != state.NamedValues.end()) {
+              llvm::Value *indexVal = it->second.first;
+              if (indexVal->getType()->isPointerTy()) {
+                indexVal = state.Builder->CreateLoad(
+                    it->second.second.value(), indexVal, *strIdx);
+              }
+              idxList.push_back(indexVal);
+            } else {
+              assert(0 == 1);
+            }
           }
           auto GEP = state.Builder->CreateGEP(RType.value(), R, idxList);
           R = state.Builder->CreateLoad(RType.value(), GEP, varExpr->getName());

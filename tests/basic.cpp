@@ -347,6 +347,53 @@ TEST(JIT, Bundles) {
   EXPECT_DOUBLE_EQ(Out[4], cos(In[3]));
 }
 
+TEST(JIT, BundleDynamicIndex) {
+
+  strd::StrideEnvironment strenv;
+
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "bundle_variable.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  EXPECT_TRUE(static_cast<bool>(EntrySym));
+
+  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+
+  double In[16] = {0};
+  int32_t Index = 2;
+  double Out[16] = {0};
+  In[1] = 7.7;
+  In[2] = 4.2;
+
+  Entry(In, &Index, Out);
+  // Stride code: In[Index] >> Out[3];
+  EXPECT_DOUBLE_EQ(Out[3], 4.2);
+  // Stride code: In[Index] + 1.5 >> Out[4];
+  EXPECT_DOUBLE_EQ(Out[4], 4.2 + 1.5);
+  // Stride code: In[1] >> Out[Index];
+  EXPECT_DOUBLE_EQ(Out[2], 7.7);
+
+  // Test with another value for Index
+  Index = 5;
+  In[5] = 9.1;
+  for (double &x : Out) {
+    x = 0.0;
+  }
+
+  Entry(In, &Index, Out);
+  // Stride code: In[Index] >> Out[3];
+  EXPECT_DOUBLE_EQ(Out[3], 9.1);
+  // Stride code: In[Index] + 1.5 >> Out[4];
+  EXPECT_DOUBLE_EQ(Out[4], 9.1 + 1.5);
+  // Stride code: In[1] >> Out[Index];
+  EXPECT_DOUBLE_EQ(Out[5], 7.7);
+}
+
 TEST(JIT, Stream) {
 
   strd::StrideEnvironment strenv;
