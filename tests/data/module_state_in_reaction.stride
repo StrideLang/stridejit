@@ -1,0 +1,32 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [ signal In {domain: RootDomain type: _IntType} ]
+    outputs: [ signal Out {domain: RootDomain type: _IntType} ]
+	domainFunctionCode: ''
+}
+module Counter {
+    ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
+    blocks: [
+        signal Input { type: _IntType domain: OutputPort.domain }
+        signal Output { type: _IntType domain: OutputPort.domain }
+        signal Count { default: 0 type: _IntType reset: Reset domain: OutputPort.domain }
+    ]
+    streams: [
+        Count + Input >> Count;
+        Count >> Output;
+    ]
+}
+reaction TestReaction {
+    ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
+    blocks: [
+        signal Input { type: _IntType domain: OutputPort.domain }
+        signal Output { type: _IntType domain: OutputPort.domain }
+    ]
+    streams: [
+        Input >> Counter() >> Output;
+    ]
+}
+In >> TestReaction() >> Out;

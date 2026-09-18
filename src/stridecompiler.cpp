@@ -424,6 +424,7 @@ void StrideCompiler::buildStateStructTypes(const CodeAnalysis::TypeTree &tree) {
 
     StateStructInfo info;
     std::vector<llvm::Type *> fieldTypes;
+    std::vector<llvm::Constant *> defaultFieldValues;
 
     // 1. Persistent fields for this node's own state (only modules have state of their own)
     if (isModuleNode(nodeTree.instance)) {
@@ -441,6 +442,36 @@ void StrideCompiler::buildStateStructTypes(const CodeAnalysis::TypeTree &tree) {
         }
         info.varIndices[varName] = static_cast<unsigned>(fieldTypes.size());
         fieldTypes.push_back(varType);
+
+        llvm::Constant *defaultVal = nullptr;
+        if (var.first->getNodeType() == AST::Declaration) {
+          auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
+          auto defaultNode = decl->getPropertyValue("default");
+          if (defaultNode) {
+            if (defaultNode->getNodeType() == AST::Int) {
+              int64_t val =
+                  std::static_pointer_cast<ValueNode>(defaultNode)->getIntValue();
+              if (varType->isIntegerTy(64)) {
+                defaultVal = llvm::ConstantInt::get(varType, val);
+              } else {
+                defaultVal =
+                    llvm::ConstantInt::get(varType, static_cast<int32_t>(val));
+              }
+            } else if (defaultNode->getNodeType() == AST::Real) {
+              double val =
+                  std::static_pointer_cast<ValueNode>(defaultNode)->getRealValue();
+              defaultVal = llvm::ConstantFP::get(varType, val);
+            } else if (defaultNode->getNodeType() == AST::Switch) {
+              bool val =
+                  std::static_pointer_cast<ValueNode>(defaultNode)->getSwitchValue();
+              defaultVal = llvm::ConstantInt::get(varType, val ? 1 : 0);
+            }
+          }
+        }
+        if (!defaultVal) {
+          defaultVal = llvm::Constant::getNullValue(varType);
+        }
+        defaultFieldValues.push_back(defaultVal);
       }
     }
 
@@ -450,8 +481,10 @@ void StrideCompiler::buildStateStructTypes(const CodeAnalysis::TypeTree &tree) {
         auto childIt = stateStructMap.find(child.instance);
         if (childIt == stateStructMap.end()) {
           // Fallback by name
-          std::string childName = child.instance ? ASTQuery::getNodeName(child.instance) : "";
-          for (auto it = stateStructMap.begin(); it != stateStructMap.end(); ++it) {
+          std::string childName =
+              child.instance ? ASTQuery::getNodeName(child.instance) : "";
+          for (auto it = stateStructMap.begin(); it != stateStructMap.end();
+               ++it) {
             if (it->first && ASTQuery::getNodeName(it->first) == childName) {
               childIt = it;
               break;
@@ -462,6 +495,10 @@ void StrideCompiler::buildStateStructTypes(const CodeAnalysis::TypeTree &tree) {
           info.childIndices[child.instance] =
               static_cast<unsigned>(fieldTypes.size());
           fieldTypes.push_back(childIt->second.structType);
+          defaultFieldValues.push_back(
+              childIt->second.defaultConstant
+                  ? childIt->second.defaultConstant
+                  : llvm::Constant::getNullValue(childIt->second.structType));
         }
       }
     }
@@ -473,6 +510,8 @@ void StrideCompiler::buildStateStructTypes(const CodeAnalysis::TypeTree &tree) {
       info.structType =
           llvm::StructType::create(*TheContext, "struct." + name + "_state");
       info.structType->setBody(fieldTypes);
+      info.defaultConstant =
+          llvm::ConstantStruct::get(info.structType, defaultFieldValues);
       stateStructMap[nodeTree.instance] = info;
     }
   };

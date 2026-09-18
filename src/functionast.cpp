@@ -995,8 +995,11 @@ CallExprAST::codegen(StrideCompiler &state) {
             state.Builder->GetInsertBlock()->getParent();
         statePtrVal = state.CreateEntryBlockAlloca(
             currFunc, Callee + "_state", calleeInfo->structType);
-        state.Builder->CreateStore(
-            llvm::Constant::getNullValue(calleeInfo->structType), statePtrVal);
+        llvm::Constant *initConst =
+            calleeInfo->defaultConstant
+                ? calleeInfo->defaultConstant
+                : llvm::Constant::getNullValue(calleeInfo->structType);
+        state.Builder->CreateStore(initConst, statePtrVal);
       }
     }
 

@@ -138,6 +138,7 @@ public:
   // State struct tracking for nested function calls
   struct StateStructInfo {
     llvm::StructType *structType{nullptr};
+    llvm::Constant *defaultConstant{nullptr};
     std::map<std::string, unsigned> varIndices;
     std::map<ASTNode, unsigned> childIndices;
   };

@@ -263,3 +263,118 @@ TEST(NestedFunctions, LoopInModule) {
   EXPECT_EQ(out2, 60);
 }
 
+TEST(NestedFunctions, StatefulModuleInLoop) {
+  strd::StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                               "module_state_in_loop.stride");
+  ASSERT_TRUE(ret);
+
+  ret = strenv.compileInMemory();
+  ASSERT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("RootDomain_process");
+  ASSERT_TRUE(static_cast<bool>(EntrySym));
+
+  auto *Entry = EntrySym->toPtr<void (*)(int32_t *, int32_t *)>();
+  ASSERT_NE(Entry, nullptr);
+
+  int32_t list1[3] = {1, 2, 3};
+  int32_t out1 = 0;
+  Entry(list1, &out1);
+  EXPECT_EQ(out1, 6);
+
+  int32_t list2[3] = {10, 20, 30};
+  int32_t out2 = 0;
+  Entry(list2, &out2);
+  EXPECT_EQ(out2, 60);
+}
+
+TEST(NestedFunctions, StatefulModuleInReaction) {
+  strd::StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                               "module_state_in_reaction.stride");
+  ASSERT_TRUE(ret);
+
+  ret = strenv.compileInMemory();
+  ASSERT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("RootDomain_process");
+  ASSERT_TRUE(static_cast<bool>(EntrySym));
+
+  auto *Entry = EntrySym->toPtr<void (*)(int32_t *, int32_t *)>();
+  ASSERT_NE(Entry, nullptr);
+
+  int32_t in1 = 5;
+  int32_t out1 = 0;
+  Entry(&in1, &out1);
+  EXPECT_EQ(out1, 5);
+
+  int32_t in2 = 12;
+  int32_t out2 = 0;
+  Entry(&in2, &out2);
+  EXPECT_EQ(out2, 12);
+}
+
+TEST(NestedFunctions, StatefulModuleInModule) {
+  strd::StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                               "module_state_in_module.stride");
+  ASSERT_TRUE(ret);
+
+  ret = strenv.compileInMemory();
+  ASSERT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("RootDomain_process");
+  ASSERT_TRUE(static_cast<bool>(EntrySym));
+
+  auto *Entry = EntrySym->toPtr<void (*)(int32_t *, int32_t *)>();
+  ASSERT_NE(Entry, nullptr);
+
+  int32_t in1 = 5;
+  int32_t out1 = 0;
+  Entry(&in1, &out1);
+  EXPECT_EQ(out1, 15);
+
+  int32_t in2 = 8;
+  int32_t out2 = 0;
+  Entry(&in2, &out2);
+  EXPECT_EQ(out2, 18);
+}
+
+TEST(NestedFunctions, MultipleStatefulModulesInLoop) {
+  strd::StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                               "multiple_state_modules_in_loop.stride");
+  ASSERT_TRUE(ret);
+
+  ret = strenv.compileInMemory();
+  ASSERT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("RootDomain_process");
+  ASSERT_TRUE(static_cast<bool>(EntrySym));
+
+  auto *Entry = EntrySym->toPtr<void (*)(int32_t *, int32_t *)>();
+  ASSERT_NE(Entry, nullptr);
+
+  int32_t list1[3] = {1, 2, 3};
+  int32_t out1 = 0;
+  Entry(list1, &out1);
+  EXPECT_EQ(out1, 18);
+
+  int32_t list2[3] = {10, 20, 30};
+  int32_t out2 = 0;
+  Entry(list2, &out2);
+  EXPECT_EQ(out2, 180);
+}
+
+
+
+
