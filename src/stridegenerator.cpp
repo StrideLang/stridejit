@@ -382,7 +382,9 @@ StrideGenerator::GeneratedIRCode
 StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
                                      StrideCompiler &state) {
 
+  state.m_tree = tree;
   state.m_intanceTree = CodeAnalysis::getStateStructInformation({}, tree);
+  state.buildStateStructTypes(state.m_intanceTree);
   StrideGenerator::GeneratedIRCode generatedIRCode;
   for (const auto &node : tree->getChildren()) {
     if (node->getNodeType() == AST::Stream) {
@@ -929,8 +931,10 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                   std::make_unique<VariableExprAST>(arg.name));
             }
             for (const auto &arg : newFuncDecl->getProto().getInternalArgs()) {
-              args.Internal.args.push_back(
-                  std::make_unique<VariableExprAST>(arg.name));
+              if (arg.name != "__state") {
+                args.Internal.args.push_back(
+                    std::make_unique<VariableExprAST>(arg.name));
+              }
             }
           }
           std::vector<std::unique_ptr<ExprAST>> PortPropArgs;
@@ -988,6 +992,14 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               std::move(args.External.args), std::move(PortPropArgs),
               std::move(args.MainOut.argTypes), std::move(args.MainIn.argTypes),
               state.getName());
+          auto *callTypeTree = state.findTypeTreeNode(func);
+          if (!callTypeTree && funcDecl) {
+            callTypeTree = state.findTypeTreeNode(funcDecl);
+          }
+          if (state.doesNodeNeedState(callTypeTree)) {
+            callexpr->calleeNeedsState = true;
+            callexpr->funcInstance = func;
+          }
           if (newFuncDecl) {
             callexpr->callType = newFuncDecl->callType;
             generated[domainName].functions.push_back(std::move(newFuncDecl));
@@ -1318,6 +1330,19 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
     // TODO check if current function is the same as existing function
     return nullptr;
   }
+
+  auto *nodeTree =
+      funcInstance ? state.findTypeTreeNode(funcInstance) : nullptr;
+  if (!nodeTree && funcDecl) {
+    nodeTree = state.findTypeTreeNode(funcDecl);
+  }
+  bool funcNeedsState = state.doesNodeNeedState(nodeTree);
+  if (funcNeedsState) {
+    InternalPersistentParams.clear();
+    InternalPersistentParams.push_back(
+        PrototypeArg{"__state", llvm::PointerType::get(*state.TheContext, 0)});
+  }
+
   auto proto = std::make_unique<PrototypeAST>(
       funcName, OutParams, InParams, InternalPersistentParams, ExternalParams,
       UsedPortProperties);
@@ -1326,6 +1351,8 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
   auto newfunc =
       std::make_unique<FunctionAST>(std::move(proto), std::move(collected));
   newfunc->internalVariables = usedInternalVariables;
+  newfunc->hasState = funcNeedsState;
+  newfunc->funcInstance = funcInstance ? ASTNode(funcInstance) : ASTNode(funcDecl);
 
   if (funcDecl->getObjectType() == "module") {
     newfunc->callType = CallableType::Module;

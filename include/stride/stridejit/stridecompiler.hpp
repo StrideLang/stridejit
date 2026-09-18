@@ -135,6 +135,26 @@ public:
   // Track pointer element types for opaque pointers (LLVM >= 17)
   std::map<llvm::Value *, llvm::Type *> pointerElementTypes;
 
+  // State struct tracking for nested function calls
+  struct StateStructInfo {
+    llvm::StructType *structType{nullptr};
+    std::map<std::string, unsigned> varIndices;
+    std::map<ASTNode, unsigned> childIndices;
+  };
+
+  std::map<ASTNode, StateStructInfo> stateStructMap;
+  llvm::Value *currentFunctionStatePtr{nullptr};
+  const StateStructInfo *currentFunctionStateInfo{nullptr};
+  ASTNode m_tree{nullptr};
+
+  bool isModuleNode(ASTNode node) const;
+  bool doesNodeNeedState(const CodeAnalysis::TypeTree *node);
+  void buildStateStructTypes(const CodeAnalysis::TypeTree &tree);
+  const StateStructInfo *getStateStructInfo(ASTNode instance) const;
+  const CodeAnalysis::TypeTree *
+  findTypeTreeNode(ASTNode node,
+                   const CodeAnalysis::TypeTree *tree = nullptr) const;
+
   std::vector<std::string> m_nameStack;
   uint32_t m_idCounter{0};
 

@@ -62,6 +62,12 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
   // Allocate non-persistent local internal variables on the stack
   for (const auto &decl : internalVariables) {
     std::string varName = decl->getName();
+    if (state.currentFunctionStateInfo &&
+        state.currentFunctionStateInfo->varIndices.find(varName) !=
+            state.currentFunctionStateInfo->varIndices.end()) {
+      // Variable is allocated in state struct; skip local stack alloca
+      continue;
+    }
     auto defaultNode = decl->getPropertyValue("default");
     if (defaultNode) {
       if (decl->getNodeType() == AST::Declaration) {
@@ -274,6 +280,37 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     std::cout << std::string(Arg.getName()) << ", ";
   }
   std::cout << std::endl;
+
+  llvm::Value *prevFunctionStatePtr = state.currentFunctionStatePtr;
+  const StrideCompiler::StateStructInfo *prevFunctionStateInfo =
+      state.currentFunctionStateInfo;
+
+  if (hasState) {
+    auto stateArgIt = state.NamedValues.find("__state");
+    if (stateArgIt != state.NamedValues.end()) {
+      state.currentFunctionStatePtr = stateArgIt->second.first;
+      state.currentFunctionStateInfo = state.getStateStructInfo(funcInstance);
+      if (!state.currentFunctionStateInfo && state.m_tree) {
+        state.currentFunctionStateInfo = state.getStateStructInfo(
+            ASTQuery::findDeclarationByName(Proto->getName(), {}, state.m_tree));
+      }
+      if (state.currentFunctionStateInfo &&
+          state.currentFunctionStateInfo->structType) {
+        for (const auto &[varName, idx] :
+             state.currentFunctionStateInfo->varIndices) {
+          llvm::Type *elemTy =
+              state.currentFunctionStateInfo->structType->getElementType(idx);
+          llvm::Value *fieldPtr = state.Builder->CreateStructGEP(
+              state.currentFunctionStateInfo->structType,
+              state.currentFunctionStatePtr, idx, varName + "_ptr");
+          state.NamedValues[varName] = {fieldPtr, elemTy};
+        }
+      }
+    }
+  } else {
+    state.currentFunctionStatePtr = nullptr;
+    state.currentFunctionStateInfo = nullptr;
+  }
 
   // Pre Body
   // Before actual function code there is some work done to loops to manage the
@@ -562,6 +599,8 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   }
   auto *outVal = llvm::ConstantInt::get(state.Builder->getInt32Ty(), 0, true);
   state.Builder->CreateRet(outVal);
+  state.currentFunctionStatePtr = prevFunctionStatePtr;
+  state.currentFunctionStateInfo = prevFunctionStateInfo;
   // Validate the generated code, checking for consistency.
   verifyFunction(*TheFunction);
   TheFunction->print(llvm::outs());
@@ -858,9 +897,11 @@ CallExprAST::codegen(StrideCompiler &state) {
     size_t outCount = OutArgs.size();
     size_t portPropCount = PortPropArgs.size();
     size_t externalCount = ExternalArgs.size();
-    if (CalleeF->arg_size() >= outCount + portPropCount + externalCount) {
-      expectedInArgs =
-          CalleeF->arg_size() - outCount - portPropCount - externalCount;
+    size_t stateCount = calleeNeedsState ? 1 : 0;
+    if (CalleeF->arg_size() >=
+        outCount + portPropCount + externalCount + stateCount) {
+      expectedInArgs = CalleeF->arg_size() - outCount - portPropCount -
+                       externalCount - stateCount;
     }
   }
 
@@ -895,8 +936,7 @@ CallExprAST::codegen(StrideCompiler &state) {
                                      ? CallArgs[outArgCount + i].second.value()
                                      : elemType;
           val = state.Builder->CreateLoad(loadType, val, "bundle_elem");
-        }
-        if (val->getType() != elemType) {
+        } else if (val->getType() != elemType) {
           if (val->getType()->isIntegerTy() && elemType->isFloatingPointTy()) {
             val = state.Builder->CreateSIToFP(val, elemType, "bundle_cast");
           } else if (val->getType()->isFloatingPointTy() &&
@@ -916,6 +956,53 @@ CallExprAST::codegen(StrideCompiler &state) {
   } else if (callType == CallableType::External) {
     processArgGroup(state, InArgs, CalleeF, CallArgs);
     // processArgGroup(state, InternalArgs, CalleeF, CallArgs);
+  }
+
+  if (calleeNeedsState) {
+    llvm::Value *statePtrVal = nullptr;
+    llvm::Type *ptrTy = llvm::PointerType::get(*state.TheContext, 0);
+
+    if (state.currentFunctionStatePtr && state.currentFunctionStateInfo) {
+      auto childIt =
+          state.currentFunctionStateInfo->childIndices.find(funcInstance);
+      if (childIt == state.currentFunctionStateInfo->childIndices.end()) {
+        std::string childName =
+            funcInstance ? ASTQuery::getNodeName(funcInstance) : Callee;
+        for (const auto &pair : state.currentFunctionStateInfo->childIndices) {
+          if (pair.first && ASTQuery::getNodeName(pair.first) == childName) {
+            childIt =
+                state.currentFunctionStateInfo->childIndices.find(pair.first);
+            break;
+          }
+        }
+      }
+      if (childIt != state.currentFunctionStateInfo->childIndices.end()) {
+        statePtrVal = state.Builder->CreateStructGEP(
+            state.currentFunctionStateInfo->structType,
+            state.currentFunctionStatePtr, childIt->second,
+            Callee + "_child_state");
+      }
+    }
+
+    if (!statePtrVal) {
+      const auto *calleeInfo = state.getStateStructInfo(funcInstance);
+      if (!calleeInfo && state.m_tree) {
+        calleeInfo = state.getStateStructInfo(
+            ASTQuery::findDeclarationByName(Callee, {}, state.m_tree));
+      }
+      if (calleeInfo && calleeInfo->structType) {
+        llvm::Function *currFunc =
+            state.Builder->GetInsertBlock()->getParent();
+        statePtrVal = state.CreateEntryBlockAlloca(
+            currFunc, Callee + "_state", calleeInfo->structType);
+        state.Builder->CreateStore(
+            llvm::Constant::getNullValue(calleeInfo->structType), statePtrVal);
+      }
+    }
+
+    if (statePtrVal) {
+      CallArgs.push_back({statePtrVal, ptrTy});
+    }
   }
 
   if (callType == CallableType::Reaction || !ExternalArgs.empty()) {

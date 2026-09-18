@@ -1,3 +1,4 @@
+#include <functional>
 #include <iostream>
 
 #include "stride/parser/blocknode.h"
@@ -326,3 +327,167 @@ strd::StrideCompiler::getGlobal(std::string globalName) {
 bool StrideCompiler::globalExists(std::string globalName) {
   return m_globals.find(globalName) != m_globals.end();
 }
+
+bool StrideCompiler::isModuleNode(ASTNode node) const {
+  if (!node) {
+    return false;
+  }
+  if (node->getNodeType() == AST::Declaration) {
+    auto decl = std::static_pointer_cast<DeclarationNode>(node);
+    return decl->getObjectType() == "module";
+  }
+  if (m_tree) {
+    auto decl = ASTQuery::findDeclarationByName(ASTQuery::getNodeName(node), {},
+                                                m_tree);
+    if (decl) {
+      return decl->getObjectType() == "module";
+    }
+  }
+  return false;
+}
+
+bool StrideCompiler::doesNodeNeedState(const CodeAnalysis::TypeTree *node) {
+  if (!node) {
+    return false;
+  }
+  // Only modules can have persistent state of their own, and only if they have persistent variables.
+  // Reactions and loops do not have state of their own.
+  if (isModuleNode(node->instance) && !node->persistent.empty()) {
+    return true;
+  }
+  // Any callable needs state if any nested child needs state
+  for (const auto &child : node->nodes) {
+    if (doesNodeNeedState(&child)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const StrideCompiler::StateStructInfo *
+StrideCompiler::getStateStructInfo(ASTNode instance) const {
+  if (!instance) {
+    return nullptr;
+  }
+  auto it = stateStructMap.find(instance);
+  if (it != stateStructMap.end()) {
+    return &it->second;
+  }
+  // Fallback by name
+  std::string name = ASTQuery::getNodeName(instance);
+  for (const auto &pair : stateStructMap) {
+    if (pair.first && ASTQuery::getNodeName(pair.first) == name) {
+      return &pair.second;
+    }
+  }
+  return nullptr;
+}
+
+const CodeAnalysis::TypeTree *
+StrideCompiler::findTypeTreeNode(ASTNode node,
+                                 const CodeAnalysis::TypeTree *tree) const {
+  if (!node) {
+    return nullptr;
+  }
+  if (!tree) {
+    tree = &m_intanceTree;
+  }
+  if (tree->instance == node) {
+    return tree;
+  }
+  std::string targetName = ASTQuery::getNodeName(node);
+  if (tree->instance && ASTQuery::getNodeName(tree->instance) == targetName) {
+    return tree;
+  }
+  for (const auto &child : tree->nodes) {
+    auto *found = findTypeTreeNode(node, &child);
+    if (found) {
+      return found;
+    }
+  }
+  return nullptr;
+}
+
+void StrideCompiler::buildStateStructTypes(const CodeAnalysis::TypeTree &tree) {
+  stateStructMap.clear();
+
+  std::function<void(const CodeAnalysis::TypeTree &)> buildNodeState =
+      [&](const CodeAnalysis::TypeTree &nodeTree) {
+    if (!doesNodeNeedState(&nodeTree)) {
+      return;
+    }
+
+    // First recursively build child state structs
+    for (const auto &child : nodeTree.nodes) {
+      buildNodeState(child);
+    }
+
+    StateStructInfo info;
+    std::vector<llvm::Type *> fieldTypes;
+
+    // 1. Persistent fields for this node's own state (only modules have state of their own)
+    if (isModuleNode(nodeTree.instance)) {
+      for (const auto &var : nodeTree.persistent) {
+        std::string varName = ASTQuery::getNodeName(var.first);
+        llvm::Type *varType = nullptr;
+        if (typesMap.find(var.second) != typesMap.end()) {
+          varType = typesMap[var.second];
+        } else if (var.first->getNodeType() == AST::Declaration) {
+          varType =
+              getLLVMType(std::static_pointer_cast<DeclarationNode>(var.first));
+        }
+        if (!varType) {
+          varType = llvm::Type::getDoubleTy(*TheContext);
+        }
+        info.varIndices[varName] = static_cast<unsigned>(fieldTypes.size());
+        fieldTypes.push_back(varType);
+      }
+    }
+
+    // 2. Sub-struct fields for each child node requiring state
+    for (const auto &child : nodeTree.nodes) {
+      if (doesNodeNeedState(&child)) {
+        auto childIt = stateStructMap.find(child.instance);
+        if (childIt == stateStructMap.end()) {
+          // Fallback by name
+          std::string childName = child.instance ? ASTQuery::getNodeName(child.instance) : "";
+          for (auto it = stateStructMap.begin(); it != stateStructMap.end(); ++it) {
+            if (it->first && ASTQuery::getNodeName(it->first) == childName) {
+              childIt = it;
+              break;
+            }
+          }
+        }
+        if (childIt != stateStructMap.end() && childIt->second.structType) {
+          info.childIndices[child.instance] =
+              static_cast<unsigned>(fieldTypes.size());
+          fieldTypes.push_back(childIt->second.structType);
+        }
+      }
+    }
+
+    if (!fieldTypes.empty()) {
+      std::string name = nodeTree.instance
+                             ? ASTQuery::getNodeName(nodeTree.instance)
+                             : "anon";
+      info.structType =
+          llvm::StructType::create(*TheContext, "struct." + name + "_state");
+      info.structType->setBody(fieldTypes);
+      stateStructMap[nodeTree.instance] = info;
+    }
+  };
+
+  for (const auto &node : tree.nodes) {
+    if (node.instance && node.instance->getNodeType() == AST::Declaration) {
+      auto decl = std::static_pointer_cast<DeclarationNode>(node.instance);
+      if (decl->getObjectType() == "_domainDefinition") {
+        for (const auto &funcTree : node.nodes) {
+          buildNodeState(funcTree);
+        }
+        continue;
+      }
+    }
+    buildNodeState(node);
+  }
+}
+

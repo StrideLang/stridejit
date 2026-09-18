@@ -94,6 +94,8 @@ public:
   std::string terminateWhenName;
 
   CallableType callType;
+  bool hasState{false};
+  ASTNode funcInstance{nullptr};
 
 private:
   void allocateInternalVariables(StrideCompiler &state,
@@ -124,6 +126,8 @@ public:
   codegen(StrideCompiler &state) override;
 
   CallableType callType;
+  bool calleeNeedsState{false};
+  ASTNode funcInstance{nullptr};
 
   std::vector<std::unique_ptr<ExprAST>> InArgs;
   std::vector<std::unique_ptr<ExprAST>> OutArgs;

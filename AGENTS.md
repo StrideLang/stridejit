@@ -78,3 +78,46 @@ This document outlines critical architectural patterns, code generation invarian
   - In polymorphism tests (e.g. `Equal@Int_Bool` vs `Equal@Double_Bool`), use exact literal types (`0` vs `0.0`) so that overload resolution does not depend on typecasting.
   - Test typecasting in dedicated fixtures/tests (e.g. `typecast_list.stride`, `typecast_stream.stride`).
 - **Assert Values**: In addition to validating non-null pointers (`EXPECT_TRUE(ptr)`), always dereference and check actual values (`EXPECT_TRUE(*ptr)`, `EXPECT_FALSE(*ptr)`).
+
+---
+
+## 7. Native LLVM Command Templates & Instruction Formats
+
+- **Strict `llvm::` Prefix Requirement**:
+  - Native LLVM IR instructions specified in `platformModule` `processing:` strings MUST use the explicit `llvm::` prefix:
+    ```stride
+    processing: "%%outtokens:0%% = llvm::icmp sgt %%intokens:0%%, %%intokens:1%%"
+    processing: "%%outtokens:0%% = llvm::fcmp ogt %%intokens:0%%, %%intokens:1%%"
+    ```
+  - **Never** add ad-hoc fallback branches or omit the `llvm::` prefix in `LLVMCommandAST::codegen`. When non-standard syntax is encountered, update the `.stride` fixture rather than adding parser heuristics.
+- **Valid Condition Codes**:
+  - LLVM `icmp` instructions strictly require explicit signedness: `sgt`, `sge`, `slt`, `sle`, `ugt`, `uge`, `ult`, `ule`, `eq`, `ne`.
+  - Do not use non-standard shorthand like `gt`. Use `sgt` for signed comparisons or `ugt` for unsigned comparisons.
+
+---
+
+## 8. Nested Scope Resolution & Shadowing Invariants
+
+- **Check Innermost Scope First**:
+  - In `CodeAnalysis::determineNodeRole`, always query the local scope (`scope.back()`) *before* searching `outerScope`.
+  - Inner declarations shadow outer declarations. Checking `outerScope` first incorrectly flags local loop/reaction variables (like `Done`, `Step`, or `Index`) as `External`, replacing local stack/PHI variables with pointer arguments passed down from caller functions.
+
+---
+
+## 9. Bundled Arguments in Module & Loop Calls
+
+- **Offset by `outArgCount`**:
+  - When bundling multiple input arguments into an intermediate array (`CallArgs.size() > outArgCount + 1`), the inputs in `CallArgs` start at index `outArgCount + i`. Never index directly from `0`, which points to output arguments.
+- **Pass Alloca Pointer Directly**:
+  - Pass the alloca pointer itself (`arrayAlloc`) directly as the argument to the callee. Never call `builder->CreateLoad` on the buffer memory.
+- **Single-Offset GEP**:
+  - For dynamic array allocas (`CreateAlloca(elemType, size)`), compute element addresses using single-index GEP: `builder->CreateInBoundsGEP(elemType, arrayAlloc, index)`. Double indexing `{0, index}` is only valid for fixed-size LLVM array types.
+
+---
+
+## 10. Reaction Calling Conventions & Conditional Execution
+
+- **Reactions with Declared Input Ports**:
+  - Reactions that declare input ports take explicit data arguments and execute unconditionally upon invocation. In `CallExprAST::codegen`, pass inputs directly to the callee without conditional branching.
+- **Switch-Triggered Reactions (0 Input Ports)**:
+  - Reactions without declared input ports that are fed by a stream switch/condition (`expectedInArgs == 0 && !InArgs.empty()`) generate a conditional branch (`CreateCondBr`) around the reaction call.
