@@ -8,7 +8,7 @@
 // #include "llvm/ADT/APFloat.h"
 // #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/BasicBlock.h"
-// #include "llvm/IR/Constants.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
@@ -404,6 +404,24 @@ StrideCompiler::findTypeTreeNode(ASTNode node,
     if (found) {
       return found;
     }
+  }
+  return nullptr;
+}
+
+llvm::Constant *
+StrideCompiler::StateStructInfo::getDefaultValue(const std::string &varName) const {
+  auto it = varIndices.find(varName);
+  if (it != varIndices.end() && defaultConstant) {
+    return llvm::cast<llvm::Constant>(defaultConstant->getOperand(it->second));
+  }
+  return nullptr;
+}
+
+llvm::Constant *
+StrideCompiler::StateStructInfo::getChildDefaultConstant(ASTNode childInstance) const {
+  auto it = childIndices.find(childInstance);
+  if (it != childIndices.end() && defaultConstant) {
+    return llvm::cast<llvm::Constant>(defaultConstant->getOperand(it->second));
   }
   return nullptr;
 }

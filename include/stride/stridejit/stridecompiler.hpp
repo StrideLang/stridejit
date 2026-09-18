@@ -20,6 +20,7 @@
 // forward declarations for llvm
 namespace llvm {
 class Value;
+class Constant;
 class Module;
 
 } // namespace llvm
@@ -141,6 +142,9 @@ public:
     llvm::Constant *defaultConstant{nullptr};
     std::map<std::string, unsigned> varIndices;
     std::map<ASTNode, unsigned> childIndices;
+
+    llvm::Constant *getDefaultValue(const std::string &varName) const;
+    llvm::Constant *getChildDefaultConstant(ASTNode childInstance) const;
   };
 
   std::map<ASTNode, StateStructInfo> stateStructMap;
