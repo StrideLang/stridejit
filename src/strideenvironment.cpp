@@ -317,6 +317,46 @@ size_t StrideEnvironment::getStateSize(const std::string &funcName) const {
   return DL->getTypeAllocSize(info->structType);
 }
 
+static void fillTypeInfo(llvm::Type *ty, const llvm::DataLayout *DL,
+                         DataType &outType, std::string &outTypeName,
+                         size_t &outElemSize) {
+  if (!ty) {
+    outType = DataType::CUSTOM;
+    outTypeName = "";
+    outElemSize = 0;
+    return;
+  }
+  if (ty->isDoubleTy()) {
+    outType = DataType::DOUBLE;
+    outTypeName = "_RealType";
+    outElemSize = DL ? DL->getTypeAllocSize(ty) : 8;
+  } else if (ty->isIntegerTy(32)) {
+    outType = DataType::INT32;
+    outTypeName = "_IntType";
+    outElemSize = DL ? DL->getTypeAllocSize(ty) : 4;
+  } else if (ty->isIntegerTy(1)) {
+    outType = DataType::BOOL;
+    outTypeName = "_SwitchType";
+    outElemSize = DL ? DL->getTypeAllocSize(ty) : 1;
+  } else if (ty->isIntegerTy(64)) {
+    outType = DataType::INT64;
+    outTypeName = "_IntType";
+    outElemSize = DL ? DL->getTypeAllocSize(ty) : 8;
+  } else if (ty->isFloatTy()) {
+    outType = DataType::DOUBLE;
+    outTypeName = "_RealType";
+    outElemSize = DL ? DL->getTypeAllocSize(ty) : 4;
+  } else if (ty->isStructTy()) {
+    outType = DataType::STATE;
+    outTypeName = ty->getStructName().str();
+    outElemSize = DL ? DL->getTypeAllocSize(ty) : 0;
+  } else {
+    outType = DataType::CUSTOM;
+    outTypeName = "";
+    outElemSize = DL ? DL->getTypeAllocSize(ty) : 0;
+  }
+}
+
 std::vector<FunctionArgInfo>
 StrideEnvironment::getFunctionArgs(const std::string &funcName) const {
   std::vector<FunctionArgInfo> result;
@@ -324,30 +364,215 @@ StrideEnvironment::getFunctionArgs(const std::string &funcName) const {
   if (it == state.FunctionProtos.end()) {
     return result;
   }
+  const auto *DL = getDataLayout();
   const auto &proto = it->second;
+
+  auto makeArgInfo = [&](const PrototypeArg &arg, FunctionArgInfo::Role role,
+                         bool isPtr, const std::string &prop = "") {
+    FunctionArgInfo info;
+    info.name = arg.name;
+    info.role = role;
+    info.llvmType = arg.llvmType;
+    info.isPointer = isPtr;
+    info.property = prop.empty() ? arg.property : prop;
+
+    fillTypeInfo(arg.llvmType, DL, info.type, info.typeName, info.elementSize);
+
+    info.count = 1;
+    if (state.m_tree) {
+      auto decl = ASTQuery::findDeclarationByName(arg.name, {}, state.m_tree);
+      if (decl) {
+        int sz = ASTQuery::getBlockDeclaredSize(decl, {}, state.m_tree);
+        if (sz > 0) {
+          info.count = static_cast<size_t>(sz);
+        } else if (!info.property.empty()) {
+          info.count = 0; // Undetermined dynamic size
+        }
+      }
+    }
+    info.totalBytes = info.elementSize * info.count;
+    return info;
+  };
+
   for (const auto &arg : proto->getOutArgs()) {
-    result.push_back({arg.name, FunctionArgInfo::Role::Output, arg.llvmType, true});
+    result.push_back(makeArgInfo(arg, FunctionArgInfo::Role::Output, true));
   }
   for (const auto &arg : proto->getInArgs()) {
-    result.push_back({arg.name, FunctionArgInfo::Role::Input, arg.llvmType, true});
+    result.push_back(makeArgInfo(arg, FunctionArgInfo::Role::Input, true));
   }
   if (hasState(funcName)) {
-    const auto *info = state.getStateStructInfo(funcName);
-    llvm::Type *statePtrTy = nullptr;
-    if (info && info->structType) {
-      statePtrTy = llvm::PointerType::get(info->structType->getContext(), 0);
+    FunctionArgInfo info;
+    info.name = "__state";
+    info.role = FunctionArgInfo::Role::State;
+    info.type = DataType::STATE;
+    info.typeName = "struct." + funcName + "_state";
+    info.isPointer = true;
+    info.count = 1;
+    info.elementSize = getStateSize(funcName);
+    info.totalBytes = info.elementSize;
+
+    const auto *stateInfo = state.getStateStructInfo(funcName);
+    if (stateInfo && stateInfo->structType) {
+      info.llvmType =
+          llvm::PointerType::get(stateInfo->structType->getContext(), 0);
     } else if (state.TheContext) {
-      statePtrTy = llvm::PointerType::get(*state.TheContext, 0);
+      info.llvmType = llvm::PointerType::get(*state.TheContext, 0);
     }
-    result.push_back({"__state", FunctionArgInfo::Role::State, statePtrTy, true});
+    result.push_back(info);
   }
   for (const auto &arg : proto->getExternalArgs()) {
-    result.push_back({arg.name, FunctionArgInfo::Role::External, arg.llvmType, true});
+    result.push_back(makeArgInfo(arg, FunctionArgInfo::Role::External, true));
   }
   for (const auto &arg : proto->getUsedPortProperties()) {
-    result.push_back({arg.name, FunctionArgInfo::Role::PortProperty, arg.llvmType, false});
+    result.push_back(makeArgInfo(arg, FunctionArgInfo::Role::PortProperty, false,
+                                 arg.property));
   }
   return result;
+}
+
+size_t StrideEnvironment::getFunctionArgCount(const std::string &funcName) const {
+  return getFunctionArgs(funcName).size();
+}
+
+std::optional<FunctionArgInfo>
+StrideEnvironment::getFunctionArg(const std::string &funcName, size_t index) const {
+  auto args = getFunctionArgs(funcName);
+  if (index < args.size()) {
+    return args[index];
+  }
+  return std::nullopt;
+}
+
+std::optional<FunctionArgInfo>
+StrideEnvironment::getFunctionArg(const std::string &funcName,
+                                  const std::string &argName) const {
+  for (const auto &arg : getFunctionArgs(funcName)) {
+    if (arg.name == argName) {
+      return arg;
+    }
+  }
+  return std::nullopt;
+}
+
+int StrideEnvironment::getFunctionArgIndex(const std::string &funcName,
+                                          const std::string &argName) const {
+  auto args = getFunctionArgs(funcName);
+  for (size_t i = 0; i < args.size(); ++i) {
+    if (args[i].name == argName) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
+InvokerParameterList::InvokerParameterList(std::vector<FunctionArgInfo> args)
+    : m_args(args.size(), nullptr), m_argInfos(std::move(args)) {
+  for (size_t i = 0; i < m_argInfos.size(); ++i) {
+    m_nameToIndex[m_argInfos[i].name] = i;
+  }
+}
+
+bool InvokerParameterList::setArg(size_t index, void *ptr) {
+  if (index >= m_args.size()) {
+    return false;
+  }
+  const auto &info = m_argInfos[index];
+  if (!info.property.empty() && m_nameToIndex.find(info.property) != m_nameToIndex.end()) {
+    return false; // MUST use setArrayArg
+  }
+  m_args[index] = ptr;
+  return true;
+}
+
+bool InvokerParameterList::setArg(const std::string &name, void *ptr) {
+  auto it = m_nameToIndex.find(name);
+  if (it == m_nameToIndex.end()) {
+    return false;
+  }
+  return setArg(it->second, ptr);
+}
+
+bool InvokerParameterList::setState(void *statePtr) {
+  for (size_t i = 0; i < m_argInfos.size(); ++i) {
+    if (m_argInfos[i].role == FunctionArgInfo::Role::State) {
+      m_args[i] = statePtr;
+      return true;
+    }
+  }
+  return setArg("__state", statePtr);
+}
+
+bool InvokerParameterList::setProperty(const std::string &name, int32_t value) {
+  auto it = m_nameToIndex.find(name);
+  if (it == m_nameToIndex.end()) {
+    return false;
+  }
+  // Store the value locally inside the FunctionArgInfo struct so its address is stable
+  m_argInfos[it->second].portPropertyValue = value;
+  m_args[it->second] = &m_argInfos[it->second].portPropertyValue;
+  return true;
+}
+
+bool InvokerParameterList::setArrayArg(const std::string &name, void *ptr, size_t size) {
+  auto it = m_nameToIndex.find(name);
+  if (it == m_nameToIndex.end()) {
+    return false;
+  }
+  m_args[it->second] = ptr; // Bypass setArg validation
+  
+  const auto &propName = m_argInfos[it->second].property;
+  if (!propName.empty()) {
+    return setProperty(propName, static_cast<int32_t>(size));
+  }
+  return true;
+}
+
+void *InvokerParameterList::getArg(size_t index) const {
+  if (index < m_args.size()) {
+    return m_args[index];
+  }
+  return nullptr;
+}
+
+void *InvokerParameterList::getArg(const std::string &name) const {
+  auto it = m_nameToIndex.find(name);
+  if (it != m_nameToIndex.end()) {
+    return m_args[it->second];
+  }
+  return nullptr;
+}
+
+bool InvokerParameterList::isComplete() const {
+  if (m_args.empty() && !m_argInfos.empty()) {
+    return false;
+  }
+  for (void *ptr : m_args) {
+    if (!ptr) {
+      return false;
+    }
+  }
+  return true;
+}
+
+const FunctionArgInfo *InvokerParameterList::getArgInfo(size_t index) const {
+  if (index < m_argInfos.size()) {
+    return &m_argInfos[index];
+  }
+  return nullptr;
+}
+
+const FunctionArgInfo *
+InvokerParameterList::getArgInfo(const std::string &name) const {
+  auto it = m_nameToIndex.find(name);
+  if (it != m_nameToIndex.end()) {
+    return &m_argInfos[it->second];
+  }
+  return nullptr;
+}
+
+InvokerParameterList
+StrideEnvironment::createInvokerParamList(const std::string &funcName) const {
+  return InvokerParameterList(getFunctionArgs(funcName));
 }
 
 int32_t StrideEnvironment::invoke(const std::string &funcName, void **args) {
@@ -360,6 +585,11 @@ int32_t StrideEnvironment::invoke(const std::string &funcName, void **args) {
   }
   auto *invoker = sym->toPtr<int32_t (*)(void **)>();
   return invoker(args);
+}
+
+int32_t StrideEnvironment::invoke(const std::string &funcName,
+                                 InvokerParameterList &params) {
+  return invoke(funcName, params.data());
 }
 
 bool StrideEnvironment::compileInMemory() {

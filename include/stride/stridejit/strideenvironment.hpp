@@ -3,6 +3,8 @@
 
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "stride/parser/ast.h"
 #include "stride/stridejit/stridecompiler.hpp"
@@ -22,11 +24,57 @@ struct StrideExternalVariable {
 };
  
 struct FunctionArgInfo {
-  std::string name;
   enum class Role { Output, Input, State, External, PortProperty };
-  Role role;
+
+  std::string name;
+  Role role{Role::Input};
+  DataType type{DataType::INT32};
+  std::string typeName;
   llvm::Type *llvmType{nullptr};
   bool isPointer{true};
+  size_t elementSize{0};
+  size_t count{1};
+  size_t totalBytes{0};
+  std::string property;
+
+  // Returns true if this argument is an array.
+  // Static size arrays have count > 1.
+  // Undetermined dynamic size arrays have count == 0.
+  bool isArray() const { return count != 1; }
+
+  // Returns the static size of the array.
+  // If the array has an undetermined size (dynamic), this returns 0.
+  size_t getArraySize() const { return count; }
+  
+  int32_t portPropertyValue{0};
+};
+
+class InvokerParameterList {
+public:
+  InvokerParameterList() = default;
+  explicit InvokerParameterList(std::vector<FunctionArgInfo> args);
+
+  bool setArg(size_t index, void *ptr);
+  bool setArg(const std::string &name, void *ptr);
+  bool setState(void *statePtr);
+  bool setProperty(const std::string &name, int32_t value);
+  bool setArrayArg(const std::string &name, void *ptr, size_t size);
+
+  void *getArg(size_t index) const;
+  void *getArg(const std::string &name) const;
+
+  size_t size() const { return m_args.size(); }
+  bool isComplete() const;
+  void **data() { return m_args.data(); }
+  const void *const *data() const { return m_args.data(); }
+  const std::vector<FunctionArgInfo> &getArgInfos() const { return m_argInfos; }
+  const FunctionArgInfo *getArgInfo(size_t index) const;
+  const FunctionArgInfo *getArgInfo(const std::string &name) const;
+
+private:
+  std::vector<void *> m_args;
+  std::vector<FunctionArgInfo> m_argInfos;
+  std::unordered_map<std::string, size_t> m_nameToIndex;
 };
 
 class StrideEnvironment {
@@ -49,7 +97,14 @@ public:
 
   // Programmatic function inspection and dynamic invocation
   std::vector<FunctionArgInfo> getFunctionArgs(const std::string &funcName) const;
+  size_t getFunctionArgCount(const std::string &funcName) const;
+  std::optional<FunctionArgInfo> getFunctionArg(const std::string &funcName, size_t index) const;
+  std::optional<FunctionArgInfo> getFunctionArg(const std::string &funcName, const std::string &argName) const;
+  int getFunctionArgIndex(const std::string &funcName, const std::string &argName) const;
+
+  InvokerParameterList createInvokerParamList(const std::string &funcName) const;
   int32_t invoke(const std::string &funcName, void **args);
+  int32_t invoke(const std::string &funcName, InvokerParameterList &params);
 
   void prepareTree(ASTNode tree);
 

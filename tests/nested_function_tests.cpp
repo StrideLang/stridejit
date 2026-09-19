@@ -801,3 +801,122 @@ TEST(NestedFunctions, StandaloneLoopGenericInvocation) {
 
   strenv.deallocateState(state);
 }
+
+TEST(NestedFunctions, StandaloneArgumentQueries) {
+  strd::StrideEnvironment strenv;
+
+  auto tree = strd::AST::parseFile(
+      STRIDEJIT_TESTS_SOURCE_DIR "module_state_in_loop.stride");
+  ASSERT_TRUE(tree);
+  strenv.prepareTree(tree);
+
+  strd::ScopeStack scope;
+  auto ret = strenv.generateStandaloneFunction("TestLoop", scope, tree);
+  ASSERT_TRUE(ret);
+
+  // Total count
+  EXPECT_EQ(strenv.getFunctionArgCount("TestLoop"), 4u);
+
+  // Query by index
+  auto arg0 = strenv.getFunctionArg("TestLoop", 0);
+  ASSERT_TRUE(arg0.has_value());
+  EXPECT_EQ(arg0->name, "Output");
+  EXPECT_EQ(arg0->role, strd::FunctionArgInfo::Role::Output);
+  EXPECT_EQ(arg0->type, strd::DataType::INT32);
+  EXPECT_EQ(arg0->elementSize, 4u);
+  EXPECT_TRUE(arg0->isPointer);
+
+  // Query by name
+  auto argInput = strenv.getFunctionArg("TestLoop", "Input");
+  ASSERT_TRUE(argInput.has_value());
+  EXPECT_EQ(argInput->role, strd::FunctionArgInfo::Role::Input);
+  EXPECT_EQ(argInput->type, strd::DataType::INT32);
+  EXPECT_EQ(argInput->elementSize, 4u);
+  EXPECT_TRUE(argInput->isPointer);
+
+  auto argNonExistent = strenv.getFunctionArg("TestLoop", "NonExistent");
+  EXPECT_FALSE(argNonExistent.has_value());
+
+  // Query index by name
+  EXPECT_EQ(strenv.getFunctionArgIndex("TestLoop", "Output"), 0);
+  EXPECT_EQ(strenv.getFunctionArgIndex("TestLoop", "Input"), 1);
+  EXPECT_EQ(strenv.getFunctionArgIndex("TestLoop", "__state"), 2);
+  EXPECT_EQ(strenv.getFunctionArgIndex("TestLoop", "InputPort_size"), 3);
+  EXPECT_EQ(strenv.getFunctionArgIndex("TestLoop", "NonExistent"), -1);
+
+  // Verify full ordered list
+  auto args = strenv.getFunctionArgs("TestLoop");
+  ASSERT_EQ(args.size(), 4u);
+  EXPECT_EQ(args[0].name, "Output");
+  EXPECT_EQ(args[0].role, strd::FunctionArgInfo::Role::Output);
+  EXPECT_EQ(args[0].type, strd::DataType::INT32);
+  EXPECT_TRUE(args[0].isPointer);
+
+  EXPECT_EQ(args[1].name, "Input");
+  EXPECT_EQ(args[1].role, strd::FunctionArgInfo::Role::Input);
+  EXPECT_EQ(args[1].type, strd::DataType::INT32);
+  EXPECT_TRUE(args[1].isPointer);
+
+  EXPECT_EQ(args[2].name, "__state");
+  EXPECT_EQ(args[2].role, strd::FunctionArgInfo::Role::State);
+  EXPECT_EQ(args[2].type, strd::DataType::STATE);
+  EXPECT_GT(args[2].elementSize, 0u);
+  EXPECT_TRUE(args[2].isPointer);
+
+  EXPECT_EQ(args[3].name, "InputPort_size");
+  EXPECT_EQ(args[3].role, strd::FunctionArgInfo::Role::PortProperty);
+  EXPECT_EQ(args[3].type, strd::DataType::INT32);
+  EXPECT_FALSE(args[3].isPointer);
+}
+
+TEST(NestedFunctions, StandaloneInvokerParameterList) {
+  strd::StrideEnvironment strenv;
+
+  auto tree = strd::AST::parseFile(
+      STRIDEJIT_TESTS_SOURCE_DIR "module_state_in_loop.stride");
+  ASSERT_TRUE(tree);
+  strenv.prepareTree(tree);
+
+  strd::ScopeStack scope;
+  auto ret = strenv.generateStandaloneFunction("TestLoop", scope, tree);
+  ASSERT_TRUE(ret);
+
+  ret = strenv.compileInMemory();
+  ASSERT_TRUE(ret);
+
+  void *state = strenv.allocateState("TestLoop");
+  ASSERT_NE(state, nullptr);
+
+  // Create parameter list helper
+  auto params = strenv.createInvokerParamList("TestLoop");
+  EXPECT_EQ(params.size(), 4u);
+  EXPECT_FALSE(params.isComplete());
+
+  int32_t list1[3] = {1, 2, 3};
+  int32_t out1 = 0;
+  int32_t size = 3;
+
+  // Populate parameter list by name
+  EXPECT_TRUE(params.setArg("Output", &out1));
+  EXPECT_TRUE(params.setArrayArg("Input", list1, size));
+  EXPECT_TRUE(params.setState(state));
+
+  EXPECT_TRUE(params.isComplete());
+
+  // Invoke dynamically via InvokerParameterList
+  int32_t retCode = strenv.invoke("TestLoop", params);
+  EXPECT_EQ(retCode, 0);
+  EXPECT_EQ(out1, 6);
+
+  // Re-use parameter list with new input
+  int32_t list2[3] = {10, 20, 30};
+  int32_t out2 = 0;
+  EXPECT_TRUE(params.setArg("Output", &out2));
+  EXPECT_TRUE(params.setArrayArg("Input", list2, 3));
+
+  retCode = strenv.invoke("TestLoop", params);
+  EXPECT_EQ(retCode, 0);
+  EXPECT_EQ(out2, 66); // Cumulative accumulation with state
+
+  strenv.deallocateState(state);
+}

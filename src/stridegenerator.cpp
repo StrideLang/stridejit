@@ -1116,10 +1116,10 @@ bool StrideGenerator::resolveIOParamsFromDefinition(
           }
           if (portTypeStr.find("Input") != std::string::npos) {
             tempIn.push_back(
-                PrototypeArg{ASTQuery::getNodeName(blockDeclNode), type});
+                PrototypeArg{ASTQuery::getNodeName(blockDeclNode), type, portDecl->getName() + "_size"});
           } else if (portTypeStr.find("Output") != std::string::npos) {
             tempOut.push_back(
-                PrototypeArg{ASTQuery::getNodeName(blockDeclNode), type});
+                PrototypeArg{ASTQuery::getNodeName(blockDeclNode), type, portDecl->getName() + "_size"});
           }
         }
       }
