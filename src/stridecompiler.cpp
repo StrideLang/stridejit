@@ -374,7 +374,14 @@ StrideCompiler::getStateStructInfo(ASTNode instance) const {
     return &it->second;
   }
   // Fallback by name
-  std::string name = ASTQuery::getNodeName(instance);
+  return getStateStructInfo(ASTQuery::getNodeName(instance));
+}
+
+const StrideCompiler::StateStructInfo *
+StrideCompiler::getStateStructInfo(const std::string &name) const {
+  if (name.empty()) {
+    return nullptr;
+  }
   for (const auto &pair : stateStructMap) {
     if (pair.first && ASTQuery::getNodeName(pair.first) == name) {
       return &pair.second;

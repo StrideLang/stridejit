@@ -670,6 +670,134 @@ TEST(NestedFunctions, StandaloneStatefulModuleInLoop) {
   EXPECT_EQ(state.accumulator.Total, 66);
 }
 
+TEST(NestedFunctions, StandaloneStatefulOpaqueAllocation) {
+  strd::StrideEnvironment strenv;
 
+  auto tree = strd::AST::parseFile(
+      STRIDEJIT_TESTS_SOURCE_DIR "module_state_in_module.stride");
+  ASSERT_TRUE(tree);
+  strenv.prepareTree(tree);
 
+  strd::ScopeStack scope;
+  auto ret = strenv.generateStandaloneFunction("OuterModule", scope, tree);
+  ASSERT_TRUE(ret);
 
+  EXPECT_TRUE(strenv.hasState("OuterModule"));
+  EXPECT_GT(strenv.getStateSize("OuterModule"), 0u);
+
+  ret = strenv.compileInMemory();
+  ASSERT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("OuterModule");
+  ASSERT_TRUE(static_cast<bool>(EntrySym));
+
+  // Users do not need to define InnerState or OuterState!
+  void *state = strenv.allocateState("OuterModule");
+  ASSERT_NE(state, nullptr);
+
+  auto *Entry = EntrySym->toPtr<int32_t (*)(int32_t *, int32_t *, void *)>();
+  ASSERT_NE(Entry, nullptr);
+
+  int32_t in1 = 5;
+  int32_t out1 = 0;
+  Entry(&out1, &in1, state);
+  EXPECT_EQ(out1, 15);
+
+  int32_t in2 = 8;
+  int32_t out2 = 0;
+  Entry(&out2, &in2, state);
+  EXPECT_EQ(out2, 23);
+
+  strenv.deallocateState(state);
+}
+
+TEST(NestedFunctions, StandaloneGenericInvocation) {
+  strd::StrideEnvironment strenv;
+
+  auto tree = strd::AST::parseFile(
+      STRIDEJIT_TESTS_SOURCE_DIR "module_state_in_module.stride");
+  ASSERT_TRUE(tree);
+  strenv.prepareTree(tree);
+
+  strd::ScopeStack scope;
+  auto ret = strenv.generateStandaloneFunction("OuterModule", scope, tree);
+  ASSERT_TRUE(ret);
+
+  // Programmatic inspection of arguments
+  auto argsInfo = strenv.getFunctionArgs("OuterModule");
+  ASSERT_EQ(argsInfo.size(), 3);
+  EXPECT_EQ(argsInfo[0].name, "Output");
+  EXPECT_EQ(argsInfo[0].role, strd::FunctionArgInfo::Role::Output);
+  EXPECT_TRUE(argsInfo[0].isPointer);
+
+  EXPECT_EQ(argsInfo[1].name, "Input");
+  EXPECT_EQ(argsInfo[1].role, strd::FunctionArgInfo::Role::Input);
+  EXPECT_TRUE(argsInfo[1].isPointer);
+
+  EXPECT_EQ(argsInfo[2].name, "__state");
+  EXPECT_EQ(argsInfo[2].role, strd::FunctionArgInfo::Role::State);
+  EXPECT_TRUE(argsInfo[2].isPointer);
+
+  ret = strenv.compileInMemory();
+  ASSERT_TRUE(ret);
+
+  void *state = strenv.allocateState("OuterModule");
+  ASSERT_NE(state, nullptr);
+
+  int32_t in1 = 5;
+  int32_t out1 = 0;
+  void *callArgs1[] = {&out1, &in1, state};
+  strenv.invoke("OuterModule", callArgs1);
+  EXPECT_EQ(out1, 15);
+
+  int32_t in2 = 8;
+  int32_t out2 = 0;
+  void *callArgs2[] = {&out2, &in2, state};
+  strenv.invoke("OuterModule", callArgs2);
+  EXPECT_EQ(out2, 23);
+
+  strenv.deallocateState(state);
+}
+
+TEST(NestedFunctions, StandaloneLoopGenericInvocation) {
+  strd::StrideEnvironment strenv;
+
+  auto tree = strd::AST::parseFile(
+      STRIDEJIT_TESTS_SOURCE_DIR "module_state_in_loop.stride");
+  ASSERT_TRUE(tree);
+  strenv.prepareTree(tree);
+
+  strd::ScopeStack scope;
+  auto ret = strenv.generateStandaloneFunction("TestLoop", scope, tree);
+  ASSERT_TRUE(ret);
+
+  auto argsInfo = strenv.getFunctionArgs("TestLoop");
+  ASSERT_EQ(argsInfo.size(), 4);
+  EXPECT_EQ(argsInfo[0].role, strd::FunctionArgInfo::Role::Output);
+  EXPECT_EQ(argsInfo[1].role, strd::FunctionArgInfo::Role::Input);
+  EXPECT_EQ(argsInfo[2].role, strd::FunctionArgInfo::Role::State);
+  EXPECT_EQ(argsInfo[3].role, strd::FunctionArgInfo::Role::PortProperty);
+  EXPECT_FALSE(argsInfo[3].isPointer);
+
+  ret = strenv.compileInMemory();
+  ASSERT_TRUE(ret);
+
+  void *state = strenv.allocateState("TestLoop");
+  ASSERT_NE(state, nullptr);
+
+  int32_t list1[3] = {1, 2, 3};
+  int32_t out1 = 0;
+  int32_t size = 3;
+  void *callArgs1[] = {&out1, list1, state, &size};
+  strenv.invoke("TestLoop", callArgs1);
+  EXPECT_EQ(out1, 6);
+
+  int32_t list2[3] = {10, 20, 30};
+  int32_t out2 = 0;
+  void *callArgs2[] = {&out2, list2, state, &size};
+  strenv.invoke("TestLoop", callArgs2);
+  EXPECT_EQ(out2, 66);
+
+  strenv.deallocateState(state);
+}

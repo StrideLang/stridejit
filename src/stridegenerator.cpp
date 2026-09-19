@@ -1,4 +1,4 @@
-﻿#include <iostream>
+#include <iostream>
 
 #include "stride/stridejit/binaryexprast.hpp"
 #include "stride/stridejit/exprast.hpp"
@@ -1538,9 +1538,56 @@ std::unique_ptr<FunctionAST> StrideGenerator::generateStandaloneFunction(
   state.buildStateStructTypes(state.m_intanceTree);
   auto func = createFunctionDeclaration(funcDecl, nullptr, tree, &scope, state);
   if (func) {
-    func->codegen(state);
+    auto *llvmFunc = func->codegen(state);
+    if (llvmFunc) {
+      generateInvoker(llvmFunc, state);
+    }
   }
   return func;
+}
+
+void StrideGenerator::generateInvoker(llvm::Function *TheFunction,
+                                     StrideCompiler &state) {
+  if (!TheFunction) return;
+  std::string invokerName = TheFunction->getName().str() + "_invoker";
+  if (state.TheModule->getFunction(invokerName)) return;
+
+  auto *retTy = llvm::Type::getInt32Ty(*state.TheContext);
+  auto *ptrTy = llvm::PointerType::get(*state.TheContext, 0);
+  auto *funcTy = llvm::FunctionType::get(retTy, {ptrTy}, false);
+  auto *invoker = llvm::Function::Create(
+      funcTy, llvm::Function::ExternalLinkage, invokerName, state.TheModule.get());
+
+  auto *entry = llvm::BasicBlock::Create(*state.TheContext, "entry", invoker);
+  llvm::IRBuilder<> builder(entry);
+
+  auto *argsArray = invoker->getArg(0);
+
+  std::vector<llvm::Value *> callArgs;
+  unsigned idx = 0;
+  for (auto &arg : TheFunction->args()) {
+    auto *elemPtr = builder.CreateGEP(
+        ptrTy, argsArray,
+        {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*state.TheContext), idx)});
+    auto *loadedPtr = builder.CreateLoad(ptrTy, elemPtr);
+
+    if (arg.getType()->isPointerTy()) {
+      callArgs.push_back(loadedPtr);
+    } else {
+      auto *scalarVal = builder.CreateLoad(arg.getType(), loadedPtr);
+      callArgs.push_back(scalarVal);
+    }
+    ++idx;
+  }
+
+  auto *callRes = builder.CreateCall(TheFunction, callArgs);
+  if (TheFunction->getReturnType()->isVoidTy()) {
+    builder.CreateRet(llvm::ConstantInt::get(retTy, 0));
+  } else if (TheFunction->getReturnType()->isIntegerTy()) {
+    builder.CreateRet(builder.CreateZExtOrTrunc(callRes, retTy));
+  } else {
+    builder.CreateRet(llvm::ConstantInt::get(retTy, 0));
+  }
 }
 
 std::unique_ptr<FunctionAST> StrideGenerator::generateStandaloneFunction(

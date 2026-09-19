@@ -1,6 +1,7 @@
 #ifndef STRIDEENVIRONMENT_HPP
 #define STRIDEENVIRONMENT_HPP
 
+#include <optional>
 #include <string>
 
 #include "stride/parser/ast.h"
@@ -12,11 +13,20 @@ class Value;
 }; // namespace llvm
 
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
+#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 
 namespace strd {
 struct StrideExternalVariable {
   std::string name;
   llvm::Type *type;
+};
+ 
+struct FunctionArgInfo {
+  std::string name;
+  enum class Role { Output, Input, State, External, PortProperty };
+  Role role;
+  llvm::Type *llvmType{nullptr};
+  bool isPointer{true};
 };
 
 class StrideEnvironment {
@@ -31,6 +41,16 @@ public:
   bool generateStandaloneFunction(std::string funcName, ScopeStack &scope,
                                   ASTNode tree = nullptr);
 
+  // State struct management
+  void *allocateState(const std::string &funcName);
+  void deallocateState(void *statePtr);
+  bool hasState(const std::string &funcName) const;
+  size_t getStateSize(const std::string &funcName) const;
+
+  // Programmatic function inspection and dynamic invocation
+  std::vector<FunctionArgInfo> getFunctionArgs(const std::string &funcName) const;
+  int32_t invoke(const std::string &funcName, void **args);
+
   void prepareTree(ASTNode tree);
 
   // JIT
@@ -40,11 +60,14 @@ public:
 
   StrideCompiler state;
   std::unique_ptr<llvm::orc::LLJIT> JIT;
+  llvm::orc::ThreadSafeContext TSCtx;
 
   llvm::Expected<llvm::orc::ExecutorAddr> getFunction(std::string);
   template <typename T> T *getGlobal(std::string varName);
 
 private:
+  mutable std::optional<llvm::DataLayout> m_dataLayout;
+  const llvm::DataLayout *getDataLayout() const;
   void optimizeModule();
   bool loadLibrary(const char *libName, std::string &err);
   bool generateCompiledObject(std::string path, std::string TargetTriple);

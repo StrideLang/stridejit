@@ -26,6 +26,7 @@
 // #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
 // #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/Config/llvm-config.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/LLVMContext.h"
 
@@ -215,6 +216,152 @@ bool StrideEnvironment::generateStandaloneFunction(std::string funcName,
   return true;
 }
 
+static void writeConstantToBuffer(llvm::Constant *C, char *buffer,
+                                  const llvm::DataLayout &DL) {
+  if (!C || !buffer) {
+    return;
+  }
+  if (llvm::isa<llvm::ConstantAggregateZero>(C)) {
+    size_t sz = DL.getTypeAllocSize(C->getType());
+    memset(buffer, 0, sz);
+    return;
+  }
+  if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(C)) {
+    size_t sz = DL.getTypeAllocSize(CI->getType());
+    uint64_t val = CI->getZExtValue();
+    memcpy(buffer, &val, sz);
+  } else if (auto *CFP = llvm::dyn_cast<llvm::ConstantFP>(C)) {
+    size_t sz = DL.getTypeAllocSize(CFP->getType());
+    llvm::APInt api = CFP->getValueAPF().bitcastToAPInt();
+    memcpy(buffer, api.getRawData(), sz);
+  } else if (auto *CS = llvm::dyn_cast<llvm::ConstantStruct>(C)) {
+    auto *ST = CS->getType();
+    const llvm::StructLayout *SL = DL.getStructLayout(ST);
+    for (unsigned i = 0; i < CS->getNumOperands(); ++i) {
+      auto *op = llvm::cast<llvm::Constant>(CS->getOperand(i));
+      uint64_t offset = SL->getElementOffset(i);
+      writeConstantToBuffer(op, buffer + offset, DL);
+    }
+  } else if (auto *CA = llvm::dyn_cast<llvm::ConstantArray>(C)) {
+    llvm::Type *elemTy = CA->getType()->getElementType();
+    size_t elemSz = DL.getTypeAllocSize(elemTy);
+    for (unsigned i = 0; i < CA->getNumOperands(); ++i) {
+      auto *op = llvm::cast<llvm::Constant>(CA->getOperand(i));
+      writeConstantToBuffer(op, buffer + (i * elemSz), DL);
+    }
+  } else if (auto *CDA = llvm::dyn_cast<llvm::ConstantDataArray>(C)) {
+    llvm::StringRef raw = CDA->getRawDataValues();
+    memcpy(buffer, raw.data(), raw.size());
+  }
+}
+
+const llvm::DataLayout *StrideEnvironment::getDataLayout() const {
+  if (m_dataLayout) {
+    return &*m_dataLayout;
+  }
+  if (JIT) {
+    m_dataLayout = JIT->getDataLayout();
+    return &*m_dataLayout;
+  }
+  if (state.TheModule) {
+    m_dataLayout = state.TheModule->getDataLayout();
+    return &*m_dataLayout;
+  }
+  return nullptr;
+}
+
+void *StrideEnvironment::allocateState(const std::string &funcName) {
+  const auto *info = state.getStateStructInfo(funcName);
+  if (!info || !info->structType) {
+    return nullptr;
+  }
+  const auto *DL = getDataLayout();
+  if (!DL) {
+    return nullptr;
+  }
+  size_t allocSize = DL->getTypeAllocSize(info->structType);
+  if (allocSize == 0) {
+    return nullptr;
+  }
+  void *mem = malloc(allocSize);
+  if (!mem) {
+    return nullptr;
+  }
+  memset(mem, 0, allocSize);
+  if (info->defaultConstant) {
+    writeConstantToBuffer(info->defaultConstant, static_cast<char *>(mem), *DL);
+  }
+  return mem;
+}
+
+void StrideEnvironment::deallocateState(void *statePtr) {
+  if (statePtr) {
+    free(statePtr);
+  }
+}
+
+bool StrideEnvironment::hasState(const std::string &funcName) const {
+  const auto *info = state.getStateStructInfo(funcName);
+  return info && info->structType != nullptr;
+}
+
+size_t StrideEnvironment::getStateSize(const std::string &funcName) const {
+  const auto *info = state.getStateStructInfo(funcName);
+  if (!info || !info->structType) {
+    return 0;
+  }
+  const auto *DL = getDataLayout();
+  if (!DL) {
+    return 0;
+  }
+  return DL->getTypeAllocSize(info->structType);
+}
+
+std::vector<FunctionArgInfo>
+StrideEnvironment::getFunctionArgs(const std::string &funcName) const {
+  std::vector<FunctionArgInfo> result;
+  auto it = state.FunctionProtos.find(funcName);
+  if (it == state.FunctionProtos.end()) {
+    return result;
+  }
+  const auto &proto = it->second;
+  for (const auto &arg : proto->getOutArgs()) {
+    result.push_back({arg.name, FunctionArgInfo::Role::Output, arg.llvmType, true});
+  }
+  for (const auto &arg : proto->getInArgs()) {
+    result.push_back({arg.name, FunctionArgInfo::Role::Input, arg.llvmType, true});
+  }
+  if (hasState(funcName)) {
+    const auto *info = state.getStateStructInfo(funcName);
+    llvm::Type *statePtrTy = nullptr;
+    if (info && info->structType) {
+      statePtrTy = llvm::PointerType::get(info->structType->getContext(), 0);
+    } else if (state.TheContext) {
+      statePtrTy = llvm::PointerType::get(*state.TheContext, 0);
+    }
+    result.push_back({"__state", FunctionArgInfo::Role::State, statePtrTy, true});
+  }
+  for (const auto &arg : proto->getExternalArgs()) {
+    result.push_back({arg.name, FunctionArgInfo::Role::External, arg.llvmType, true});
+  }
+  for (const auto &arg : proto->getUsedPortProperties()) {
+    result.push_back({arg.name, FunctionArgInfo::Role::PortProperty, arg.llvmType, false});
+  }
+  return result;
+}
+
+int32_t StrideEnvironment::invoke(const std::string &funcName, void **args) {
+  auto sym = getFunction(funcName + "_invoker");
+  if (!sym) {
+    llvm::consumeError(sym.takeError());
+    std::cerr << "Invoker for function not found: " << funcName + "_invoker"
+              << std::endl;
+    return -1;
+  }
+  auto *invoker = sym->toPtr<int32_t (*)(void **)>();
+  return invoker(args);
+}
+
 bool StrideEnvironment::compileInMemory() {
   initializeJIT();
 
@@ -274,8 +421,10 @@ bool StrideEnvironment::compileInMemory() {
       llvm::JITSymbolFlags::Exported);
   llvm::cantFail(JIT->getMainJITDylib().define(llvm::orc::absoluteSymbols(M)));
 
-  if (auto Err = JIT->addIRModule(llvm::orc::ThreadSafeModule(
-          std::move(state.TheModule), std::move(state.TheContext)))) {
+  m_dataLayout = JIT->getDataLayout();
+  TSCtx = llvm::orc::ThreadSafeContext(std::move(state.TheContext));
+  if (auto Err = JIT->addIRModule(
+          llvm::orc::ThreadSafeModule(std::move(state.TheModule), TSCtx))) {
     return false;
   }
   return true;

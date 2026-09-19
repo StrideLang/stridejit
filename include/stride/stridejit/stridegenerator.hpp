@@ -84,6 +84,9 @@ public:
                              ASTNode tree, ScopeStack &scope,
                              StrideCompiler &state);
 
+  static void generateInvoker(llvm::Function *TheFunction,
+                              StrideCompiler &state);
+
   static void
   generatePlatformFunctionSignature(std::shared_ptr<DeclarationNode> decl,
                                     std::vector<ASTNode> &frameworkScope,

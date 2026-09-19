@@ -156,6 +156,7 @@ public:
   bool doesNodeNeedState(const CodeAnalysis::TypeTree *node);
   void buildStateStructTypes(const CodeAnalysis::TypeTree &tree);
   const StateStructInfo *getStateStructInfo(ASTNode instance) const;
+  const StateStructInfo *getStateStructInfo(const std::string &name) const;
   const CodeAnalysis::TypeTree *
   findTypeTreeNode(ASTNode node,
                    const CodeAnalysis::TypeTree *tree = nullptr) const;
