@@ -74,6 +74,16 @@ public:
                             ASTNode tree, ScopeStack *scope,
                             StrideCompiler &state);
 
+  static std::unique_ptr<FunctionAST>
+  generateStandaloneFunction(std::shared_ptr<DeclarationNode> funcDecl,
+                             ASTNode tree, ScopeStack &scope,
+                             StrideCompiler &state);
+
+  static std::unique_ptr<FunctionAST>
+  generateStandaloneFunction(const std::string &funcName,
+                             ASTNode tree, ScopeStack &scope,
+                             StrideCompiler &state);
+
   static void
   generatePlatformFunctionSignature(std::shared_ptr<DeclarationNode> decl,
                                     std::vector<ASTNode> &frameworkScope,

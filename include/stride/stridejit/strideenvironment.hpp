@@ -27,6 +27,10 @@ public:
   bool generateIr(std::string path);
   bool generateIr(strd::ASTNode root);
 
+  // Standalone function generator
+  bool generateStandaloneFunction(std::string funcName, ScopeStack &scope,
+                                  ASTNode tree = nullptr);
+
   void prepareTree(ASTNode tree);
 
   // JIT
@@ -41,6 +45,7 @@ public:
   template <typename T> T *getGlobal(std::string varName);
 
 private:
+  void optimizeModule();
   bool loadLibrary(const char *libName, std::string &err);
   bool generateCompiledObject(std::string path, std::string TargetTriple);
 

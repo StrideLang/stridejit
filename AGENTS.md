@@ -118,6 +118,39 @@ This document outlines critical architectural patterns, code generation invarian
 ## 10. Reaction Calling Conventions & Conditional Execution
 
 - **Reactions with Declared Input Ports**:
-  - Reactions that declare input ports take explicit data arguments and execute unconditionally upon invocation. In `CallExprAST::codegen`, pass inputs directly to the callee without conditional branching.
+  - Reactions cannot declare mainInputPorts, they can only have propertyInputPorts, an input to a reaction is a trigger/switch to
+    determing if the reaction should run
 - **Switch-Triggered Reactions (0 Input Ports)**:
   - Reactions without declared input ports that are fed by a stream switch/condition (`expectedInArgs == 0 && !InArgs.empty()`) generate a conditional branch (`CreateCondBr`) around the reaction call.
+
+---
+
+## 11. Nested Function Calls & State Struct Management
+
+- **Callable State Ownership (`doesNodeNeedState`)**:
+  - **Loops and Reactions do NOT have state of their own** across domain calls. Their internal signals remain local stack allocas or loop PHI nodes.
+  - **Modules only have state if they declare persistent variables** (`!node->persistent.empty()`). Not all modules need state.
+  - **Inherited State**: A callable (module, reaction, or loop) needs a state struct if and only if it has persistent variables of its own OR any nested child callable requires state.
+  - **Zero-Overhead for Stateless Combinations**: Stateless combinations (e.g. `reaction_in_loop`, `loop_in_loop`, `reaction_in_reaction`, stateless modules) must NOT generate or pass a state struct.
+  - **No Domain State Struct**: Domains are execution coordinators, not modules; state is never wrapped in a root domain struct.
+
+- **Stack Allocation (No LLVM Globals for State)**:
+  - Persistent module state must never be stored in global LLVM variables.
+  - Top-level caller functions (domain process functions) allocate the state struct on the stack in the entry block using `state.CreateEntryBlockAlloca`.
+  - Nested callers slice child state sub-structs using `builder->CreateStructGEP`.
+
+- **Recursive `defaultConstant` Initialization**:
+  - State structs allocated on the stack must **not** be zero-initialized with `Constant::getNullValue`. Zero-initialization clobbers non-zero signal defaults (e.g. `signal Acc { default: 10 reset: Reset }`).
+  - `buildStateStructTypes` builds a compile-time `llvm::ConstantStruct` (`defaultConstant`) recursively from the bottom up, embedding primitive default values and child sub-struct default constants.
+  - In `CallExprAST::codegen`, stack allocas are initialized via `builder->CreateStore(calleeInfo->defaultConstant, statePtrVal)`.
+  - Persistent variables must **never** be re-initialized at the start of a module function body (`allocateInternalVariables`), as that would wipe accumulated state across calls.
+
+- **Independent Variable Resets**:
+  - When an independent reset is triggered on a persistent variable, look up its compile-time default constant using `StateStructInfo::getDefaultValue(varName)` (via `defaultConstant->getOperand(varIndices[varName])`) and store it back into the variable's GEP pointer.
+
+- **MSVC Smart Pointer Ternary Operator**:
+  - When assigning smart pointers of different derived AST types (e.g., `shared_ptr<FunctionNode>` vs `shared_ptr<DeclarationNode>`) to `ASTNode` via ternary operator `? :`, MSVC does not deduce the base type automatically. Explicitly cast both arms:
+    ```cpp
+    newfunc->funcInstance = funcInstance ? ASTNode(funcInstance) : ASTNode(funcDecl);
+    ```
+

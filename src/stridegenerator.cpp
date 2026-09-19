@@ -1,4 +1,4 @@
-#include <iostream>
+﻿#include <iostream>
 
 #include "stride/stridejit/binaryexprast.hpp"
 #include "stride/stridejit/exprast.hpp"
@@ -865,25 +865,45 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
           ASTQuery::findDeclarationByName(ASTQuery::getNodeName(next), scope,
                                           tree);
 
+      llvm::Type *retType = state.getLLVMType(nextDecl);
+      if (retType->isVoidTy() && funcDecl->getObjectType() == "platformModule") {
+        auto outputList = funcDecl->getPropertyValue("outputs");
+        if (outputList && outputList->getNodeType() == AST::List &&
+            outputList->getChildren().size() > 0) {
+          auto outputBlock = outputList->getChildren()[0];
+          if (outputBlock->getNodeType() == AST::Block) {
+            auto outputType =
+                std::static_pointer_cast<BlockNode>(outputBlock)->getName();
+            if (state.typesMap.find(outputType) != state.typesMap.end()) {
+              retType = state.typesMap[outputType];
+            }
+          }
+        }
+      }
+
       if (funcDecl->getObjectType() == "platformModule") {
         externFunc = state.getExternalFunction(
-            func->getName(), state.getLLVMType(nextDecl), args.MainIn.argTypes);
+            func->getName(), retType, args.MainIn.argTypes);
       }
 
       auto nextExpr = createExpr(next);
       if (nextExpr) {
-        auto outputNode = typeTree->instance->getCompilerProperty("mainOutput");
-        args.MainOut.args.emplace_back(std::move(nextExpr));
-        auto blockName = ASTQuery::getNodeName(outputNode);
-        ScopeStack scope;
-        if (auto blocksNode = funcDecl->getPropertyValue("blocks")) {
-          scope = {std::pair<ASTNode, std::vector<ASTNode>>(
-              nullptr, blocksNode->getChildren())};
-        }
-        auto mainOutputDecl =
-            ASTQuery::findDeclarationByName(blockName, scope, nullptr);
+        if (typeTree && typeTree->instance) {
+          auto outputNode = typeTree->instance->getCompilerProperty("mainOutput");
+          args.MainOut.args.emplace_back(std::move(nextExpr));
+          auto blockName = ASTQuery::getNodeName(outputNode);
+          ScopeStack scope;
+          if (auto blocksNode = funcDecl->getPropertyValue("blocks")) {
+            scope = {std::pair<ASTNode, std::vector<ASTNode>>(
+                nullptr, blocksNode->getChildren())};
+          }
+          auto mainOutputDecl =
+              ASTQuery::findDeclarationByName(blockName, scope, nullptr);
 
-        args.MainOut.argTypes.push_back(state.getLLVMType(mainOutputDecl));
+          args.MainOut.argTypes.push_back(state.getLLVMType(mainOutputDecl));
+        } else {
+          args.MainOut.args.emplace_back(std::move(nextExpr));
+        }
       }
 
       // Create function call expr
@@ -1072,9 +1092,7 @@ bool StrideGenerator::resolveIOParamsFromDefinition(
       auto portTypeStr = portDecl->getObjectType();
       if (portTypeStr == "mainInputPort" || portTypeStr == "mainOutputPort" ||
           portTypeStr == "propertyInputPort" ||
-          portTypeStr == "propertyOutputPort" ||
-          portTypeStr == "secondaryInputPort" ||
-          portTypeStr == "secondaryOutputPort") {
+          portTypeStr == "propertyOutputPort") {
         auto blockNode = portDecl->getPropertyValue("block");
         if (blockNode && blockNode->getNodeType() == AST::Block) {
           auto blockName =
@@ -1233,6 +1251,9 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
   // If IO parameters are not resolved, infer them from connections
   if (!ioParamsResolved) {
     auto *nodeTree = state.m_intanceTree.find(funcInstance);
+    if (!nodeTree && funcDecl) {
+      nodeTree = state.m_intanceTree.find(funcDecl);
+    }
     if (nodeTree) {
       for (const auto &var : nodeTree->input) {
         auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
@@ -1489,4 +1510,45 @@ StrideGenerator::getDefaultValue(std::shared_ptr<DeclarationNode> decl,
     }
   }
   return defaultValue;
+}
+
+std::unique_ptr<FunctionAST> StrideGenerator::generateStandaloneFunction(
+    std::shared_ptr<DeclarationNode> funcDecl, ASTNode tree, ScopeStack &scope,
+    StrideCompiler &state) {
+  if (!funcDecl) {
+    return nullptr;
+  }
+  state.m_tree = tree;
+  if (tree) {
+    for (const auto &node : tree->getChildren()) {
+      if (node->getNodeType() == AST::Declaration ||
+          node->getNodeType() == AST::BundleDeclaration) {
+        auto decl = std::static_pointer_cast<DeclarationNode>(node);
+        if (decl->getObjectType() == "platformModule") {
+          std::vector<ASTNode> dummy;
+          StrideGenerator::generatePlatformFunctionSignature(
+              decl, scope.empty() ? dummy : scope.back().second, state);
+        }
+      }
+    }
+  }
+  state.m_intanceTree =
+      CodeAnalysis::getStateStructInformationForDeclaration(funcDecl, scope,
+                                                            tree);
+  state.buildStateStructTypes(state.m_intanceTree);
+  auto func = createFunctionDeclaration(funcDecl, nullptr, tree, &scope, state);
+  if (func) {
+    func->codegen(state);
+  }
+  return func;
+}
+
+std::unique_ptr<FunctionAST> StrideGenerator::generateStandaloneFunction(
+    const std::string &funcName, ASTNode tree, ScopeStack &scope,
+    StrideCompiler &state) {
+  auto funcDecl = ASTQuery::findDeclarationByName(funcName, scope, tree);
+  if (!funcDecl) {
+    return nullptr;
+  }
+  return generateStandaloneFunction(funcDecl, tree, scope, state);
 }

@@ -129,6 +129,11 @@ bool StrideEnvironment::generateIr(ASTNode root) {
   //    llvm::outs() << "\n";
   //  }
 
+  optimizeModule();
+  return true;
+}
+
+void StrideEnvironment::optimizeModule() {
   if (m_optimizeCode) {
 #if LLVM_VERSION_MAJOR >= 17
     // New Pass Manager
@@ -194,6 +199,19 @@ bool StrideEnvironment::generateIr(ASTNode root) {
     state.TheModule->print(llvm::outs(), nullptr);
     llvm::outs() << "\n";
   }
+}
+
+
+bool StrideEnvironment::generateStandaloneFunction(std::string funcName,
+                                                   ScopeStack &scope,
+                                                   ASTNode tree) {
+  auto func =
+      StrideGenerator::generateStandaloneFunction(funcName, tree, scope, state);
+  if (!func) {
+    return false;
+  }
+
+  optimizeModule();
   return true;
 }
 

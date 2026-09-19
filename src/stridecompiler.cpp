@@ -395,10 +395,6 @@ StrideCompiler::findTypeTreeNode(ASTNode node,
   if (tree->instance == node) {
     return tree;
   }
-  std::string targetName = ASTQuery::getNodeName(node);
-  if (tree->instance && ASTQuery::getNodeName(tree->instance) == targetName) {
-    return tree;
-  }
   for (const auto &child : tree->nodes) {
     auto *found = findTypeTreeNode(node, &child);
     if (found) {
@@ -533,6 +529,17 @@ void StrideCompiler::buildStateStructTypes(const CodeAnalysis::TypeTree &tree) {
       stateStructMap[nodeTree.instance] = info;
     }
   };
+
+  if (tree.instance && tree.instance->getNodeType() == AST::Declaration) {
+    auto decl = std::static_pointer_cast<DeclarationNode>(tree.instance);
+    if (decl->getObjectType() != "_domainDefinition") {
+      buildNodeState(tree);
+      return;
+    }
+  } else if (tree.instance) {
+    buildNodeState(tree);
+    return;
+  }
 
   for (const auto &node : tree.nodes) {
     if (node.instance && node.instance->getNodeType() == AST::Declaration) {

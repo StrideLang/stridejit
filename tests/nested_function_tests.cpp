@@ -375,6 +375,301 @@ TEST(NestedFunctions, MultipleStatefulModulesInLoop) {
   EXPECT_EQ(out2, 180);
 }
 
+TEST(NestedFunctions, StandaloneStatelessModuleInModule) {
+  strd::StrideEnvironment strenv;
+
+  auto tree = strd::AST::parseFile(
+      STRIDEJIT_TESTS_SOURCE_DIR "module_in_module.stride");
+  ASSERT_TRUE(tree);
+  strenv.prepareTree(tree);
+
+  strd::ScopeStack scope;
+  auto ret = strenv.generateStandaloneFunction("TestModule", scope, tree);
+  ASSERT_TRUE(ret);
+
+  EXPECT_EQ(strenv.state.TheModule->getFunction("RootDomain_process"), nullptr);
+  EXPECT_NE(strenv.state.TheModule->getFunction("TestModule"), nullptr);
+
+  ret = strenv.compileInMemory();
+  ASSERT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("TestModule");
+  ASSERT_TRUE(static_cast<bool>(EntrySym));
+
+  auto *Entry = EntrySym->toPtr<int32_t (*)(double *, double *)>();
+  ASSERT_NE(Entry, nullptr);
+
+  double in1 = 5.0;
+  double out1 = 0.0;
+  Entry(&out1, &in1);
+  EXPECT_DOUBLE_EQ(out1, 10.0);
+
+  double in2 = 10.5;
+  double out2 = 0.0;
+  Entry(&out2, &in2);
+  EXPECT_DOUBLE_EQ(out2, 15.5);
+}
+
+TEST(NestedFunctions, StandaloneReactionInModule) {
+  strd::StrideEnvironment strenv;
+
+  auto tree = strd::AST::parseFile(
+      STRIDEJIT_TESTS_SOURCE_DIR "reaction_in_module.stride");
+  ASSERT_TRUE(tree);
+  strenv.prepareTree(tree);
+
+  strd::ScopeStack scope;
+  auto ret = strenv.generateStandaloneFunction("Max", scope, tree);
+  ASSERT_TRUE(ret);
+
+  EXPECT_EQ(strenv.state.TheModule->getFunction("RootDomain_process"), nullptr);
+  EXPECT_NE(strenv.state.TheModule->getFunction("Max"), nullptr);
+
+  ret = strenv.compileInMemory();
+  ASSERT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym = strenv.getFunction("Max");
+  ASSERT_TRUE(static_cast<bool>(EntrySym));
+
+  auto *Entry = EntrySym->toPtr<int32_t (*)(double *, double *)>();
+  ASSERT_NE(Entry, nullptr);
+
+  double in1 = 3.0;
+  double out1 = 0.0;
+  Entry(&out1, &in1);
+  EXPECT_DOUBLE_EQ(out1, 0.0);
+
+  double in2 = 8.0;
+  double out2 = 0.0;
+  Entry(&out2, &in2);
+  EXPECT_DOUBLE_EQ(out2, 8.0);
+}
+
+TEST(NestedFunctions, StandaloneLoopInModule) {
+  strd::StrideEnvironment strenv;
+
+  auto tree = strd::AST::parseFile(
+      STRIDEJIT_TESTS_SOURCE_DIR "loop_in_module.stride");
+  ASSERT_TRUE(tree);
+  strenv.prepareTree(tree);
+
+  strd::ScopeStack scope;
+  auto ret = strenv.generateStandaloneFunction("TestModule", scope, tree);
+  ASSERT_TRUE(ret);
+
+  EXPECT_EQ(strenv.state.TheModule->getFunction("RootDomain_process"), nullptr);
+  EXPECT_NE(strenv.state.TheModule->getFunction("TestModule"), nullptr);
+
+  ret = strenv.compileInMemory();
+  ASSERT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("TestModule");
+  ASSERT_TRUE(static_cast<bool>(EntrySym));
+
+  auto *Entry = EntrySym->toPtr<int32_t (*)(int32_t *, int32_t *)>();
+  ASSERT_NE(Entry, nullptr);
+
+  int32_t list1[3] = {1, 2, 3};
+  int32_t out1 = 0;
+  Entry(&out1, list1);
+  EXPECT_EQ(out1, 6);
+
+  int32_t list2[3] = {10, 20, 30};
+  int32_t out2 = 0;
+  Entry(&out2, list2);
+  EXPECT_EQ(out2, 60);
+}
+
+TEST(NestedFunctions, StandaloneStatefulAccumulator) {
+  strd::StrideEnvironment strenv;
+
+  auto tree = strd::AST::parseFile(
+      STRIDEJIT_TESTS_SOURCE_DIR "module_state_in_module.stride");
+  ASSERT_TRUE(tree);
+  strenv.prepareTree(tree);
+
+  strd::ScopeStack scope;
+  auto ret = strenv.generateStandaloneFunction("InnerAccumulator", scope, tree);
+  ASSERT_TRUE(ret);
+
+  EXPECT_EQ(strenv.state.TheModule->getFunction("RootDomain_process"), nullptr);
+  EXPECT_NE(strenv.state.TheModule->getFunction("InnerAccumulator"), nullptr);
+
+  ret = strenv.compileInMemory();
+  ASSERT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("InnerAccumulator");
+  ASSERT_TRUE(static_cast<bool>(EntrySym));
+
+  struct InnerState {
+    int32_t Acc{10};
+  };
+
+  auto *Entry = EntrySym->toPtr<int32_t (*)(int32_t *, int32_t *, InnerState *)>();
+  ASSERT_NE(Entry, nullptr);
+
+  InnerState state{10};
+  int32_t in1 = 5;
+  int32_t out1 = 0;
+  Entry(&out1, &in1, &state);
+  EXPECT_EQ(out1, 15);
+  EXPECT_EQ(state.Acc, 15);
+
+  int32_t in2 = 8;
+  int32_t out2 = 0;
+  Entry(&out2, &in2, &state);
+  EXPECT_EQ(out2, 23);
+  EXPECT_EQ(state.Acc, 23);
+}
+
+TEST(NestedFunctions, StandaloneStatefulModuleInModule) {
+  strd::StrideEnvironment strenv;
+
+  auto tree = strd::AST::parseFile(
+      STRIDEJIT_TESTS_SOURCE_DIR "module_state_in_module.stride");
+  ASSERT_TRUE(tree);
+  strenv.prepareTree(tree);
+
+  strd::ScopeStack scope;
+  auto ret = strenv.generateStandaloneFunction("OuterModule", scope, tree);
+  ASSERT_TRUE(ret);
+
+  EXPECT_EQ(strenv.state.TheModule->getFunction("RootDomain_process"), nullptr);
+  EXPECT_NE(strenv.state.TheModule->getFunction("OuterModule"), nullptr);
+  EXPECT_NE(strenv.state.TheModule->getFunction("InnerAccumulator"), nullptr);
+
+  ret = strenv.compileInMemory();
+  ASSERT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("OuterModule");
+  ASSERT_TRUE(static_cast<bool>(EntrySym));
+
+  struct InnerState {
+    int32_t Acc{10};
+  };
+  struct OuterState {
+    InnerState inner;
+  };
+
+  auto *Entry = EntrySym->toPtr<int32_t (*)(int32_t *, int32_t *, OuterState *)>();
+  ASSERT_NE(Entry, nullptr);
+
+  OuterState state;
+  state.inner.Acc = 10;
+  int32_t in1 = 5;
+  int32_t out1 = 0;
+  Entry(&out1, &in1, &state);
+  EXPECT_EQ(out1, 15);
+  EXPECT_EQ(state.inner.Acc, 15);
+
+  int32_t in2 = 8;
+  int32_t out2 = 0;
+  Entry(&out2, &in2, &state);
+  EXPECT_EQ(out2, 23);
+  EXPECT_EQ(state.inner.Acc, 23);
+}
+
+TEST(NestedFunctions, StandaloneStatefulModuleInReaction) {
+  strd::StrideEnvironment strenv;
+
+  auto tree = strd::AST::parseFile(
+      STRIDEJIT_TESTS_SOURCE_DIR "module_state_in_reaction.stride");
+  ASSERT_TRUE(tree);
+  strenv.prepareTree(tree);
+
+  strd::ScopeStack scope;
+  auto ret = strenv.generateStandaloneFunction("TestReaction", scope, tree);
+  ASSERT_TRUE(ret);
+
+  EXPECT_EQ(strenv.state.TheModule->getFunction("RootDomain_process"), nullptr);
+  EXPECT_NE(strenv.state.TheModule->getFunction("TestReaction"), nullptr);
+  EXPECT_NE(strenv.state.TheModule->getFunction("Counter"), nullptr);
+
+  ret = strenv.compileInMemory();
+  ASSERT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("TestReaction");
+  ASSERT_TRUE(static_cast<bool>(EntrySym));
+
+  struct CounterState {
+    int32_t Count{0};
+  };
+  struct ReactionState {
+    CounterState counter;
+  };
+
+  auto *Entry = EntrySym->toPtr<int32_t (*)(int32_t *, int32_t *, ReactionState *)>();
+  ASSERT_NE(Entry, nullptr);
+
+  ReactionState state;
+  state.counter.Count = 0;
+  int32_t in1 = 5;
+  int32_t out1 = 0;
+  Entry(&out1, &in1, &state);
+  EXPECT_EQ(out1, 5);
+  EXPECT_EQ(state.counter.Count, 5);
+
+  int32_t in2 = 7;
+  int32_t out2 = 0;
+  Entry(&out2, &in2, &state);
+  EXPECT_EQ(out2, 12);
+  EXPECT_EQ(state.counter.Count, 12);
+}
+
+TEST(NestedFunctions, StandaloneStatefulModuleInLoop) {
+  strd::StrideEnvironment strenv;
+
+  auto tree = strd::AST::parseFile(
+      STRIDEJIT_TESTS_SOURCE_DIR "module_state_in_loop.stride");
+  ASSERT_TRUE(tree);
+  strenv.prepareTree(tree);
+
+  strd::ScopeStack scope;
+  auto ret = strenv.generateStandaloneFunction("TestLoop", scope, tree);
+  ASSERT_TRUE(ret);
+
+  EXPECT_EQ(strenv.state.TheModule->getFunction("RootDomain_process"), nullptr);
+  EXPECT_NE(strenv.state.TheModule->getFunction("TestLoop"), nullptr);
+  EXPECT_NE(strenv.state.TheModule->getFunction("Accumulator"), nullptr);
+
+  ret = strenv.compileInMemory();
+  ASSERT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("TestLoop");
+  ASSERT_TRUE(static_cast<bool>(EntrySym));
+
+  struct AccumulatorState {
+    int32_t Total{0};
+  };
+  struct LoopState {
+    AccumulatorState accumulator;
+  };
+
+  auto *Entry =
+      EntrySym->toPtr<int32_t (*)(int32_t *, int32_t *, LoopState *, int32_t)>();
+  ASSERT_NE(Entry, nullptr);
+
+  LoopState state;
+  state.accumulator.Total = 0;
+  int32_t list1[3] = {1, 2, 3};
+  int32_t out1 = 0;
+  Entry(&out1, list1, &state, 3);
+  EXPECT_EQ(out1, 6);
+  EXPECT_EQ(state.accumulator.Total, 6);
+
+  int32_t list2[3] = {10, 20, 30};
+  int32_t out2 = 0;
+  Entry(&out2, list2, &state, 3);
+  EXPECT_EQ(out2, 66);
+  EXPECT_EQ(state.accumulator.Total, 66);
+}
+
 
 
 
