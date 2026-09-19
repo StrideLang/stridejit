@@ -1,4 +1,5 @@
 #include <iostream>
+#include "stride/utils/logger.h"
 
 #include "stride/stridejit/binaryexprast.hpp"
 #include "stride/stridejit/exprast.hpp"
@@ -39,7 +40,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
     // Find domain and insert inputs and output to tree.
     auto domainDecl = ASTQuery::findDeclarationByName(domainName, scope, tree);
     if (domainDecl) {
-      std::cout << " Found domain declaration for " << domainName << std::endl;
+      LOG_INFO() << " Found domain declaration for " << domainName << std::endl;
       auto domainExternalInputNode = domainDecl->getPropertyValue("inputs");
       if (domainExternalInputNode) {
         for (const auto &externalInput :
@@ -126,7 +127,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
             std::make_unique<BoolExprAST>(std::get<bool>(extArg.defaultValue)));
         resetBody.push_back(std::move(varInit));
       } else {
-        std::cerr << "ERROR unexpected type for default." << std::endl;
+        LOG_ERROR() << "ERROR unexpected type for default." << std::endl;
       }
     }
 
@@ -151,7 +152,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
                             ->getSwitchValue()));
                 resetBody.push_back(std::move(varInit));
               } else {
-                std::cerr << "Unsupported type for switch default: "
+                LOG_ERROR() << "Unsupported type for switch default: "
                           << defaultValueNode->toText() << std::endl;
               }
             } else if (decl->getObjectType() == "signal") {
@@ -212,7 +213,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
                   defaultValues = defaultValueNode->getChildren();
 
                   if (defaultValues.size() != size) {
-                    std::cerr << "ERROR default values size does not match "
+                    LOG_ERROR() << "ERROR default values size does not match "
                                  "declared size"
                               << std::endl;
                     continue;
@@ -307,7 +308,7 @@ std::unique_ptr<ExprAST> StrideGenerator::createExpr(ASTNode node) {
         indeces.push_back(
             (size_t)std::static_pointer_cast<ValueNode>(idx)->getIntValue());
       } else {
-        std::cerr << "Unsupported node type for bundle index.";
+        LOG_ERROR() << "Unsupported node type for bundle index.";
       }
     }
     auto V = std::make_unique<VariableExprAST>(bundleNode->getName(), indeces);
@@ -374,7 +375,7 @@ std::unique_ptr<ExprAST> StrideGenerator::createExpr(ASTNode node) {
     setTypeCastMetadata(node, V.get());
     return V;
   }
-  std::cerr << " Node type not supported " << std::endl;
+  LOG_ERROR() << " Node type not supported " << std::endl;
   return nullptr;
 }
 
@@ -454,7 +455,7 @@ bool StrideGenerator::processPreviousFunction(
   auto funcDecl = ASTQuery::findDeclarationByName(
       ASTQuery::getNodeName(prevFuncCall), scope, tree);
   if (!funcDecl) {
-    std::cerr << "ERROR: no function declaration for "
+    LOG_ERROR() << "ERROR: no function declaration for "
               << ASTQuery::getNodeName(prevFuncCall) << std::endl;
     return false;
   }
@@ -644,7 +645,7 @@ void StrideGenerator::collectInputArgs(
                   args.MainIn.argTypes.push_back(
                       llvm::Type::getDoubleTy(*state.TheContext));
                 } else {
-                  std::cerr << __FILE__ << ":" << __LINE__ << ":Port property not supported: " << pp->getPortName() << std::endl;
+                  LOG_ERROR() << ":Port property not supported: " << pp->getPortName() << std::endl;
                   args.MainIn.argTypes.push_back(
                       llvm::Type::getDoubleTy(*state.TheContext));
                 }
@@ -653,8 +654,7 @@ void StrideGenerator::collectInputArgs(
                 // implemented
                 args.MainIn.argTypes.push_back(
                     state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
-                std::cerr << __FILE__ << ":" << __LINE__
-                          << " Unsupported type for: " << (*nodeIt)->toText()
+                LOG_ERROR() << "Unsupported type for: " << (*nodeIt)->toText()
                           << std::endl;
               }
             }
@@ -689,7 +689,7 @@ void StrideGenerator::collectInputArgs(
           }
         } else {
           // Not supported
-          std::cerr << "ERROR: List type not supported" << std::endl;
+          LOG_ERROR() << "ERROR: List type not supported" << std::endl;
           assert(0 == 1);
         }
         exprs.pop_back();
@@ -698,25 +698,25 @@ void StrideGenerator::collectInputArgs(
         if (exprs.size() > 0) {
           args.MainIn.args.emplace_back(std::move(exprs.back()));
           exprs.pop_back();
-          std::cout << "DEBUG: Calling getOutputDataTypes for input: "
+          LOG_DEBUG() << "Calling getOutputDataTypes for input: "
                     << input->toText() << std::endl;
           auto prevTypes = CodeAnalysis::getOutputDataTypes(input, scope, tree);
-          std::cout << "DEBUG: getOutputDataTypes returned " << prevTypes.size()
+          LOG_DEBUG() << "getOutputDataTypes returned " << prevTypes.size()
                     << " types" << std::endl;
           for (const auto &prevType : prevTypes) {
             auto typeName = ASTQuery::getNodeName(prevType);
-            std::cout << "DEBUG: prevType name is: " << typeName << std::endl;
+            LOG_DEBUG() << "prevType name is: " << typeName << std::endl;
             if (state.typesMap.find(typeName) != state.typesMap.end()) {
               args.MainIn.argTypes.push_back(state.typesMap[typeName]);
-              std::cout << "DEBUG: added type to argTypes, size is now "
+              LOG_DEBUG() << "added type to argTypes, size is now "
                         << args.MainIn.argTypes.size() << std::endl;
             } else {
-              std::cout << "DEBUG: typeName " << typeName
+              LOG_DEBUG() << "typeName " << typeName
                         << " not found in typesMap!" << std::endl;
             }
           }
         } else {
-          std::cerr << "ERROR: No code generated for domain." << std::endl;
+          LOG_ERROR() << "ERROR: No code generated for domain." << std::endl;
         }
       }
     }
@@ -798,7 +798,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         }
       }
       if (!decl) {
-        std::cerr << "No declaration for: " << AST::toText(current) << " in "
+        LOG_ERROR() << "No declaration for: " << AST::toText(current) << " in "
                   << AST::toText(stream) << " in " << stream->getFilename()
                   << ":" << stream->getLine() << std::endl;
         return generated;
@@ -834,7 +834,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       auto funcDecl =
           CodeAnalysis::matchDefinitionToTypes(decls, func, scope, tree);
       if (!funcDecl) {
-        std::cerr << "ERROR can't find/match declaration for "
+        LOG_ERROR() << "ERROR can't find/match declaration for "
                   << func->getName() << std::endl;
         continue;
       }
@@ -845,10 +845,10 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       auto *domainTypeTree = state.m_intanceTree.getDomainRootTree(domainName);
       auto *typeTree = domainTypeTree->find(func);
       if (!typeTree) {
-        std::cout << "DEBUG: typeTree is null for function " << func->getName()
+        LOG_DEBUG() << "typeTree is null for function " << func->getName()
                   << " in domain " << domainName << std::endl;
       } else {
-        std::cout << "DEBUG: typeTree is NOT null for function "
+        LOG_DEBUG() << "typeTree is NOT null for function "
                   << func->getName() << std::endl;
       }
       FunctionArgs args;
@@ -925,7 +925,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               state.getName());
           newExternCall->callType = CallableType::External;
           generated[domainName].expr.push_back(std::move(newExternCall));
-          std::cout << "Using external function:" << externFunc->name
+          LOG_INFO() << "Using external function:" << externFunc->name
                     << std::endl;
         } else {
           auto newCall = std::make_unique<LLVMCommandAST>(
@@ -981,7 +981,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               }
             }
             if (funcDecl->getObjectType() == "module") {
-              std::cout << "Module instance:" << std::endl;
+              LOG_INFO() << "Module instance:" << std::endl;
               for (const auto &blockNode : blocks) {
                 if (blockNode->getNodeType() == AST::Declaration ||
                     blockNode->getNodeType() == AST::BundleDeclaration) {
@@ -998,7 +998,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                     state.createGlobal(blockDecl);
                   }
                 } else {
-                  std::cerr << "Expected declaration, got: "
+                  LOG_ERROR() << "Expected declaration, got: "
                             << AST::toText(blockNode);
                 }
               }
@@ -1033,15 +1033,15 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               } else if (funcDecl->getObjectType() == "loop") {
                 callexpr->callType = CallableType::Loop;
               } else {
-                std::cout << " ERROR: Can't set callable type" << std::endl;
+                LOG_INFO() << " ERROR: Can't set callable type" << std::endl;
               }
             } else {
-              std::cout << " ERROR: Can't set callable type" << std::endl;
+              LOG_INFO() << " ERROR: Can't set callable type" << std::endl;
             }
           }
           generated[domainName].expr.push_back(std::move(callexpr));
         } else {
-          std::cerr << "ERROR: Could not find function declaration: "
+          LOG_ERROR() << "ERROR: Could not find function declaration: "
                     << func->getName() << std::endl;
         }
       }
@@ -1066,7 +1066,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
     } else if (current->getNodeType() == AST::PortProperty) {
       generated[domainName].expr.push_back(createExpr(current));
     } else {
-      std::cerr << "ERROR: Unsupported type" << std::endl;
+      LOG_ERROR() << "ERROR: Unsupported type" << std::endl;
     }
   };
   return generated;
@@ -1184,7 +1184,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
     StrideCompiler &state) {
 
   // if (!ASTQuery::isCallable(funcDecl, scope, tree)) {
-  //   std::cerr << "ERROR: Can't create function for: " << funcDecl->toText()
+  //   LOG_ERROR() << "ERROR: Can't create function for: " << funcDecl->toText()
   //             << std::endl
   //             << "is not _Callable." << std::endl;
   //   return nullptr;
@@ -1319,13 +1319,12 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
           // Port properties are added in a separate pass
           // TODO move this pass here?
         } else {
-          std::cerr << __FILE__ << ":" << __LINE__
-                    << " Error unexpected type: " << var.first->toText()
+          LOG_ERROR() << "Error unexpected type: " << var.first->toText()
                     << std::endl;
         }
       }
     } else {
-      std::cerr << __FILE__ << ":" << __LINE__ << " ERROR: type tree not found"
+      LOG_ERROR() << "ERROR: type tree not found"
                 << std::endl;
     }
   }
@@ -1346,8 +1345,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
   }
   llvm::Function *TheFunction = state.getFunctionInModule(funcName);
   if (TheFunction) {
-    std::cout << __FILE__ << ":" << __LINE__
-              << " Function already defined: " << funcName << std::endl;
+    LOG_INFO() << " Function already defined: " << funcName << std::endl;
     // TODO check if current function is the same as existing function
     return nullptr;
   }
@@ -1391,7 +1389,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
   } else if (funcDecl->getObjectType() == "platformModule") {
     newfunc->callType = CallableType::External;
   } else {
-    std::cerr << "Callable type unsuported" << std::endl;
+    LOG_ERROR() << "Callable type unsuported" << std::endl;
   }
   return newfunc;
 }
@@ -1405,7 +1403,7 @@ void StrideGenerator::generatePlatformFunctionSignature(
   auto outputList = decl->getPropertyValue("outputs");
   auto functionNameNode = decl->getPropertyValue("processing");
   if (inputList && outputList && functionNameNode) {
-    //            std::cout << "Loaded: " << decl->getName() <<
+    //            LOG_INFO() << "Loaded: " << decl->getName() <<
     //            std::endl;
     frameworkScope.push_back(decl);
     for (const auto &input : inputList->getChildren()) {
@@ -1415,7 +1413,7 @@ void StrideGenerator::generatePlatformFunctionSignature(
         if (state.typesMap.find(inputType) != state.typesMap.end()) {
           parameters.push_back(state.typesMap[inputType]);
         } else {
-          std::cerr << "Input Type not mapped: " << inputType << std::endl;
+          LOG_ERROR() << "Input Type not mapped: " << inputType << std::endl;
         }
       }
     }
@@ -1428,7 +1426,7 @@ void StrideGenerator::generatePlatformFunctionSignature(
         if (state.typesMap.find(outputType) != state.typesMap.end()) {
           retType = state.typesMap[outputType];
         } else {
-          std::cerr << " Output Type not mapped: " << outputType << std::endl;
+          LOG_ERROR() << " Output Type not mapped: " << outputType << std::endl;
         }
       }
     }
@@ -1444,7 +1442,7 @@ void StrideGenerator::generatePlatformFunctionSignature(
         atName =
             "@" + std::static_pointer_cast<ValueNode>(atNode)->getStringValue();
       }
-      std::cout << "Loaded platform module: " << decl->getName() << atName
+      LOG_INFO() << "Loaded platform module: " << decl->getName() << atName
                 << std::endl;
     }
   }

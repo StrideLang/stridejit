@@ -1,4 +1,5 @@
 // #include "llvm/ADT/StringRef.h"
+#include "stride/utils/logger.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
 // #include "llvm/ExecutionEngine/Orc/CompileOnDemandLayer.h"
 // #include "llvm/ExecutionEngine/Orc/CompileUtils.h"
@@ -94,8 +95,7 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
                                 ->getRealValue()));
           state.Builder->CreateStore(realVal, alloca);
         } else {
-          std::cerr << __FILE__ << ":" << __LINE__
-                    << " ERROR: type not supported for default" << std::endl;
+          LOG_ERROR() << "ERROR: type not supported for default" << std::endl;
           assert(0 == 1);
         }
       } else if (decl->getNodeType() == AST::BundleDeclaration) {
@@ -229,8 +229,7 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
           }
 
         } else {
-          std::cerr << __FILE__ << ":" << __LINE__
-                    << " ERROR: type not supported for default" << std::endl;
+          LOG_ERROR() << "ERROR: type not supported for default" << std::endl;
           assert(0 == 1);
         }
 
@@ -244,7 +243,7 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
 
 llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
 
-  std::cout << " == FunctionAST codegen : " << Proto->getName() << std::endl;
+  LOG_INFO() << " == FunctionAST codegen : " << Proto->getName() << std::endl;
   // Record the function arguments in the NamedValues map.
   state.NamedValues.clear();
   state.PortBlockMap.clear();
@@ -277,9 +276,9 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     // allocateInternalVariables and other places
     state.NamedValues[std::string(Arg.getName())] = {&Arg, argType};
     i++;
-    std::cout << std::string(Arg.getName()) << ", ";
+    LOG_INFO() << std::string(Arg.getName()) << ", ";
   }
-  std::cout << std::endl;
+  LOG_INFO() << std::endl;
 
   llvm::Value *prevFunctionStatePtr = state.currentFunctionStatePtr;
   const StrideCompiler::StateStructInfo *prevFunctionStateInfo =
@@ -373,7 +372,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
           //  allocated and set to their default value
           auto defaultNode = decl->getPropertyValue("default");
           if (!defaultNode) {
-            std::cerr << "No default provided for internal variable."
+            LOG_ERROR() << "No default provided for internal variable."
                       << std::endl;
             continue;
           }
@@ -384,7 +383,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
             if (state.typesMap.find(typeBlockName) != state.typesMap.end()) {
               type = state.typesMap[typeBlockName];
             } else {
-              std::cerr << "Unknown type " << typeBlockName
+              LOG_ERROR() << "Unknown type " << typeBlockName
                         << " . Falling back on double" << std::endl;
             }
             if (typeBlockName == "_RealType") {
@@ -410,8 +409,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
                     llvm::Type::getInt32Ty(*state.TheContext),
                     llvm::APInt(32, int32_t(val)));
               } else {
-                std::cerr << __FILE__ << ":" << __LINE__
-                          << "Unsupported type. Falling back on double"
+                LOG_ERROR() << "Unsupported type. Falling back on double"
                           << std::endl;
                 assert(0 == 1);
                 type = llvm::Type::getDoubleTy(*state.TheContext);
@@ -420,8 +418,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
                     llvm::APFloat(0.0));
               }
             } else {
-              std::cerr << __FILE__ << ":" << __LINE__
-                        << "Unsupported type. Falling back on double"
+              LOG_ERROR() << "Unsupported type. Falling back on double"
                         << std::endl;
               assert(0 == 1);
               type = llvm::Type::getDoubleTy(*state.TheContext);
@@ -430,8 +427,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
                   llvm::APFloat(0.0));
             }
           } else {
-            std::cerr << __FILE__ << ":" << __LINE__
-                      << "Unsupported type. Falling back on double"
+            LOG_ERROR() << "Unsupported type. Falling back on double"
                       << std::endl;
             assert(0 == 1);
             type = llvm::Type::getDoubleTy(*state.TheContext);
@@ -462,13 +458,13 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
                   llvm::Type::getInt1Ty(*state.TheContext),
                   llvm::APInt(1, val ? 1 : 0));
             } else {
-              std::cerr << "Invalid default for switch" << std::endl;
+              LOG_ERROR() << "Invalid default for switch" << std::endl;
             }
           } else {
-            std::cerr << "No default for switch" << std::endl;
+            LOG_ERROR() << "No default for switch" << std::endl;
           }
         } else if (decl->getObjectType() == "iterator") {
-          std::cout << "iterator" << std::endl;
+          LOG_INFO() << "iterator" << std::endl;
           auto startNode = decl->getPropertyValue("default");
           auto limitNode = decl->getPropertyValue("limit");
           auto incrementNode = decl->getPropertyValue("increment");
@@ -489,7 +485,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
               llvm::ConstantInt::get(llvm::Type::getInt32Ty(*state.TheContext),
                                      llvm::APInt(32, int32_t(itStart)));
         } else {
-          std::cerr << "Invalid declaration for block '" << decl->getName()
+          LOG_ERROR() << "Invalid declaration for block '" << decl->getName()
                     << "' . Ignoring" << std::endl;
           continue;
         }
@@ -623,7 +619,7 @@ std::vector<PrototypeArg> PrototypeAST::getUsedPortProperties() const {
 llvm::Function *PrototypeAST::codegen(StrideCompiler &state) {
   // Make the function type:  double(double,double) etc.
 
-  std::cout << " == PrototypeAST codegen" << std::endl;
+  LOG_INFO() << " == PrototypeAST codegen" << std::endl;
   std::vector<llvm::Type *> ProtoArguments;
   if (callType == CallableType::DomainFunction &&
       state.hasConfiguration(StrideConfig::PACK_DOMAIN_FUNCTION_EXTERNAL)) {
@@ -772,7 +768,7 @@ void processArgGroup(
                                          : nullptr;
         auto newArg = currentArg ? func(val, elemType, currentArg, state) : val;
         if (!newArg) {
-          std::cerr << "Can't process argument: "
+          LOG_ERROR() << "Can't process argument: "
                     << std::string(value->getName()) << std::endl;
           return;
         }
@@ -817,7 +813,7 @@ void processArgGroup(
             }
           }
           if (!type.has_value()) {
-            std::cerr << "No type for: " << std::string(value->getName())
+            LOG_ERROR() << "No type for: " << std::string(value->getName())
                       << std::endl;
             return;
           }
@@ -862,7 +858,7 @@ void processArgGroup(
       }
 
       if (!newArgVal) {
-        std::cerr << "Can't process argument: " << std::string(value->getName())
+        LOG_ERROR() << "Can't process argument: " << std::string(value->getName())
                   << std::endl;
         return;
       }
@@ -879,7 +875,7 @@ CallExprAST::codegen(StrideCompiler &state) {
     return {state.LogErrorV(("Unknown function referenced: " + Callee).c_str()),
             std::nullopt};
   }
-  std::cout << " == CallExprAST codegen for " << std::string(CalleeF->getName())
+  LOG_INFO() << " == CallExprAST codegen for " << std::string(CalleeF->getName())
             << " -> " << instanceName << std::endl;
 
   std::vector<std::pair<llvm::Value *, std::optional<llvm::Type *>>> CallArgs;
@@ -1249,7 +1245,7 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
   std::string bundleIndexStr = "0";
   std::string substituted =
       substituteTokens(command, inTokens, outTokens, bundleIndexStr);
-  std::cout << "Substituted LLVM IR text: " << substituted << std::endl;
+  LOG_INFO() << "Substituted LLVM IR text: " << substituted << std::endl;
 
   // Dispatch: llvm:: prefix means a native LLVM IR instruction.
   // Format: "llvm::<mnemonic> [operands...]"
@@ -1399,8 +1395,7 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
       outval = state.Builder->CreateXor(lhs, rhs);
       outtype = lhs->getType();
     } else {
-      std::cerr << __FILE__ << ":" << __LINE__
-                << " ERROR: unknown llvm:: instruction: " << instr << std::endl;
+      LOG_ERROR() << "ERROR: unknown llvm:: instruction: " << instr << std::endl;
       assert(0 == 1);
     }
 
@@ -1497,8 +1492,7 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
     }
 
   } else {
-    std::cerr << __FILE__ << ":" << __LINE__
-              << " ERROR: unrecognised command format: " << substituted
+    LOG_ERROR() << "ERROR: unrecognised command format: " << substituted
               << std::endl;
     assert(0 == 1);
   }

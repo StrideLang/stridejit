@@ -1,4 +1,5 @@
 #include <functional>
+#include "stride/utils/logger.h"
 #include <iostream>
 
 #include "stride/parser/blocknode.h"
@@ -56,20 +57,20 @@ std::optional<ExternalFunction> StrideCompiler::getExternalFunction(
     if (externFunc.first == strideName) {
       for (const auto &candidate : externFunc.second) {
         llvm::FunctionType *llvmFType = candidate.llvmFunctionType;
-        //        std::cout << llvmFType->getReturnType() << std::endl;
+        //        LOG_INFO() << llvmFType->getReturnType() << std::endl;
         if (llvmFType->getReturnType() == returnType) {
           if (argTypes.size() == llvmFType->getNumParams()) {
             bool allTypesMatch = true;
             for (int i = 0; i < argTypes.size(); i++) {
               if (argTypes[i] != llvmFType->getParamType(i)) {
-                std::cout << "Type mismatch for " << strideName << " arg " << i
+                LOG_INFO() << "Type mismatch for " << strideName << " arg " << i
                           << std::endl;
                 allTypesMatch = false;
                 break;
               }
             }
             if (allTypesMatch) {
-              std::cout << "Found external candidate for " << strideName
+              LOG_INFO() << "Found external candidate for " << strideName
                         << std::endl;
               return candidate;
             }
@@ -77,12 +78,12 @@ std::optional<ExternalFunction> StrideCompiler::getExternalFunction(
               out = candidate;
             }
           } else {
-            std::cout << "Param count mismatch for " << strideName
+            LOG_INFO() << "Param count mismatch for " << strideName
                       << " expected " << llvmFType->getNumParams() << " got "
                       << argTypes.size() << std::endl;
           }
         } else {
-          std::cout << "Return type mismatch for " << strideName << std::endl;
+          LOG_INFO() << "Return type mismatch for " << strideName << std::endl;
         }
       }
     }
@@ -157,7 +158,7 @@ void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
     if (size > 0) {
       Type = llvm::ArrayType::get(Type, size);
     } else {
-      std::cout << " Error: Undefined size for global not possible"
+      LOG_INFO() << " Error: Undefined size for global not possible"
                 << std::endl;
       return;
     }
@@ -176,7 +177,7 @@ void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
   MyGlobal->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::None);
   // Optional: Set data alignment for optimal CPU access
   MyGlobal->setAlignment(llvm::MaybeAlign(4));
-  std::cout << "global: " << fullName << std::endl;
+  LOG_INFO() << "global: " << fullName << std::endl;
 
   m_globals[globalDecl->getName()] = {MyGlobal, Type};
 }
@@ -236,7 +237,7 @@ StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl) {
     if (typePropNode->getNodeType() == strd::AST::Block) {
       type = std::static_pointer_cast<strd::BlockNode>(typePropNode)->getName();
     } else {
-      std::cout << __FILE__ << ":" << __LINE__ << " : unsupported type"
+      LOG_INFO() << " : unsupported type"
                 << std::endl;
     }
   }
@@ -274,7 +275,7 @@ llvm::Type *StrideCompiler::getLLVMTypeForCodegenBlock(
       if (inputPortBlock && typeProp &&
           inputPortBlock->getName() == typeProp->getName()) {
         if (typeProp->getPortName() != "type") {
-          std::cerr << "ERROR invalid port for type for " << decl->toText()
+          LOG_ERROR() << "ERROR invalid port for type for " << decl->toText()
                     << std::endl;
           return typesMap[type];
         }
@@ -286,7 +287,7 @@ llvm::Type *StrideCompiler::getLLVMTypeForCodegenBlock(
         }
       }
     } else {
-      std::cout << __FILE__ << ":" << __LINE__ << " : unsupported type"
+      LOG_INFO() << " : unsupported type"
                 << std::endl;
     }
   }

@@ -45,7 +45,7 @@ EXPORT double __stride_Greater_d_dd(double a, double b);
 }
 
 namespace strd {
-enum class DataType { DOUBLE, BOOL, INT32, INT64 };
+enum class DataType { DOUBLE, BOOL, INT32, INT64, CUSTOM, STATE };
 
 struct ExternalFunction {
   std::string name;

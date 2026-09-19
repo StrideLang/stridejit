@@ -1,4 +1,5 @@
 // #include "llvm/ADT/StringRef.h"
+#include "stride/utils/logger.h"
 // #include "llvm/ExecutionEngine/JITSymbol.h"
 // #include "llvm/ExecutionEngine/Orc/CompileOnDemandLayer.h"
 // #include "llvm/ExecutionEngine/Orc/CompileUtils.h"
@@ -89,7 +90,7 @@ ListExprAST::codegen(StrideCompiler &state) {
       values.push_back(val);
       if (dataType.has_value()) {
         if (dataType.value() != llvm::Type::getDoubleTy(*state.TheContext)) {
-          std::cerr << "ERROR, inconsistent lists not supported" << std::endl;
+          LOG_ERROR() << "ERROR, inconsistent lists not supported" << std::endl;
         }
       } else {
         dataType = llvm::Type::getDoubleTy(*state.TheContext);
@@ -104,7 +105,7 @@ ListExprAST::codegen(StrideCompiler &state) {
       intValues.push_back(val);
       if (dataType.has_value()) {
         if (dataType.value() != llvm::Type::getInt32Ty(*state.TheContext)) {
-          std::cerr << "ERROR, inconsistent lists not supported" << std::endl;
+          LOG_ERROR() << "ERROR, inconsistent lists not supported" << std::endl;
         }
       } else {
         dataType = llvm::Type::getInt32Ty(*state.TheContext);

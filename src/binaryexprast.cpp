@@ -1,4 +1,5 @@
 #include <iostream>
+#include "stride/utils/logger.h"
 
 #include "stride/stridejit/binaryexprast.hpp"
 #include "stride/stridejit/numberexprast.hpp"
@@ -13,7 +14,7 @@ BinaryExprAST::BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS,
 
 std::pair<llvm::Value *, std::optional<llvm::Type *>>
 BinaryExprAST::codegen(StrideCompiler &state) {
-  std::cout << " == BinaryExprAST codegen " << std::string{Op} << std::endl;
+  LOG_INFO() << " == BinaryExprAST codegen " << std::string{Op} << std::endl;
 
   // Special case '=' because we don't want to emit the LHS as an expression.
   if (Op == '=') {

@@ -1,5 +1,6 @@
 
 #include "llvm/IR/Module.h"
+#include "stride/utils/logger.h"
 #include <iostream>
 
 #include "stride/stridejit/numberexprast.hpp"
@@ -40,7 +41,7 @@ IntExprAST::codegen(StrideCompiler &state) {
                 llvm::APInt(NumBits, static_cast<int32_t>(Val), Signed)),
             llvm::Type::getInt32Ty(*state.TheContext)};
   }
-  std::cout << "IntExprAST::codegen Unsupported number of bits" << std::endl;
+  LOG_INFO() << "IntExprAST::codegen Unsupported number of bits" << std::endl;
   return {nullptr, nullptr};
 }
 
