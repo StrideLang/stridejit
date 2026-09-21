@@ -121,8 +121,8 @@ TEST(NestedFunctions, ModuleInReaction) {
 TEST(NestedFunctions, ReactionInReaction) {
   strd::StrideEnvironment strenv;
 
-  auto ret =
-      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "reaction_in_reaction.stride");
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                               "reaction_in_reaction.stride");
   ASSERT_TRUE(ret);
 
   ret = strenv.compileInMemory();
@@ -378,8 +378,8 @@ TEST(NestedFunctions, MultipleStatefulModulesInLoop) {
 TEST(NestedFunctions, StandaloneStatelessModuleInModule) {
   strd::StrideEnvironment strenv;
 
-  auto tree = strd::AST::parseFile(
-      STRIDEJIT_TESTS_SOURCE_DIR "module_in_module.stride");
+  auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                                   "module_in_module.stride");
   ASSERT_TRUE(tree);
   strenv.prepareTree(tree);
 
@@ -414,8 +414,8 @@ TEST(NestedFunctions, StandaloneStatelessModuleInModule) {
 TEST(NestedFunctions, StandaloneReactionInModule) {
   strd::StrideEnvironment strenv;
 
-  auto tree = strd::AST::parseFile(
-      STRIDEJIT_TESTS_SOURCE_DIR "reaction_in_module.stride");
+  auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                                   "reaction_in_module.stride");
   ASSERT_TRUE(tree);
   strenv.prepareTree(tree);
 
@@ -449,8 +449,8 @@ TEST(NestedFunctions, StandaloneReactionInModule) {
 TEST(NestedFunctions, StandaloneLoopInModule) {
   strd::StrideEnvironment strenv;
 
-  auto tree = strd::AST::parseFile(
-      STRIDEJIT_TESTS_SOURCE_DIR "loop_in_module.stride");
+  auto tree =
+      strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "loop_in_module.stride");
   ASSERT_TRUE(tree);
   strenv.prepareTree(tree);
 
@@ -485,8 +485,8 @@ TEST(NestedFunctions, StandaloneLoopInModule) {
 TEST(NestedFunctions, StandaloneStatefulAccumulator) {
   strd::StrideEnvironment strenv;
 
-  auto tree = strd::AST::parseFile(
-      STRIDEJIT_TESTS_SOURCE_DIR "module_state_in_module.stride");
+  auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                                   "module_state_in_module.stride");
   ASSERT_TRUE(tree);
   strenv.prepareTree(tree);
 
@@ -508,7 +508,8 @@ TEST(NestedFunctions, StandaloneStatefulAccumulator) {
     int32_t Acc{10};
   };
 
-  auto *Entry = EntrySym->toPtr<int32_t (*)(int32_t *, int32_t *, InnerState *)>();
+  auto *Entry =
+      EntrySym->toPtr<int32_t (*)(int32_t *, int32_t *, InnerState *)>();
   ASSERT_NE(Entry, nullptr);
 
   InnerState state{10};
@@ -528,8 +529,8 @@ TEST(NestedFunctions, StandaloneStatefulAccumulator) {
 TEST(NestedFunctions, StandaloneStatefulModuleInModule) {
   strd::StrideEnvironment strenv;
 
-  auto tree = strd::AST::parseFile(
-      STRIDEJIT_TESTS_SOURCE_DIR "module_state_in_module.stride");
+  auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                                   "module_state_in_module.stride");
   ASSERT_TRUE(tree);
   strenv.prepareTree(tree);
 
@@ -555,7 +556,8 @@ TEST(NestedFunctions, StandaloneStatefulModuleInModule) {
     InnerState inner;
   };
 
-  auto *Entry = EntrySym->toPtr<int32_t (*)(int32_t *, int32_t *, OuterState *)>();
+  auto *Entry =
+      EntrySym->toPtr<int32_t (*)(int32_t *, int32_t *, OuterState *)>();
   ASSERT_NE(Entry, nullptr);
 
   OuterState state;
@@ -576,8 +578,8 @@ TEST(NestedFunctions, StandaloneStatefulModuleInModule) {
 TEST(NestedFunctions, StandaloneStatefulModuleInReaction) {
   strd::StrideEnvironment strenv;
 
-  auto tree = strd::AST::parseFile(
-      STRIDEJIT_TESTS_SOURCE_DIR "module_state_in_reaction.stride");
+  auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                                   "module_state_in_reaction.stride");
   ASSERT_TRUE(tree);
   strenv.prepareTree(tree);
 
@@ -603,7 +605,8 @@ TEST(NestedFunctions, StandaloneStatefulModuleInReaction) {
     CounterState counter;
   };
 
-  auto *Entry = EntrySym->toPtr<int32_t (*)(int32_t *, int32_t *, ReactionState *)>();
+  auto *Entry =
+      EntrySym->toPtr<int32_t (*)(int32_t *, int32_t *, ReactionState *)>();
   ASSERT_NE(Entry, nullptr);
 
   ReactionState state;
@@ -624,8 +627,8 @@ TEST(NestedFunctions, StandaloneStatefulModuleInReaction) {
 TEST(NestedFunctions, StandaloneStatefulModuleInLoop) {
   strd::StrideEnvironment strenv;
 
-  auto tree = strd::AST::parseFile(
-      STRIDEJIT_TESTS_SOURCE_DIR "module_state_in_loop.stride");
+  auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                                   "module_state_in_loop.stride");
   ASSERT_TRUE(tree);
   strenv.prepareTree(tree);
 
@@ -652,7 +655,8 @@ TEST(NestedFunctions, StandaloneStatefulModuleInLoop) {
   };
 
   auto *Entry =
-      EntrySym->toPtr<int32_t (*)(int32_t *, int32_t *, LoopState *, int32_t)>();
+      EntrySym
+          ->toPtr<int32_t (*)(int32_t *, int32_t *, LoopState *, int32_t)>();
   ASSERT_NE(Entry, nullptr);
 
   LoopState state;
@@ -673,8 +677,8 @@ TEST(NestedFunctions, StandaloneStatefulModuleInLoop) {
 TEST(NestedFunctions, StandaloneStatefulOpaqueAllocation) {
   strd::StrideEnvironment strenv;
 
-  auto tree = strd::AST::parseFile(
-      STRIDEJIT_TESTS_SOURCE_DIR "module_state_in_module.stride");
+  auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                                   "module_state_in_module.stride");
   ASSERT_TRUE(tree);
   strenv.prepareTree(tree);
 
@@ -715,8 +719,8 @@ TEST(NestedFunctions, StandaloneStatefulOpaqueAllocation) {
 TEST(NestedFunctions, StandaloneGenericInvocation) {
   strd::StrideEnvironment strenv;
 
-  auto tree = strd::AST::parseFile(
-      STRIDEJIT_TESTS_SOURCE_DIR "module_state_in_module.stride");
+  auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                                   "module_state_in_module.stride");
   ASSERT_TRUE(tree);
   strenv.prepareTree(tree);
 
@@ -763,8 +767,8 @@ TEST(NestedFunctions, StandaloneGenericInvocation) {
 TEST(NestedFunctions, StandaloneLoopGenericInvocation) {
   strd::StrideEnvironment strenv;
 
-  auto tree = strd::AST::parseFile(
-      STRIDEJIT_TESTS_SOURCE_DIR "module_state_in_loop.stride");
+  auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                                   "module_state_in_loop.stride");
   ASSERT_TRUE(tree);
   strenv.prepareTree(tree);
 
@@ -805,8 +809,8 @@ TEST(NestedFunctions, StandaloneLoopGenericInvocation) {
 TEST(NestedFunctions, StandaloneArgumentQueries) {
   strd::StrideEnvironment strenv;
 
-  auto tree = strd::AST::parseFile(
-      STRIDEJIT_TESTS_SOURCE_DIR "module_state_in_loop.stride");
+  auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                                   "module_state_in_loop.stride");
   ASSERT_TRUE(tree);
   strenv.prepareTree(tree);
 
@@ -872,8 +876,8 @@ TEST(NestedFunctions, StandaloneArgumentQueries) {
 TEST(NestedFunctions, StandaloneInvokerParameterList) {
   strd::StrideEnvironment strenv;
 
-  auto tree = strd::AST::parseFile(
-      STRIDEJIT_TESTS_SOURCE_DIR "module_state_in_loop.stride");
+  auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                                   "module_state_in_loop.stride");
   ASSERT_TRUE(tree);
   strenv.prepareTree(tree);
 

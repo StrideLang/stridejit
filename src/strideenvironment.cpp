@@ -1,5 +1,5 @@
-#include <filesystem>
 #include "stride/utils/logger.h"
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 
@@ -203,7 +203,6 @@ void StrideEnvironment::optimizeModule() {
   }
 }
 
-
 bool StrideEnvironment::generateStandaloneFunction(std::string funcName,
                                                    ScopeStack &scope,
                                                    ASTNode tree) {
@@ -368,26 +367,42 @@ StrideEnvironment::getFunctionArgs(const std::string &funcName) const {
   const auto *DL = getDataLayout();
   const auto &proto = it->second;
 
+  assert(state.m_tree);
+  auto funcDecl = ASTQuery::findDeclarationByName(funcName, {}, state.m_tree);
+  assert(funcDecl);
+
   auto makeArgInfo = [&](const PrototypeArg &arg, FunctionArgInfo::Role role,
-                         bool isPtr, const std::string &prop = "") {
+                         bool isPtr) {
     FunctionArgInfo info;
     info.name = arg.name;
     info.role = role;
     info.llvmType = arg.llvmType;
     info.isPointer = isPtr;
-    info.property = prop.empty() ? arg.property : prop;
+    // info.sizeProperty = prop.empty() ? arg.property : prop;
 
     fillTypeInfo(arg.llvmType, DL, info.type, info.typeName, info.elementSize);
 
+    auto blockDecl = ASTQuery::findDeclarationByName(
+        arg.name,
+        {{funcDecl, funcDecl->getPropertyValue("blocks")->getChildren()}},
+        nullptr);
     info.count = 1;
-    if (state.m_tree) {
-      auto decl = ASTQuery::findDeclarationByName(arg.name, {}, state.m_tree);
-      if (decl) {
-        int sz = ASTQuery::getBlockDeclaredSize(decl, {}, state.m_tree);
-        if (sz > 0) {
-          info.count = static_cast<size_t>(sz);
-        } else if (!info.property.empty()) {
-          info.count = 0; // Undetermined dynamic size
+    if (blockDecl) {
+      int sz = ASTQuery::getBlockDeclaredSize(blockDecl, {}, state.m_tree);
+      if (sz > 0) {
+        info.count = static_cast<size_t>(sz);
+      } else {
+        info.count = 0; // Undetermined dynamic size
+        if (blockDecl->getNodeType() == AST::BundleDeclaration) {
+          // FIXME this should be calculated much earlier than here!
+          auto bundle = blockDecl->getBundle();
+          if (bundle->index()->getChildren()[0]->getNodeType() ==
+              AST::PortProperty) {
+            auto pp = std::static_pointer_cast<PortPropertyNode>(
+                bundle->index()->getChildren()[0]);
+
+            info.sizeProperty = pp->getName() + "_" + pp->getPortName();
+          }
         }
       }
     }
@@ -425,18 +440,20 @@ StrideEnvironment::getFunctionArgs(const std::string &funcName) const {
     result.push_back(makeArgInfo(arg, FunctionArgInfo::Role::External, true));
   }
   for (const auto &arg : proto->getUsedPortProperties()) {
-    result.push_back(makeArgInfo(arg, FunctionArgInfo::Role::PortProperty, false,
-                                 arg.property));
+    result.push_back(
+        makeArgInfo(arg, FunctionArgInfo::Role::PortProperty, false));
   }
   return result;
 }
 
-size_t StrideEnvironment::getFunctionArgCount(const std::string &funcName) const {
+size_t
+StrideEnvironment::getFunctionArgCount(const std::string &funcName) const {
   return getFunctionArgs(funcName).size();
 }
 
 std::optional<FunctionArgInfo>
-StrideEnvironment::getFunctionArg(const std::string &funcName, size_t index) const {
+StrideEnvironment::getFunctionArg(const std::string &funcName,
+                                  size_t index) const {
   auto args = getFunctionArgs(funcName);
   if (index < args.size()) {
     return args[index];
@@ -456,7 +473,7 @@ StrideEnvironment::getFunctionArg(const std::string &funcName,
 }
 
 int StrideEnvironment::getFunctionArgIndex(const std::string &funcName,
-                                          const std::string &argName) const {
+                                           const std::string &argName) const {
   auto args = getFunctionArgs(funcName);
   for (size_t i = 0; i < args.size(); ++i) {
     if (args[i].name == argName) {
@@ -478,7 +495,8 @@ bool InvokerParameterList::setArg(size_t index, void *ptr) {
     return false;
   }
   const auto &info = m_argInfos[index];
-  if (!info.property.empty() && m_nameToIndex.find(info.property) != m_nameToIndex.end()) {
+  if (!info.sizeProperty.empty() &&
+      m_nameToIndex.find(info.sizeProperty) != m_nameToIndex.end()) {
     return false; // MUST use setArrayArg
   }
   m_args[index] = ptr;
@@ -508,20 +526,22 @@ bool InvokerParameterList::setProperty(const std::string &name, int32_t value) {
   if (it == m_nameToIndex.end()) {
     return false;
   }
-  // Store the value locally inside the FunctionArgInfo struct so its address is stable
+  // Store the value locally inside the FunctionArgInfo struct so its address is
+  // stable
   m_argInfos[it->second].portPropertyValue = value;
   m_args[it->second] = &m_argInfos[it->second].portPropertyValue;
   return true;
 }
 
-bool InvokerParameterList::setArrayArg(const std::string &name, void *ptr, size_t size) {
+bool InvokerParameterList::setArrayArg(const std::string &name, void *ptr,
+                                       size_t size) {
   auto it = m_nameToIndex.find(name);
   if (it == m_nameToIndex.end()) {
     return false;
   }
   m_args[it->second] = ptr; // Bypass setArg validation
-  
-  const auto &propName = m_argInfos[it->second].property;
+
+  const auto &propName = m_argInfos[it->second].sizeProperty;
   if (!propName.empty()) {
     return setProperty(propName, static_cast<int32_t>(size));
   }
@@ -581,7 +601,7 @@ int32_t StrideEnvironment::invoke(const std::string &funcName, void **args) {
   if (!sym) {
     llvm::consumeError(sym.takeError());
     LOG_ERROR() << "Invoker for function not found: " << funcName + "_invoker"
-              << std::endl;
+                << std::endl;
     return -1;
   }
   auto *invoker = sym->toPtr<int32_t (*)(void **)>();
@@ -589,7 +609,7 @@ int32_t StrideEnvironment::invoke(const std::string &funcName, void **args) {
 }
 
 int32_t StrideEnvironment::invoke(const std::string &funcName,
-                                 InvokerParameterList &params) {
+                                  InvokerParameterList &params) {
   return invoke(funcName, params.data());
 }
 
@@ -620,7 +640,7 @@ bool StrideEnvironment::compileInMemory() {
           .create();
   if (!JIT_) {
     LOG_ERROR() << "JIT coulf not be created. Have you called initializeJIT()?"
-              << std::endl;
+                << std::endl;
     return false; // JIT.takeError();
   }
   JIT = std::move(*JIT_);
@@ -749,7 +769,7 @@ bool StrideEnvironment::compileObjectToDisk(std::string path) {
                                                      TargetTriple, Error);
     if (Target) {
       LOG_INFO() << Target->getName() << "   " << TargetTriple.getTriple()
-                << std::endl;
+                 << std::endl;
     }
   }
 

@@ -53,8 +53,7 @@ public:
   struct FunctionArgs {
     ArgGroup MainIn;
     ArgGroup MainOut;
-    ArgGroup PropertyIn;
-    ArgGroup PropertyOut;
+    ArgGroup Properties; // Property IO
     ArgGroup Internal;
     ArgGroup External;
   };
@@ -80,9 +79,8 @@ public:
                              StrideCompiler &state);
 
   static std::unique_ptr<FunctionAST>
-  generateStandaloneFunction(const std::string &funcName,
-                             ASTNode tree, ScopeStack &scope,
-                             StrideCompiler &state);
+  generateStandaloneFunction(const std::string &funcName, ASTNode tree,
+                             ScopeStack &scope, StrideCompiler &state);
 
   static void generateInvoker(llvm::Function *TheFunction,
                               StrideCompiler &state);
@@ -115,13 +113,21 @@ private:
                                std::shared_ptr<DeclarationNode> funcDecl,
                                std::shared_ptr<FunctionNode> func);
 
+  static void collectPropertyArgs(FunctionArgs &args,
+                                  CodeAnalysis::TypeTree *typeTree,
+                                  StrideCompiler &state,
+                                  std::vector<std::unique_ptr<ExprAST>> &exprs,
+                                  ScopeStack &scope, ASTNode tree,
+                                  std::shared_ptr<DeclarationNode> funcDecl,
+                                  std::shared_ptr<FunctionNode> func);
+
   static bool resolveIOParamsFromDefinition(
       std::shared_ptr<DeclarationNode> funcDecl,
       std::shared_ptr<FunctionNode> funcInstance, ASTNode tree,
       ScopeStack &functionScope, StrideCompiler &state,
       std::vector<PrototypeArg> &InParams, std::vector<PrototypeArg> &OutParams,
       std::vector<PrototypeArg> &InternalParams,
-      std::vector<PrototypeArg> &InternalPersistentParams,
+      std::vector<PrototypeArg> &InternalPersistentParams, std::vector<PrototypeArg> &PropertyParams,
       std::vector<PrototypeArg> &ExternalParams,
       std::vector<std::shared_ptr<DeclarationNode>> &usedInternalVariables);
 

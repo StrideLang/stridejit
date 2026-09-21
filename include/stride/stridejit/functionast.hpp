@@ -39,7 +39,8 @@ class PrototypeAST {
   std::vector<PrototypeArg> InArgs;
   std::vector<PrototypeArg> OutArgs;
   std::vector<PrototypeArg>
-      InternalPersistentArgs; // For internal scope variables.
+      InternalPersistentArgs;             // For internal scope variables.
+  std::vector<PrototypeArg> PropertyArgs; // For property variables.
   std::vector<PrototypeArg>
       ExternalArgs; // For upper scope in reactions and loops
   std::vector<PrototypeArg> UsedPortProperties;
@@ -50,12 +51,13 @@ public:
   PrototypeAST(const std::string &Name, std::vector<PrototypeArg> OutArgs,
                std::vector<PrototypeArg> InArgs,
                std::vector<PrototypeArg> InternalArgs,
+               std::vector<PrototypeArg> PropertyArgs,
                std::vector<PrototypeArg> ExternalArgs,
                std::vector<PrototypeArg> UsedPortProperties,
                bool IsOperator = false, unsigned Prec = 0)
       : Name(Name), InArgs(InArgs), OutArgs(OutArgs),
-        InternalPersistentArgs(InternalArgs), ExternalArgs(ExternalArgs),
-        UsedPortProperties(UsedPortProperties) {}
+        InternalPersistentArgs(InternalArgs), PropertyArgs(PropertyArgs),
+        ExternalArgs(ExternalArgs), UsedPortProperties(UsedPortProperties) {}
 
   llvm::Function *codegen(StrideCompiler &state);
   const std::string &getName() const { return Name; }

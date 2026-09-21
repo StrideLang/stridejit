@@ -15,6 +15,32 @@
 #include "llvm/Support/raw_ostream.h"
 // #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 
+TEST(JIT, ModuleProperties) {
+
+  strd::StrideEnvironment strenv;
+
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "module_properties.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+
+  EXPECT_NE(Entry, nullptr);
+  int32_t out[2] = {0, 0};
+  Entry(out);
+  EXPECT_EQ(out[0], 5);
+  EXPECT_EQ(out[1], 8);
+}
+
 TEST(Basic, Assignment) {
   auto decl = std::make_shared<strd::DeclarationNode>("G", "signal", nullptr,
                                                       __FILE__, __LINE__);

@@ -22,7 +22,7 @@ struct StrideExternalVariable {
   std::string name;
   llvm::Type *type;
 };
- 
+
 struct FunctionArgInfo {
   enum class Role { Output, Input, State, External, PortProperty };
 
@@ -32,10 +32,10 @@ struct FunctionArgInfo {
   std::string typeName;
   llvm::Type *llvmType{nullptr};
   bool isPointer{true};
+  std::string sizeProperty; // Mane of size port property if dynamic size array
   size_t elementSize{0};
   size_t count{1};
   size_t totalBytes{0};
-  std::string property;
 
   // Returns true if this argument is an array.
   // Static size arrays have count > 1.
@@ -45,7 +45,7 @@ struct FunctionArgInfo {
   // Returns the static size of the array.
   // If the array has an undetermined size (dynamic), this returns 0.
   size_t getArraySize() const { return count; }
-  
+
   int32_t portPropertyValue{0};
 };
 
@@ -96,13 +96,18 @@ public:
   size_t getStateSize(const std::string &funcName) const;
 
   // Programmatic function inspection and dynamic invocation
-  std::vector<FunctionArgInfo> getFunctionArgs(const std::string &funcName) const;
+  std::vector<FunctionArgInfo>
+  getFunctionArgs(const std::string &funcName) const;
   size_t getFunctionArgCount(const std::string &funcName) const;
-  std::optional<FunctionArgInfo> getFunctionArg(const std::string &funcName, size_t index) const;
-  std::optional<FunctionArgInfo> getFunctionArg(const std::string &funcName, const std::string &argName) const;
-  int getFunctionArgIndex(const std::string &funcName, const std::string &argName) const;
+  std::optional<FunctionArgInfo> getFunctionArg(const std::string &funcName,
+                                                size_t index) const;
+  std::optional<FunctionArgInfo>
+  getFunctionArg(const std::string &funcName, const std::string &argName) const;
+  int getFunctionArgIndex(const std::string &funcName,
+                          const std::string &argName) const;
 
-  InvokerParameterList createInvokerParamList(const std::string &funcName) const;
+  InvokerParameterList
+  createInvokerParamList(const std::string &funcName) const;
   int32_t invoke(const std::string &funcName, void **args);
   int32_t invoke(const std::string &funcName, InvokerParameterList &params);
 

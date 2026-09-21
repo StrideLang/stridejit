@@ -290,8 +290,9 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
       state.currentFunctionStatePtr = stateArgIt->second.first;
       state.currentFunctionStateInfo = state.getStateStructInfo(funcInstance);
       if (!state.currentFunctionStateInfo && state.m_tree) {
-        state.currentFunctionStateInfo = state.getStateStructInfo(
-            ASTQuery::findDeclarationByName(Proto->getName(), {}, state.m_tree));
+        state.currentFunctionStateInfo =
+            state.getStateStructInfo(ASTQuery::findDeclarationByName(
+                Proto->getName(), {}, state.m_tree));
       }
       if (state.currentFunctionStateInfo &&
           state.currentFunctionStateInfo->structType) {
@@ -373,7 +374,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
           auto defaultNode = decl->getPropertyValue("default");
           if (!defaultNode) {
             LOG_ERROR() << "No default provided for internal variable."
-                      << std::endl;
+                        << std::endl;
             continue;
           }
           auto typeNode = decl->getPropertyValue("type");
@@ -384,7 +385,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
               type = state.typesMap[typeBlockName];
             } else {
               LOG_ERROR() << "Unknown type " << typeBlockName
-                        << " . Falling back on double" << std::endl;
+                          << " . Falling back on double" << std::endl;
             }
             if (typeBlockName == "_RealType") {
               double val =
@@ -409,8 +410,8 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
                     llvm::Type::getInt32Ty(*state.TheContext),
                     llvm::APInt(32, int32_t(val)));
               } else {
-                LOG_ERROR() << "Unsupported type. Falling back on double"
-                          << std::endl;
+                LOG_ERROR()
+                    << "Unsupported type. Falling back on double" << std::endl;
                 assert(0 == 1);
                 type = llvm::Type::getDoubleTy(*state.TheContext);
                 defaultValue = llvm::ConstantFP::get(
@@ -419,7 +420,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
               }
             } else {
               LOG_ERROR() << "Unsupported type. Falling back on double"
-                        << std::endl;
+                          << std::endl;
               assert(0 == 1);
               type = llvm::Type::getDoubleTy(*state.TheContext);
               defaultValue = llvm::ConstantFP::get(
@@ -428,7 +429,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
             }
           } else {
             LOG_ERROR() << "Unsupported type. Falling back on double"
-                      << std::endl;
+                        << std::endl;
             assert(0 == 1);
             type = llvm::Type::getDoubleTy(*state.TheContext);
             defaultValue = llvm::ConstantFP::get(
@@ -486,7 +487,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
                                      llvm::APInt(32, int32_t(itStart)));
         } else {
           LOG_ERROR() << "Invalid declaration for block '" << decl->getName()
-                    << "' . Ignoring" << std::endl;
+                      << "' . Ignoring" << std::endl;
           continue;
         }
         // Start the PHI node with an entry for Start.
@@ -753,9 +754,8 @@ void processArgGroup(
   for (unsigned i = 0, e = ArgGroup.size(); i != e; ++i) {
     auto [value, type] = ArgGroup[i]->codegen(state);
     size_t paramIdx = CallArgs.size();
-    llvm::Argument *calleeArg = (paramIdx < CalleeF->arg_size())
-                                    ? CalleeF->getArg(paramIdx)
-                                    : nullptr;
+    llvm::Argument *calleeArg =
+        (paramIdx < CalleeF->arg_size()) ? CalleeF->getArg(paramIdx) : nullptr;
 
     if (value->getType()->isTokenTy()) {
       auto *list = dynamic_cast<ListExprAST *>(ArgGroup[i].get());
@@ -769,7 +769,7 @@ void processArgGroup(
         auto newArg = currentArg ? func(val, elemType, currentArg, state) : val;
         if (!newArg) {
           LOG_ERROR() << "Can't process argument: "
-                    << std::string(value->getName()) << std::endl;
+                      << std::string(value->getName()) << std::endl;
           return;
         }
         CallArgs.push_back(
@@ -804,8 +804,8 @@ void processArgGroup(
             if (it != state.NamedValues.end()) {
               llvm::Value *indexVal = it->second.first;
               if (indexVal->getType()->isPointerTy()) {
-                indexVal = state.Builder->CreateLoad(
-                    it->second.second.value(), indexVal, *strIdx);
+                indexVal = state.Builder->CreateLoad(it->second.second.value(),
+                                                     indexVal, *strIdx);
               }
               idxList.push_back(indexVal);
             } else {
@@ -814,7 +814,7 @@ void processArgGroup(
           }
           if (!type.has_value()) {
             LOG_ERROR() << "No type for: " << std::string(value->getName())
-                      << std::endl;
+                        << std::endl;
             return;
           }
           type.value()->print(llvm::outs());
@@ -835,8 +835,8 @@ void processArgGroup(
             type.has_value() ? type.value() : newArgVal->getType();
         auto *varExpr = dynamic_cast<VariableExprAST *>(ArgGroup[i].get());
         std::string varName = varExpr ? varExpr->getName() : "call_tmp";
-        llvm::AllocaInst *tempAlloc = state.CreateEntryBlockAlloca(
-            TheFunction, varName + "_tmp", elemTy);
+        llvm::AllocaInst *tempAlloc =
+            state.CreateEntryBlockAlloca(TheFunction, varName + "_tmp", elemTy);
 
         if (isOutputGroup) {
           newArgVal = tempAlloc;
@@ -849,17 +849,17 @@ void processArgGroup(
         }
       } else if (calleeArg && !calleeArg->getType()->isPointerTy() &&
                  newArgVal->getType()->isPointerTy()) {
-        llvm::Type *loadTy =
-            type.has_value() ? type.value()
-                             : state.pointerElementTypes[newArgVal];
+        llvm::Type *loadTy = type.has_value()
+                                 ? type.value()
+                                 : state.pointerElementTypes[newArgVal];
         if (!loadTy)
           loadTy = llvm::Type::getDoubleTy(*state.TheContext);
         newArgVal = state.Builder->CreateLoad(loadTy, newArgVal, "");
       }
 
       if (!newArgVal) {
-        LOG_ERROR() << "Can't process argument: " << std::string(value->getName())
-                  << std::endl;
+        LOG_ERROR() << "Can't process argument: "
+                    << std::string(value->getName()) << std::endl;
         return;
       }
       CallArgs.push_back({std::move(newArgVal), type});
@@ -875,8 +875,9 @@ CallExprAST::codegen(StrideCompiler &state) {
     return {state.LogErrorV(("Unknown function referenced: " + Callee).c_str()),
             std::nullopt};
   }
-  LOG_INFO() << " == CallExprAST codegen for " << std::string(CalleeF->getName())
-            << " -> " << instanceName << std::endl;
+  LOG_INFO() << " == CallExprAST codegen for "
+             << std::string(CalleeF->getName()) << " -> " << instanceName
+             << std::endl;
 
   std::vector<std::pair<llvm::Value *, std::optional<llvm::Type *>>> CallArgs;
   std::vector<std::tuple<std::string, llvm::AllocaInst *, llvm::Type *>>
@@ -987,10 +988,9 @@ CallExprAST::codegen(StrideCompiler &state) {
             ASTQuery::findDeclarationByName(Callee, {}, state.m_tree));
       }
       if (calleeInfo && calleeInfo->structType) {
-        llvm::Function *currFunc =
-            state.Builder->GetInsertBlock()->getParent();
-        statePtrVal = state.CreateEntryBlockAlloca(
-            currFunc, Callee + "_state", calleeInfo->structType);
+        llvm::Function *currFunc = state.Builder->GetInsertBlock()->getParent();
+        statePtrVal = state.CreateEntryBlockAlloca(currFunc, Callee + "_state",
+                                                   calleeInfo->structType);
         llvm::Constant *initConst =
             calleeInfo->defaultConstant
                 ? calleeInfo->defaultConstant
@@ -1014,12 +1014,12 @@ CallExprAST::codegen(StrideCompiler &state) {
     CallArgs.push_back({std::move(value), type});
   }
 
-  llvm::outs() << "Callee:\n";
+  LOG_INFO() << "Callee:\n";
   CalleeF->print(llvm::outs());
   llvm::outs() << "\n";
   llvm::CallInst *call;
 
-  llvm::outs() << "Call Arguments: ";
+  LOG_INFO() << "Call Arguments: ";
   for (const auto &arg : CallArgs) {
     arg.first->print(llvm::outs());
     llvm::outs() << "|, ";
@@ -1395,7 +1395,8 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
       outval = state.Builder->CreateXor(lhs, rhs);
       outtype = lhs->getType();
     } else {
-      LOG_ERROR() << "ERROR: unknown llvm:: instruction: " << instr << std::endl;
+      LOG_ERROR() << "ERROR: unknown llvm:: instruction: " << instr
+                  << std::endl;
       assert(0 == 1);
     }
 
@@ -1421,6 +1422,12 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
         std::string cleanOp = opStr;
         cleanOp.erase(0, cleanOp.find_first_not_of(" \t"));
         cleanOp.erase(cleanOp.find_last_not_of(" \t\r\n") + 1);
+        size_t remainingSpace;
+        do {
+          remainingSpace = cleanOp.find_first_of(" ");
+          // Remove type name to isolate variable if type present
+          cleanOp.erase(0, remainingSpace + 1);
+        } while (remainingSpace != std::string::npos);
         if (cleanOp.empty())
           return nullptr;
 
@@ -1493,7 +1500,7 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
 
   } else {
     LOG_ERROR() << "ERROR: unrecognised command format: " << substituted
-              << std::endl;
+                << std::endl;
     assert(0 == 1);
   }
 
