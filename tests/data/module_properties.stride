@@ -1,0 +1,26 @@
+_domainDefinition RootDomain {
+    framework: _JitFramework
+    rate: -1
+    inputs: [ signal In {domain: RootDomain type: _RealType } ]
+    outputs: [ signal Out[2] { domain: RootDomain type: _RealType } ]
+    domainFunctionCode: ''
+}
+
+module ModuleSimple {
+    ports: [
+        mainInputPort InputPort { block: Input }
+        mainOutputPort OutputPort { block: Output }
+        propertyInputPort FactorPort { name: "factor" block: Factor }
+    ]
+    blocks: [
+        signal Input {domain: OutputPort.domain type:_RealType}
+        signal Output {domain: OutputPort.domain type:_RealType}
+        signal Factor {domain: OutputPort.domain type:_RealType}
+    ]
+    streams: [
+        Input * Factor >> Output;
+    ]
+}
+
+3.0 >> ModuleSimple(factor: In) >> Out[0];
+In >> ModuleSimple(factor: 4.0) >> Out[1];

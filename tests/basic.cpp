@@ -11,36 +11,7 @@
 #include "stride/utils/astquery.h"
 
 // llvm
-#include "llvm/ExecutionEngine/JITSymbol.h"
 #include "llvm/Support/raw_ostream.h"
-// #include "llvm/ExecutionEngine/Orc/LLJIT.h"
-
-TEST(JIT, ModuleProperties) {
-
-  strd::StrideEnvironment strenv;
-
-  auto ret =
-      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "module_properties.stride");
-  EXPECT_TRUE(ret);
-  ret = strenv.compileInMemory();
-  EXPECT_TRUE(ret);
-
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
-
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-  EXPECT_NE(Entry, nullptr);
-  double in = 2.0f;
-  double out[2] = {0, 0};
-  Entry(&in, out);
-  EXPECT_EQ(out[0], 6);
-  EXPECT_EQ(out[1], 8);
-}
 
 TEST(Basic, Assignment) {
   auto decl = std::make_shared<strd::DeclarationNode>("G", "signal", nullptr,
@@ -680,8 +651,6 @@ TEST(JIT, ModuleInternal) {
   EXPECT_EQ(out, 5);
 }
 
-// // TODO add test for bundle outputs for domains.
-
 TEST(JIT, Reaction) {
 
   strd::StrideEnvironment strenv;
@@ -747,16 +716,6 @@ TEST(JIT, IntegerType) {
 
   Entry(&S, &Val);
   EXPECT_EQ(S, 3);
-}
-
-TEST(JIT, CompileToDisk) {
-
-  strd::StrideEnvironment strenv;
-
-  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
-  EXPECT_TRUE(ret);
-  ret = strenv.compileObjectToDisk("out");
-  EXPECT_TRUE(ret);
 }
 
 TEST(JIT, ReactionCondition) {
@@ -1106,6 +1065,35 @@ TEST(JIT, PlatformFunction) {
   EXPECT_DOUBLE_EQ(OutWrapped, 5.5);
 }
 
+TEST(JIT, ModuleProperties) {
+
+  strd::StrideEnvironment strenv;
+
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "module_properties.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("RootDomain_process");
+
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
+
+  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+
+  EXPECT_NE(Entry, nullptr);
+  double in = 2.0f;
+  double out[2] = {0, 0};
+  Entry(&in, out);
+  EXPECT_EQ(out[0], 6);
+  EXPECT_EQ(out[1], 8);
+}
+
+// Function Standalone ------------------------------------
+
 TEST(JIT, FunctionStandaloneModuleSimple) {
   strd::ASTNode tree;
   tree =
@@ -1387,44 +1375,43 @@ TEST(JIT, FunctionStandaloneLoop) {
   EXPECT_EQ(out, 40);
 }
 
-// TEST(JIT, ReactionInModule) {
+TEST(JIT, ReactionInModule) {
 
-//   strd::StrideEnvironment strenv;
+  strd::StrideEnvironment strenv;
 
-//   auto ret =
-//       strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
-//       "reaction_in_module.stride");
-//   EXPECT_TRUE(ret);
-//   ret = strenv.compileInMemory();
-//   EXPECT_TRUE(ret);
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "reaction_in_module.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
 
-//   llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-//       strenv.getFunction("RootDomain_process");
-//   if (!EntrySym) {
-//     std::cerr << "No entry" << std::endl;
-//   }
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("RootDomain_process");
+  if (!EntrySym) {
+    std::cerr << "No entry" << std::endl;
+  }
 
-//   auto *Entry = EntrySym->toPtr<void (*)(...)>();
-//   EXPECT_NE(Entry, nullptr);
+  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+  EXPECT_NE(Entry, nullptr);
 
-//   double In = 3.0;
-//   double Out = 1.0;
+  double In = 3.0;
+  double Out = 1.0;
 
-//   Entry(&In, &Out);
-//   EXPECT_EQ(Out, 1.0);
-//   In = 4.0;
-//   Entry(&In, &Out);
-//   EXPECT_EQ(Out, 1.0);
-//   In = 5.0;
-//   Entry(&In, &Out);
-//   EXPECT_EQ(Out, 1.0);
-//   In = 6.0;
-//   Entry(&In, &Out);
-//   EXPECT_EQ(Out, 6.0);
-//   In = 10.0;
-//   Entry(&In, &Out);
-//   EXPECT_EQ(Out, 10.0);
-// }
+  Entry(&In, &Out);
+  EXPECT_EQ(Out, 1.0);
+  In = 4.0;
+  Entry(&In, &Out);
+  EXPECT_EQ(Out, 1.0);
+  In = 5.0;
+  Entry(&In, &Out);
+  EXPECT_EQ(Out, 1.0);
+  In = 6.0;
+  Entry(&In, &Out);
+  EXPECT_EQ(Out, 6.0);
+  In = 10.0;
+  Entry(&In, &Out);
+  EXPECT_EQ(Out, 10.0);
+}
 
 ///  -------------------------------------------------
 ///  -------------------------------------------------

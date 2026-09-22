@@ -75,3 +75,13 @@ TEST(JIT, Create) {
   Entry(&out, &in);
   EXPECT_EQ(out, 5);
 }
+
+TEST(JIT, CompileToDisk) {
+
+  strd::StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileObjectToDisk("out");
+  EXPECT_TRUE(ret);
+}

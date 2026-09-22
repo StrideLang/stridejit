@@ -962,11 +962,11 @@ CallExprAST::codegen(StrideCompiler &state) {
       arrayAlloc->print(llvm::outs());
       llvm::outs() << "\n";
     }
-    processArgGroup(state, PropertyArgs, CalleeF, CallArgs);
   } else if (callType == CallableType::External) {
     processArgGroup(state, InArgs, CalleeF, CallArgs);
-    // processArgGroup(state, InternalArgs, CalleeF, CallArgs);
+    // processArgGroup(state, InternalArgs, CalleeF, CallArgs)
   }
+  processArgGroup(state, PropertyArgs, CalleeF, CallArgs);
 
   if (calleeNeedsState) {
     llvm::Value *statePtrVal = nullptr;
