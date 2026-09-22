@@ -113,15 +113,21 @@ public:
   CallExprAST(const std::string &Callee,
               std::vector<std::unique_ptr<ExprAST>> OutArgs,
               std::vector<std::unique_ptr<ExprAST>> InArgs,
+              std::vector<std::unique_ptr<ExprAST>> PropertyArgs,
               std::vector<std::unique_ptr<ExprAST>> InternalArgs,
               std::vector<std::unique_ptr<ExprAST>> ExternalArgs,
               std::vector<std::unique_ptr<ExprAST>> PortPropArgs,
               std::vector<llvm::Type *> OutArgsDataType,
               std::vector<llvm::Type *> InArgsDataType,
+              std::vector<llvm::Type *> PropertyArgsDataType,
               std::string instanceName)
-      : Callee(Callee), InArgs(std::move(InArgs)), OutArgs(std::move(OutArgs)),
-        InternalArgs(std::move(InternalArgs)), InArgsDataType(InArgsDataType),
-        OutArgsDataType(OutArgsDataType), ExternalArgs(std::move(ExternalArgs)),
+      : Callee(Callee), OutArgs(std::move(OutArgs)), InArgs(std::move(InArgs)),
+        PropertyArgs(std::move(PropertyArgs)),
+        InternalArgs(std::move(InternalArgs)),
+        OutArgsDataType(std::move(OutArgsDataType)),
+        InArgsDataType(std::move(InArgsDataType)),
+        PropertyArgsDataType(std::move(PropertyArgsDataType)),
+        ExternalArgs(std::move(ExternalArgs)),
         PortPropArgs(std::move(PortPropArgs)), instanceName(instanceName) {}
 
   std::pair<llvm::Value *, std::optional<llvm::Type *>>
@@ -131,11 +137,13 @@ public:
   bool calleeNeedsState{false};
   ASTNode funcInstance{nullptr};
 
-  std::vector<std::unique_ptr<ExprAST>> InArgs;
   std::vector<std::unique_ptr<ExprAST>> OutArgs;
+  std::vector<std::unique_ptr<ExprAST>> InArgs;
+  std::vector<std::unique_ptr<ExprAST>> PropertyArgs;
   std::vector<std::unique_ptr<ExprAST>> InternalArgs;
-  std::vector<llvm::Type *> InArgsDataType;
   std::vector<llvm::Type *> OutArgsDataType;
+  std::vector<llvm::Type *> InArgsDataType;
+  std::vector<llvm::Type *> PropertyArgsDataType;
   std::vector<std::unique_ptr<ExprAST>> ExternalArgs;
   std::vector<std::unique_ptr<ExprAST>> PortPropArgs;
   std::string instanceName;

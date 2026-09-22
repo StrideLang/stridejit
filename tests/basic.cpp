@@ -35,9 +35,10 @@ TEST(JIT, ModuleProperties) {
   auto *Entry = EntrySym->toPtr<void (*)(...)>();
 
   EXPECT_NE(Entry, nullptr);
-  int32_t out[2] = {0, 0};
-  Entry(out);
-  EXPECT_EQ(out[0], 5);
+  double in = 2.0f;
+  double out[2] = {0, 0};
+  Entry(&in, out);
+  EXPECT_EQ(out[0], 6);
   EXPECT_EQ(out[1], 8);
 }
 

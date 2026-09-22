@@ -87,15 +87,15 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
       }
     }
 
-    auto proto = std::make_unique<PrototypeAST>(
+    auto processProto = std::make_unique<PrototypeAST>(
         std::string(domainName + "_process"),
         /* InArgs */ std::vector<PrototypeArg>{},
         /* OutArgs */ std::vector<PrototypeArg>{},
         /* InternalPersistentArgs */ std::vector<PrototypeArg>{},
         /* PropertyArgs */ std::vector<PrototypeArg>{}, ExternalArgs,
         std::vector<PrototypeArg>{});
-    auto processFunc =
-        std::make_unique<FunctionAST>(std::move(proto), std::move(it->second));
+    auto processFunc = std::make_unique<FunctionAST>(std::move(processProto),
+                                                     std::move(it->second));
     processFunc->callType = CallableType::DomainFunction;
 
     // Domain member variables (globals)
@@ -746,7 +746,7 @@ void StrideGenerator::collectPropertyArgs(
         std::static_pointer_cast<FunctionNode>(typeTree->instance);
     auto props = funcInstance->getProperties();
     for (const auto &propNode : props) {
-      args.Properties.args.emplace_back(createExpr(propNode));
+      args.Properties.args.emplace_back(createExpr(propNode->getValue()));
       args.MainIn.argTypes.push_back(
           llvm::Type::getDoubleTy(*state.TheContext));
     }
@@ -957,8 +957,9 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               std::vector<std::unique_ptr<ExprAST>>{},
               std::vector<std::unique_ptr<ExprAST>>{},
               std::vector<std::unique_ptr<ExprAST>>{},
+              std::vector<std::unique_ptr<ExprAST>>{},
               std::move(args.MainOut.argTypes), std::move(args.MainIn.argTypes),
-              state.getName());
+              std::vector<llvm::Type *>{}, state.getName());
           newExternCall->callType = CallableType::External;
           generated[domainName].expr.push_back(std::move(newExternCall));
           LOG_INFO() << "Using external function:" << externFunc->name
@@ -1044,10 +1045,11 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
           // Function call expr
           auto callexpr = std::make_unique<CallExprAST>(
               std::string(func->getName()), std::move(args.MainOut.args),
-              std::move(args.MainIn.args), std::move(args.Internal.args),
-              std::move(args.External.args), std::move(PortPropArgs),
-              std::move(args.MainOut.argTypes), std::move(args.MainIn.argTypes),
-              state.getName());
+              std::move(args.MainIn.args), std::move(args.Properties.args),
+              std::move(args.Internal.args), std::move(args.External.args),
+              std::move(PortPropArgs), std::move(args.MainOut.argTypes),
+              std::move(args.MainIn.argTypes),
+              std::move(args.Properties.argTypes), state.getName());
           auto *callTypeTree = state.findTypeTreeNode(func);
           if (!callTypeTree && funcDecl) {
             callTypeTree = state.findTypeTreeNode(funcDecl);
@@ -1128,7 +1130,9 @@ bool StrideGenerator::resolveIOParamsFromDefinition(
     for (const auto &portNode : portsList->getChildren()) {
       auto portDecl = std::static_pointer_cast<DeclarationNode>(portNode);
       auto portTypeStr = portDecl->getObjectType();
-      if (portTypeStr == "mainInputPort" || portTypeStr == "mainOutputPort") {
+      if (portTypeStr == "mainInputPort" || portTypeStr == "mainOutputPort" ||
+          portTypeStr == "propertyInputPort" ||
+          portTypeStr == "propertyOutputPort") {
         auto blockNode = portDecl->getPropertyValue("block");
         if (blockNode && blockNode->getNodeType() == AST::Block) {
           auto blockName =

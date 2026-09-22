@@ -50,6 +50,7 @@ public:
     std::vector<std::unique_ptr<ExprAST>> args;
     std::vector<llvm::Type *> argTypes;
   };
+
   struct FunctionArgs {
     ArgGroup MainIn;
     ArgGroup MainOut;
@@ -127,7 +128,8 @@ private:
       ScopeStack &functionScope, StrideCompiler &state,
       std::vector<PrototypeArg> &InParams, std::vector<PrototypeArg> &OutParams,
       std::vector<PrototypeArg> &InternalParams,
-      std::vector<PrototypeArg> &InternalPersistentParams, std::vector<PrototypeArg> &PropertyParams,
+      std::vector<PrototypeArg> &InternalPersistentParams,
+      std::vector<PrototypeArg> &PropertyParams,
       std::vector<PrototypeArg> &ExternalParams,
       std::vector<std::shared_ptr<DeclarationNode>> &usedInternalVariables);
 

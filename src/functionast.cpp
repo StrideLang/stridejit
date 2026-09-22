@@ -274,9 +274,12 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     auto argType = argTypes[i];
     // TODO verify how this interacts with the other NamedValues setting in
     // allocateInternalVariables and other places
+    if (i != 0) {
+      LOG_INFO() << ", ";
+    }
     state.NamedValues[std::string(Arg.getName())] = {&Arg, argType};
     i++;
-    LOG_INFO() << std::string(Arg.getName()) << ", ";
+    LOG_INFO() << std::string(Arg.getName());
   }
   LOG_INFO() << std::endl;
 
@@ -645,6 +648,9 @@ llvm::Function *PrototypeAST::codegen(StrideCompiler &state) {
     for (const auto &arg : InArgs) {
       ProtoArguments.emplace_back(llvm::PointerType::get(*state.TheContext, 0));
     }
+    for (const auto &arg : PropertyArgs) {
+      ProtoArguments.emplace_back(llvm::PointerType::get(*state.TheContext, 0));
+    }
     for (const auto &arg : InternalPersistentArgs) {
       ProtoArguments.emplace_back(llvm::PointerType::get(*state.TheContext, 0));
     }
@@ -672,13 +678,17 @@ llvm::Function *PrototypeAST::codegen(StrideCompiler &state) {
       Arg.setName(OutArgs[Idx].name);
     } else if (Idx < (OutArgs.size() + InArgs.size())) {
       Arg.setName(InArgs[Idx - OutArgs.size()].name);
-    } else if (Idx < (OutArgs.size() + InArgs.size() +
+    } else if (Idx < (OutArgs.size() + InArgs.size() + PropertyArgs.size())) {
+      Arg.setName(PropertyArgs[Idx - OutArgs.size() - InArgs.size()].name);
+    } else if (Idx < (OutArgs.size() + InArgs.size() + PropertyArgs.size() +
                       InternalPersistentArgs.size())) {
-      Arg.setName(
-          InternalPersistentArgs[Idx - (OutArgs.size() + InArgs.size())].name);
-    } else if (Idx < (OutArgs.size() + InArgs.size() +
+      Arg.setName(InternalPersistentArgs[Idx - (OutArgs.size() + InArgs.size() +
+                                                PropertyArgs.size())]
+                      .name);
+    } else if (Idx < (OutArgs.size() + InArgs.size() + PropertyArgs.size() +
                       InternalPersistentArgs.size() + ExternalArgs.size())) {
       Arg.setName(ExternalArgs[Idx - (OutArgs.size() + InArgs.size() +
+                                      PropertyArgs.size() +
                                       InternalPersistentArgs.size())]
                       .name);
     } else {
@@ -704,6 +714,9 @@ std::vector<llvm::Type *> PrototypeAST::getUsedArgsTypes() const {
     ProtoArguments.emplace_back(arg.llvmType);
   }
   for (const auto &arg : InArgs) {
+    ProtoArguments.emplace_back(arg.llvmType);
+  }
+  for (const auto &arg : PropertyArgs) {
     ProtoArguments.emplace_back(arg.llvmType);
   }
   for (const auto &arg : InternalPersistentArgs) {
@@ -949,7 +962,7 @@ CallExprAST::codegen(StrideCompiler &state) {
       arrayAlloc->print(llvm::outs());
       llvm::outs() << "\n";
     }
-    // processArgGroup(state, InternalArgs, CalleeF, CallArgs);
+    processArgGroup(state, PropertyArgs, CalleeF, CallArgs);
   } else if (callType == CallableType::External) {
     processArgGroup(state, InArgs, CalleeF, CallArgs);
     // processArgGroup(state, InternalArgs, CalleeF, CallArgs);

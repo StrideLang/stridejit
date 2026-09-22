@@ -106,6 +106,7 @@ bool StrideEnvironment::generateIr(ASTNode root) {
     //    library.initializeLibrary(m_strideRoot);
 
     globalScope.push_back({nullptr, {}});
+    // FIXME don't hardocde library version
     std::vector<ASTNode> platformlib = ASTFunctions::loadAllInDirectory(
         m_strideRoot + "/frameworks/JIT/1.0/platformlib");
     auto &frameworkScope = globalScope.back().second;
