@@ -747,7 +747,8 @@ void StrideGenerator::collectPropertyArgs(
     auto props = funcInstance->getProperties();
     for (const auto &propNode : props) {
       args.Properties.args.emplace_back(createExpr(propNode->getValue()));
-      args.MainIn.argTypes.push_back(
+      // FIXME set correct type
+      args.Properties.argTypes.push_back(
           llvm::Type::getDoubleTy(*state.TheContext));
     }
   }
@@ -1492,7 +1493,8 @@ void StrideGenerator::generatePlatformFunctionSignature(
     } else {
       retType = state.typesMap[""];
     }
-    {
+    if (state.functionMap.find(decl->getName()) == state.functionMap.end()) {
+      // TODO ensure existing function matches incoming.
       auto name = std::static_pointer_cast<ValueNode>(functionNameNode)
                       ->getStringValue();
       llvm::FunctionType *FT =
