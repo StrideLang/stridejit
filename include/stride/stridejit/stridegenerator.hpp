@@ -65,6 +65,17 @@ public:
 
   static void compile(ASTNode tree, ScopeStack &scope, StrideCompiler &state);
 
+  static std::vector<std::unique_ptr<ExprAST>>
+  generateStreamsForNodes(const std::vector<ASTNode> &nodes, ScopeStack scope,
+                          StrideCompiler &state,
+                          const std::string &targetDomain);
+
+  static void processStateStreams(StateMachine &sm,
+                                  std::shared_ptr<DeclarationNode> stateNode,
+                                  ScopeStack scope, ASTNode tree,
+                                  StrideCompiler &state,
+                                  const std::string &domainName);
+
   static GeneratedIRCode generateCodeForTree(ASTNode tree, ScopeStack &scope,
                                              StrideCompiler &state);
 

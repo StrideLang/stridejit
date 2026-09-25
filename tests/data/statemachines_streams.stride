@@ -1,0 +1,34 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    stateMachines: [MyStateMachine]
+    inputs: []
+    outputs: []
+	domainFunctionCode: ''
+}
+
+signal Counter { domain: RootDomain type: _IntType default: 0 }
+
+state State1 {
+    blocks: [
+        signal LocalSig { type: _IntType default: 1 }
+    ]
+    onEntry: [
+        LocalSig >> Counter;
+    ]
+    onProcess: [
+        Counter + 1 >> Counter;
+    ]
+    onExit: [
+        0 >> Counter;
+    ]
+}
+
+state State2 {}
+
+state MyStateMachine {
+    initialState: State1
+    states: [State1, State2]
+}

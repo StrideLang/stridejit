@@ -33,25 +33,35 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
 
   GeneratedIRCode generatedIRCode = generateCodeForTree(tree, scope, state);
 
-  std::vector<PrototypeArg> ExternalArgs; // Args to domain functions
+  // Domain member variables (globals)
+  // TODO set global linkage according to debug mode
+  for (const auto &globalDecl : generatedIRCode.GlobalSignals) {
+    state.createGlobal(globalDecl);
+  }
+
   for (auto it = generatedIRCode.domainGeneratedCode.begin();
        it != generatedIRCode.domainGeneratedCode.end(); it++) {
+    std::vector<PrototypeArg> ExternalArgs; // Args to domain functions
     const std::string &domainName = it->first;
     // Find domain and insert inputs and output to tree.
     auto domainDecl = ASTQuery::findDeclarationByName(domainName, scope, tree);
     if (domainDecl) {
       LOG_INFO() << " Found domain declaration for " << domainName << std::endl;
-      auto smContexts = StateMachine::collectStateMachines(domainDecl, scope, tree);
-      generatedIRCode.stateMachinesByDomain[domainName] = smContexts;
+      auto smContexts =
+          StateMachine::collectStateMachines(domainDecl, scope, tree);
 
-      for (const auto &smCtx : smContexts) {
+      for (auto &smCtx : smContexts) {
+        processStateStreams(smCtx, smCtx.smDecl, scope, tree, state,
+                            domainName);
         auto stateVarDecl = std::make_shared<DeclarationNode>(
             smCtx.activeStateVarName, "signal", nullptr, "", 0);
         auto typeProp = std::make_shared<PropertyNode>(
             "type", std::make_shared<BlockNode>("_IntType", "", 0), "", 0);
         stateVarDecl->addProperty(typeProp);
         generatedIRCode.GlobalSignals.push_back(stateVarDecl);
+        state.createGlobal(stateVarDecl);
       }
+      generatedIRCode.stateMachinesByDomain[domainName] = std::move(smContexts);
       auto domainExternalInputNode = domainDecl->getPropertyValue("inputs");
       if (domainExternalInputNode) {
         for (const auto &externalInput :
@@ -109,12 +119,6 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
                                                      std::move(it->second));
     processFunc->callType = CallableType::DomainFunction;
 
-    // Domain member variables (globals)
-    // TODO set global linkage according to debug mode
-    for (const auto &globalDecl : generatedIRCode.GlobalSignals) {
-      state.createGlobal(globalDecl);
-    }
-
     processFunc->codegen(state);
 
     auto initProto = std::make_unique<PrototypeAST>(
@@ -150,6 +154,14 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
 
     // TODO Use information on generated code to initialize instead of going
     // through tree again.
+    for (const auto &smCtx :
+         generatedIRCode.stateMachinesByDomain[domainName]) {
+      auto varInit = std::make_unique<BinaryExprAST>(
+          '=', std::make_unique<VariableExprAST>(smCtx.activeStateVarName),
+          std::make_unique<IntExprAST>(smCtx.initialStateId));
+      resetBody.push_back(std::move(varInit));
+    }
+
     for (const auto &node : tree->getChildren()) {
       if (node->getNodeType() == AST::Declaration ||
           node->getNodeType() == AST::BundleDeclaration) {
@@ -396,6 +408,76 @@ std::unique_ptr<ExprAST> StrideGenerator::createExpr(ASTNode node) {
   return nullptr;
 }
 
+std::vector<std::unique_ptr<ExprAST>> StrideGenerator::generateStreamsForNodes(
+    const std::vector<ASTNode> &nodes, ScopeStack scope, StrideCompiler &state,
+    const std::string &targetDomain) {
+  std::vector<std::unique_ptr<ExprAST>> result;
+  for (const auto &node : nodes) {
+    if (node->getNodeType() == AST::Stream) {
+      auto stream = std::static_pointer_cast<StreamNode>(node);
+      auto code = createStreamCode(stream, state.m_tree, scope, state);
+      for (auto &domainCode : code) {
+        if (targetDomain.empty() || domainCode.first == targetDomain) {
+          for (const auto &f : domainCode.second.functions) {
+            f->codegen(state);
+          }
+          while (domainCode.second.expr.size() > 0) {
+            result.emplace_back(std::move(domainCode.second.expr.front()));
+            domainCode.second.expr.erase(domainCode.second.expr.begin());
+          }
+        }
+      }
+    }
+  }
+  return result;
+}
+
+void StrideGenerator::processStateStreams(
+    StateMachine &sm, std::shared_ptr<DeclarationNode> stateNode,
+    ScopeStack scope, ASTNode tree, StrideCompiler &state,
+    const std::string &domainName) {
+  // 1. Get state's local blocks and push to scope
+  std::vector<ASTNode> blocks = ASTQuery::getStateMachineBlocks(stateNode);
+  scope.push_back({stateNode, blocks});
+
+  // 2. Evaluate streams and track them in the state machine structs
+  for (auto &fs : sm.flattenedStates) {
+    if (fs.stateDecl == stateNode) {
+      auto onEntryProp = stateNode->getPropertyValue("onEntry");
+      if (onEntryProp && onEntryProp->getNodeType() == AST::List) {
+        fs.onEntryCode = generateStreamsForNodes(onEntryProp->getChildren(),
+                                                 scope, state, domainName);
+      }
+      auto onProcessProp = stateNode->getPropertyValue("onProcess");
+      if (onProcessProp && onProcessProp->getNodeType() == AST::List) {
+        fs.onProcessCode = generateStreamsForNodes(onProcessProp->getChildren(),
+                                                   scope, state, domainName);
+      }
+      auto onExitProp = stateNode->getPropertyValue("onExit");
+      if (onExitProp && onExitProp->getNodeType() == AST::List) {
+        fs.onExitCode = generateStreamsForNodes(onExitProp->getChildren(),
+                                                scope, state, domainName);
+      }
+      break;
+    }
+  }
+
+  // 3. Recurse into child states
+  auto statesProp = stateNode->getPropertyValue("states");
+  if (statesProp && statesProp->getNodeType() == AST::List) {
+    for (const auto &child : statesProp->getChildren()) {
+      if (child->getNodeType() == AST::Block) {
+        auto childName = std::static_pointer_cast<BlockNode>(child)->getName();
+        auto childDecl =
+            ASTQuery::findDeclarationByName(childName, scope, tree);
+        if (childDecl) {
+          processStateStreams(sm, childDecl, scope, tree, state, domainName);
+        }
+      }
+    }
+  }
+}
+
 StrideGenerator::GeneratedIRCode
 StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
                                      StrideCompiler &state) {
@@ -428,6 +510,9 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
     } else if (node->getNodeType() == AST::Declaration ||
                node->getNodeType() == AST::BundleDeclaration) {
       auto decl = std::static_pointer_cast<DeclarationNode>(node);
+      if (decl->getObjectType() == "_domainDefinition") {
+        generatedIRCode.domainGeneratedCode[decl->getName()];
+      }
       if (decl->getObjectType() == "signal" ||
           ASTQuery::isConstant(decl, scope, tree)) {
         auto *type = state.getLLVMType(decl);
@@ -1504,9 +1589,10 @@ void StrideGenerator::generatePlatformFunctionSignature(
     } else {
       retType = state.typesMap[""];
     }
-    // Always store the function signature, as there may be multiple overloads (e.g. Greater@Int_Bool, Greater@Double_Bool)
-    auto name = std::static_pointer_cast<ValueNode>(functionNameNode)
-                    ->getStringValue();
+    // Always store the function signature, as there may be multiple overloads
+    // (e.g. Greater@Int_Bool, Greater@Double_Bool)
+    auto name =
+        std::static_pointer_cast<ValueNode>(functionNameNode)->getStringValue();
     llvm::FunctionType *FT =
         llvm::FunctionType::get(retType, parameters, false);
     state.functionMap[decl->getName()].push_back(ExternalFunction{name, FT});
