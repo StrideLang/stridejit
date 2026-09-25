@@ -24,6 +24,7 @@ struct Transition {
   int id;
   std::shared_ptr<DeclarationNode> transitionDecl;
   int targetStateId;
+  bool triggerOnGuard = false;
 
   std::vector<std::unique_ptr<ExprAST>> guardCode;
   std::vector<std::unique_ptr<ExprAST>> onTransitionCode;
@@ -58,6 +59,7 @@ public:
   std::vector<FlattenedState> flattenedStates;
   int initialStateId;
   std::string activeStateVarName;
+  std::string transitionRequestVarName;
 
   static void flattenStateMachine(std::shared_ptr<DeclarationNode> stateNode,
                                   int &idCounter, StateMachine &sm,

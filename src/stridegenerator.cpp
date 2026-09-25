@@ -58,17 +58,25 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
         auto typeProp = std::make_shared<PropertyNode>(
             "type", std::make_shared<BlockNode>("_IntType", "", 0), "", 0);
         stateVarDecl->addProperty(typeProp);
-        
-        // Track the active state variable internally without exposing it as a user-level global
+
+        // Track the active state variable internally without exposing it as a
+        // user-level global
         state.createGlobal(stateVarDecl);
+
+        auto reqVarDecl = std::make_shared<DeclarationNode>(
+            smCtx.transitionRequestVarName, "signal", nullptr, "", 0);
+        reqVarDecl->addProperty(typeProp);
+        state.createGlobal(reqVarDecl);
 
         // Save init info before moving smCtx
         generatedIRCode.stateMachinesByDomain[domainName].push_back(
             {smCtx.activeStateVarName, smCtx.initialStateId});
 
-        // Inject the master switch block into the domain's process execution stream
+        // Inject the master switch block into the domain's process execution
+        // stream
         auto smExpr = std::make_unique<StateMachineExprAST>(std::move(smCtx));
-        generatedIRCode.domainGeneratedCode[domainName].push_back(std::move(smExpr));
+        generatedIRCode.domainGeneratedCode[domainName].push_back(
+            std::move(smExpr));
       }
       auto domainExternalInputNode = domainDecl->getPropertyValue("inputs");
       if (domainExternalInputNode) {
@@ -469,6 +477,22 @@ void StrideGenerator::processStateStreams(
       if (onExitProp && onExitProp->getNodeType() == AST::List) {
         fs.onExitCode = generateStreamsForNodes(onExitProp->getChildren(),
                                                 scope, state, domainName);
+      }
+
+      // Codegenerate transition streams
+      for (auto &t : fs.transitions) {
+        if (t.transitionDecl) {
+          auto guardProp = t.transitionDecl->getPropertyValue("guard");
+          if (guardProp && guardProp->getNodeType() == AST::List) {
+            t.guardCode = generateStreamsForNodes(guardProp->getChildren(),
+                                                  scope, state, domainName);
+          }
+          auto onTransProp = t.transitionDecl->getPropertyValue("onTransition");
+          if (onTransProp && onTransProp->getNodeType() == AST::List) {
+            t.onTransitionCode = generateStreamsForNodes(
+                onTransProp->getChildren(), scope, state, domainName);
+          }
+        }
       }
       break;
     }

@@ -198,3 +198,51 @@ TEST(StateMachine, TransitionLoading) {
   EXPECT_EQ(state3.stateDecl->getName(), "State3");
   EXPECT_EQ(state3.transitions.size(), 0);
 }
+
+TEST(StateMachine, TransitionExecution) {
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                              "statemachines_transitions.stride");
+  EXPECT_NE(tree, nullptr);
+
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+  bool success = strenv.generateIr(tree);
+  EXPECT_TRUE(success);
+  success = strenv.compileInMemory();
+  EXPECT_TRUE(success);
+
+  strenv.invoke("RootDomain_init", nullptr);
+
+  auto *activeState =
+      strenv.getGlobal<int32_t>("__RootDomain_MyStateMachine_active_state_id");
+  auto *reqState = strenv.getGlobal<int32_t>(
+      "__RootDomain_MyStateMachine_transition_request_id");
+  auto *counter = strenv.getGlobal<int32_t>("Counter");
+
+  EXPECT_EQ(*activeState, 2); // State1 is 2
+  EXPECT_EQ(*counter, 0);
+
+  // Tick the domain without a request, nothing should happen
+  strenv.invoke("RootDomain_process", nullptr);
+  EXPECT_EQ(*activeState, 2);
+  EXPECT_EQ(*counter, 0);
+
+  // Request transition 1 (ToState2)
+  *reqState = 1;
+  strenv.invoke("RootDomain_process", nullptr);
+
+  // activeState should be 3 (State2)
+  EXPECT_EQ(*activeState, 3);
+  // Counter should be 1
+  EXPECT_EQ(*counter, 1);
+  // reqState should be reset
+  EXPECT_EQ(*reqState, 0);
+
+  // Request transition 2 (ToState3)
+  *reqState = 2;
+  strenv.invoke("RootDomain_process", nullptr);
+
+  EXPECT_EQ(*activeState, 4); // State3
+  EXPECT_EQ(*counter, 2);
+}

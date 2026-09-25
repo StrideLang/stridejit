@@ -61,6 +61,8 @@ StateMachine::collectStateMachines(std::shared_ptr<DeclarationNode> domainDecl,
           sm.smDecl = smDecl;
           sm.activeStateVarName =
               "__" + domainDecl->getName() + "_" + smName + "_active_state_id";
+          sm.transitionRequestVarName = "__" + domainDecl->getName() + "_" +
+                                        smName + "_transition_request_id";
 
           int idCounter = 1; // 0 usually means uninitialized or inactive
           flattenStateMachine(smDecl, idCounter, sm, scope, tree);
@@ -100,6 +102,16 @@ StateMachine::collectStateMachines(std::shared_ptr<DeclarationNode> domainDecl,
                       t.id = transitionIdCounter++;
                       t.transitionDecl = tDecl;
                       t.targetStateId = targetId;
+
+                      auto trigProp = tDecl->getPropertyValue("triggerOnGuard");
+                      if (trigProp && trigProp->getNodeType() == AST::Switch) {
+                        auto valNode =
+                            std::static_pointer_cast<ValueNode>(trigProp);
+                        if (valNode->getSwitchValue()) {
+                          t.triggerOnGuard = true;
+                        }
+                      }
+
                       fs.transitions.push_back(std::move(t));
                     }
                   }
@@ -155,8 +167,85 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
 
     state.Builder->SetInsertPoint(stateBB);
 
-    // Evaluate Transitions (Phase 4 Step 2)
-    // TODO: Transition logic goes here
+    // Evaluate Transitions (Phase 4 Step 3)
+    llvm::GlobalVariable *reqVarPtr =
+        state.TheModule->getNamedGlobal(smContext.transitionRequestVarName);
+    llvm::Value *reqVal = nullptr;
+    if (reqVarPtr) {
+      reqVal =
+          state.Builder->CreateLoad(state.Builder->getInt32Ty(), reqVarPtr);
+    }
+
+    llvm::BasicBlock *processBB = llvm::BasicBlock::Create(
+        *state.TheContext, "state_" + std::to_string(fs.id) + "_process", func,
+        endBB);
+
+    for (auto &t : fs.transitions) {
+      llvm::BasicBlock *transCondBB = llvm::BasicBlock::Create(
+          *state.TheContext, "trans_" + std::to_string(t.id) + "_cond", func,
+          processBB);
+      llvm::BasicBlock *transFireBB = llvm::BasicBlock::Create(
+          *state.TheContext, "trans_" + std::to_string(t.id) + "_fire", func,
+          processBB);
+
+      state.Builder->CreateBr(transCondBB);
+      state.Builder->SetInsertPoint(transCondBB);
+
+      llvm::Value *guardVal = state.Builder->getInt1(true);
+      if (reqVal && !t.triggerOnGuard) {
+        auto *idVal = state.Builder->getInt32(t.id);
+        guardVal = state.Builder->CreateICmpEQ(reqVal, idVal);
+      }
+
+      if (!t.guardCode.empty()) {
+        auto result = t.guardCode.back()->codegen(state);
+        llvm::Value *CondV = result.first;
+        if (CondV->getType()->isDoubleTy()) {
+          CondV = state.Builder->CreateFCmpONE(
+              CondV,
+              llvm::ConstantFP::get(*state.TheContext, llvm::APFloat(0.0)),
+              "ifcond");
+        } else if (CondV->getType()->isIntegerTy(32)) {
+          CondV = state.Builder->CreateICmpNE(CondV, state.Builder->getInt32(0),
+                                              "ifcond");
+        }
+        guardVal = state.Builder->CreateAnd(guardVal, CondV);
+      }
+
+      llvm::BasicBlock *nextBB = llvm::BasicBlock::Create(
+          *state.TheContext, "trans_" + std::to_string(t.id) + "_next", func,
+          processBB);
+      state.Builder->CreateCondBr(guardVal, transFireBB, nextBB);
+
+      state.Builder->SetInsertPoint(transFireBB);
+
+      for (auto &expr : fs.onExitCode) {
+        expr->codegen(state);
+      }
+      for (auto &expr : t.onTransitionCode) {
+        expr->codegen(state);
+      }
+      state.Builder->CreateStore(state.Builder->getInt32(t.targetStateId),
+                                 activeStatePtr);
+      if (reqVarPtr) {
+        state.Builder->CreateStore(state.Builder->getInt32(0), reqVarPtr);
+      }
+
+      for (auto &targetFs : smContext.flattenedStates) {
+        if (targetFs.id == t.targetStateId) {
+          for (auto &expr : targetFs.onEntryCode) {
+            expr->codegen(state);
+          }
+          break;
+        }
+      }
+
+      state.Builder->CreateBr(endBB);
+      state.Builder->SetInsertPoint(nextBB);
+    }
+
+    state.Builder->CreateBr(processBB);
+    state.Builder->SetInsertPoint(processBB);
 
     // Run onProcessCode
     for (auto &expr : fs.onProcessCode) {
