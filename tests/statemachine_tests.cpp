@@ -100,15 +100,20 @@ TEST(StateMachine, DomainInvokerGeneration) {
   success = strenv.compileInMemory();
   EXPECT_TRUE(success);
 
-  // The domain should have its _init and _process invokers compiled and exposed to the JIT.
-  // Before the fix, these functions were compiled to IR but never exposed with invokers.
+  // The domain should have its _init and _process invokers compiled and exposed
+  // to the JIT. Before the fix, these functions were compiled to IR but never
+  // exposed with invokers.
   auto initSym = strenv.getFunction("RootDomain_init_invoker");
-  EXPECT_TRUE(static_cast<bool>(initSym)) << "RootDomain_init_invoker not found in JIT";
-  if (!initSym) llvm::consumeError(initSym.takeError());
+  EXPECT_TRUE(static_cast<bool>(initSym))
+      << "RootDomain_init_invoker not found in JIT";
+  if (!initSym)
+    llvm::consumeError(initSym.takeError());
 
   auto processSym = strenv.getFunction("RootDomain_process_invoker");
-  EXPECT_TRUE(static_cast<bool>(processSym)) << "RootDomain_process_invoker not found in JIT";
-  if (!processSym) llvm::consumeError(processSym.takeError());
+  EXPECT_TRUE(static_cast<bool>(processSym))
+      << "RootDomain_process_invoker not found in JIT";
+  if (!processSym)
+    llvm::consumeError(processSym.takeError());
 }
 
 TEST(StateMachine, CodegenExecution) {
@@ -123,27 +128,73 @@ TEST(StateMachine, CodegenExecution) {
   EXPECT_TRUE(success);
   success = strenv.compileInMemory();
   EXPECT_TRUE(success);
-  
-  // We expect statemachines_streams.stride to have a counter that increments 
+
+  // We expect statemachines_streams.stride to have a counter that increments
   // on every tick in the active state's onProcess stream.
-  
-  // Initialize the domain (this should reset activeState to State1's ID which is 2)
+
+  // Initialize the domain (this should reset activeState to State1's ID which
+  // is 2)
   strenv.invoke("RootDomain_init", nullptr);
 
-  auto *activeState = strenv.getGlobal<int32_t>("__RootDomain_MyStateMachine_active_state_id");
+  auto *activeState =
+      strenv.getGlobal<int32_t>("__RootDomain_MyStateMachine_active_state_id");
   ASSERT_NE(activeState, nullptr);
   EXPECT_EQ(*activeState, 2);
-  
+
   // Counter should start at 0
   auto *counter = strenv.getGlobal<int32_t>("Counter");
   ASSERT_NE(counter, nullptr);
   EXPECT_EQ(*counter, 0);
 
-  // Tick the domain multiple times, since MyStateMachine is the active state 
-  // and has an onProcess block that does `Counter = Counter + 1`, it should tick.
+  // Tick the domain multiple times, since MyStateMachine is the active state
+  // and has an onProcess block that does `Counter = Counter + 1`, it should
+  // tick.
   strenv.invoke("RootDomain_process", nullptr);
   EXPECT_EQ(*counter, 1);
-  
+
   strenv.invoke("RootDomain_process", nullptr);
   EXPECT_EQ(*counter, 2);
+}
+
+TEST(StateMachine, TransitionLoading) {
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                              "statemachines_transitions.stride");
+  EXPECT_NE(tree, nullptr);
+
+  strd::ScopeStack scope;
+  auto domainDecl =
+      strd::ASTQuery::findDeclarationByName("RootDomain", scope, tree);
+  EXPECT_NE(domainDecl, nullptr);
+
+  auto smContexts =
+      strd::StateMachine::collectStateMachines(domainDecl, scope, tree);
+  EXPECT_EQ(smContexts.size(), 1);
+  auto &sm = smContexts[0];
+  EXPECT_EQ(sm.name, "MyStateMachine");
+
+  // State1 should have 1 transition
+  auto &state1 = sm.flattenedStates[1]; // MyStateMachine is 0, State1 is 1
+  EXPECT_EQ(state1.stateDecl->getName(), "State1");
+  EXPECT_EQ(state1.transitions.size(), 1);
+
+  auto &t1 = state1.transitions[0];
+  EXPECT_EQ(t1.transitionDecl->getName(), "ToState2");
+  EXPECT_EQ(t1.targetStateId,
+            sm.flattenedStates[2].id); // State2 is ID 3, index 2
+
+  // State2 should have 1 transition
+  auto &state2 = sm.flattenedStates[2];
+  EXPECT_EQ(state2.stateDecl->getName(), "State2");
+  EXPECT_EQ(state2.transitions.size(), 1);
+
+  auto &t2 = state2.transitions[0];
+  EXPECT_EQ(t2.transitionDecl->getName(), "ToState3");
+  EXPECT_EQ(t2.targetStateId,
+            sm.flattenedStates[3].id); // State3 is ID 4, index 3
+
+  // State3 should have 0 transitions
+  auto &state3 = sm.flattenedStates[3];
+  EXPECT_EQ(state3.stateDecl->getName(), "State3");
+  EXPECT_EQ(state3.transitions.size(), 0);
 }

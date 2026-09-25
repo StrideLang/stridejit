@@ -1,0 +1,43 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    stateMachines: [MyStateMachine]
+    inputs: []
+    outputs: []
+	domainFunctionCode: ''
+}
+
+signal Counter { domain: RootDomain type: _IntType default: 0 }
+
+state State1 {
+    transitions: [
+        transition ToState2 {
+            targetState: State2
+            guard: [ 1 ]
+            onTransition: [
+                1 >> Counter;
+            ]
+        }
+    ]
+}
+
+state State2 {
+    transitions: [
+        transition ToState3 {
+            targetState: State3
+            guard: [ 1 ]
+            onTransition: [
+                2 >> Counter;
+            ]
+        }
+    ]
+}
+
+state State3 {}
+
+state MyStateMachine {
+    initialState: State1
+    states: [State1, State2, State3]
+}

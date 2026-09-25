@@ -14,12 +14,27 @@ class AST;
 using ASTNode = std::shared_ptr<AST>;
 using ScopeStack = std::vector<std::pair<ASTNode, std::vector<ASTNode>>>;
 
+struct Transition {
+  Transition() = default;
+  Transition(const Transition &) = delete;
+  Transition &operator=(const Transition &) = delete;
+  Transition(Transition &&) noexcept = default;
+  Transition &operator=(Transition &&) noexcept = default;
+
+  int id;
+  std::shared_ptr<DeclarationNode> transitionDecl;
+  int targetStateId;
+
+  std::vector<std::unique_ptr<ExprAST>> guardCode;
+  std::vector<std::unique_ptr<ExprAST>> onTransitionCode;
+};
+
 struct FlattenedState {
   FlattenedState() = default;
-  FlattenedState(const FlattenedState&) = delete;
-  FlattenedState& operator=(const FlattenedState&) = delete;
-  FlattenedState(FlattenedState&&) noexcept = default;
-  FlattenedState& operator=(FlattenedState&&) noexcept = default;
+  FlattenedState(const FlattenedState &) = delete;
+  FlattenedState &operator=(const FlattenedState &) = delete;
+  FlattenedState(FlattenedState &&) noexcept = default;
+  FlattenedState &operator=(FlattenedState &&) noexcept = default;
 
   int id;
   std::shared_ptr<DeclarationNode> stateDecl;
@@ -27,15 +42,16 @@ struct FlattenedState {
   std::vector<std::unique_ptr<ExprAST>> onEntryCode;
   std::vector<std::unique_ptr<ExprAST>> onProcessCode;
   std::vector<std::unique_ptr<ExprAST>> onExitCode;
+  std::vector<Transition> transitions;
 };
 
 class StateMachine {
 public:
   StateMachine() = default;
-  StateMachine(const StateMachine&) = delete;
-  StateMachine& operator=(const StateMachine&) = delete;
-  StateMachine(StateMachine&&) noexcept = default;
-  StateMachine& operator=(StateMachine&&) noexcept = default;
+  StateMachine(const StateMachine &) = delete;
+  StateMachine &operator=(const StateMachine &) = delete;
+  StateMachine(StateMachine &&) noexcept = default;
+  StateMachine &operator=(StateMachine &&) noexcept = default;
 
   std::string name;
   std::shared_ptr<DeclarationNode> smDecl;
@@ -55,7 +71,8 @@ public:
 class StateMachineExprAST : public ExprAST {
 public:
   StateMachineExprAST(StateMachine sm) : smContext(std::move(sm)) {}
-  std::pair<llvm::Value *, std::optional<llvm::Type *>> codegen(StrideCompiler &state) override;
+  std::pair<llvm::Value *, std::optional<llvm::Type *>>
+  codegen(StrideCompiler &state) override;
 
 private:
   StateMachine smContext;
