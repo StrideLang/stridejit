@@ -1,0 +1,36 @@
+# type _StateType {
+#     typeName: "state"
+# }
+
+# type _DomainDefinition {
+#     typeName: "domain"
+#     properties: [
+#         typeProperty StateMachines { name: "stateMachines" types: [""] }
+#     ]
+# }
+
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    stateMachines: [MyStateMachine]
+    inputs: [
+    ]
+    outputs: [
+        switch Out { domain: RootDomain default: off }
+    ]
+	domainFunctionCode: ''
+}
+
+
+state State1 {}
+state State2 {}
+state State3 {}
+
+state MyStateMachine {
+    states: [State1, State2, State3]
+}
+

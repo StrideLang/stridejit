@@ -102,6 +102,7 @@ set(STRIDEJIT_SRC
   src/numberexprast.cpp
   src/functionast.cpp
 
+  src/statemachine.cpp
   src/strideenvironment.cpp
   src/stridecompiler.cpp
   src/stridegenerator.cpp
@@ -114,6 +115,7 @@ set(STRIDEJIT_HEADERS
   include/stride/stridejit/numberexprast.hpp
   include/stride/stridejit/functionast.hpp
 
+  include/stride/stridejit/statemachine.hpp
   include/stride/stridejit/strideenvironment.hpp
   include/stride/stridejit/stridecompiler.hpp
   include/stride/stridejit/stridegenerator.hpp

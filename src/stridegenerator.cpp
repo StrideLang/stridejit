@@ -41,6 +41,17 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
     auto domainDecl = ASTQuery::findDeclarationByName(domainName, scope, tree);
     if (domainDecl) {
       LOG_INFO() << " Found domain declaration for " << domainName << std::endl;
+      auto smContexts = StateMachine::collectStateMachines(domainDecl, scope, tree);
+      generatedIRCode.stateMachinesByDomain[domainName] = smContexts;
+
+      for (const auto &smCtx : smContexts) {
+        auto stateVarDecl = std::make_shared<DeclarationNode>(
+            smCtx.activeStateVarName, "signal", nullptr, "", 0);
+        auto typeProp = std::make_shared<PropertyNode>(
+            "type", std::make_shared<BlockNode>("_IntType", "", 0), "", 0);
+        stateVarDecl->addProperty(typeProp);
+        generatedIRCode.GlobalSignals.push_back(stateVarDecl);
+      }
       auto domainExternalInputNode = domainDecl->getPropertyValue("inputs");
       if (domainExternalInputNode) {
         for (const auto &externalInput :
@@ -1493,22 +1504,20 @@ void StrideGenerator::generatePlatformFunctionSignature(
     } else {
       retType = state.typesMap[""];
     }
-    if (state.functionMap.find(decl->getName()) == state.functionMap.end()) {
-      // TODO ensure existing function matches incoming.
-      auto name = std::static_pointer_cast<ValueNode>(functionNameNode)
-                      ->getStringValue();
-      llvm::FunctionType *FT =
-          llvm::FunctionType::get(retType, parameters, false);
-      state.functionMap[decl->getName()].push_back(ExternalFunction{name, FT});
-      std::string atName;
-      auto atNode = decl->getCompilerProperty("_at");
-      if (atNode && atNode->getNodeType() == AST::String) {
-        atName =
-            "@" + std::static_pointer_cast<ValueNode>(atNode)->getStringValue();
-      }
-      LOG_INFO() << "Loaded platform module: " << decl->getName() << atName
-                 << std::endl;
+    // Always store the function signature, as there may be multiple overloads (e.g. Greater@Int_Bool, Greater@Double_Bool)
+    auto name = std::static_pointer_cast<ValueNode>(functionNameNode)
+                    ->getStringValue();
+    llvm::FunctionType *FT =
+        llvm::FunctionType::get(retType, parameters, false);
+    state.functionMap[decl->getName()].push_back(ExternalFunction{name, FT});
+    std::string atName;
+    auto atNode = decl->getCompilerProperty("_at");
+    if (atNode && atNode->getNodeType() == AST::String) {
+      atName =
+          "@" + std::static_pointer_cast<ValueNode>(atNode)->getStringValue();
     }
+    LOG_INFO() << "Loaded platform module: " << decl->getName() << atName
+               << std::endl;
   }
 }
 

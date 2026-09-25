@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "stride/stridejit/exprast.hpp"
-
+#include "stride/stridejit/statemachine.hpp"
 #include "stride/stridejit/stridecompiler.hpp"
 
 // llvm
@@ -44,6 +44,8 @@ public:
         domainGeneratedCode;
     std::vector<DomainArg> domainArgs;
     std::vector<std::shared_ptr<DeclarationNode>> GlobalSignals;
+    std::map<std::string, std::vector<StateMachine>>
+        stateMachinesByDomain;
   };
 
   struct ArgGroup {
