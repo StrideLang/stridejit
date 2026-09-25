@@ -600,9 +600,9 @@ StrideEnvironment::createInvokerParamList(const std::string &funcName) const {
 int32_t StrideEnvironment::invoke(const std::string &funcName, void **args) {
   auto sym = getFunction(funcName + "_invoker");
   if (!sym) {
-    llvm::consumeError(sym.takeError());
+    auto err = sym.takeError();
     LOG_ERROR() << "Invoker for function not found: " << funcName + "_invoker"
-                << std::endl;
+                << ". Error: " << llvm::toString(std::move(err)) << std::endl;
     return -1;
   }
   auto *invoker = sym->toPtr<int32_t (*)(void **)>();

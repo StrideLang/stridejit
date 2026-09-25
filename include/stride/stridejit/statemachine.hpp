@@ -52,6 +52,15 @@ public:
                        ScopeStack &scope, ASTNode tree);
 };
 
+class StateMachineExprAST : public ExprAST {
+public:
+  StateMachineExprAST(StateMachine sm) : smContext(std::move(sm)) {}
+  std::pair<llvm::Value *, std::optional<llvm::Type *>> codegen(StrideCompiler &state) override;
+
+private:
+  StateMachine smContext;
+};
+
 } // namespace strd
 
 #endif // STRIDE_STATEMACHINE_HPP

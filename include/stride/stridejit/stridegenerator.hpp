@@ -44,7 +44,11 @@ public:
         domainGeneratedCode;
     std::vector<DomainArg> domainArgs;
     std::vector<std::shared_ptr<DeclarationNode>> GlobalSignals;
-    std::map<std::string, std::vector<StateMachine>>
+    struct StateMachineInitInfo {
+      std::string activeStateVarName;
+      int initialStateId;
+    };
+    std::map<std::string, std::vector<StateMachineInitInfo>>
         stateMachinesByDomain;
   };
 

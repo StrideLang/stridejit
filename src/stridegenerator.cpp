@@ -58,10 +58,18 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
         auto typeProp = std::make_shared<PropertyNode>(
             "type", std::make_shared<BlockNode>("_IntType", "", 0), "", 0);
         stateVarDecl->addProperty(typeProp);
-        generatedIRCode.GlobalSignals.push_back(stateVarDecl);
+        
+        // Track the active state variable internally without exposing it as a user-level global
         state.createGlobal(stateVarDecl);
+
+        // Save init info before moving smCtx
+        generatedIRCode.stateMachinesByDomain[domainName].push_back(
+            {smCtx.activeStateVarName, smCtx.initialStateId});
+
+        // Inject the master switch block into the domain's process execution stream
+        auto smExpr = std::make_unique<StateMachineExprAST>(std::move(smCtx));
+        generatedIRCode.domainGeneratedCode[domainName].push_back(std::move(smExpr));
       }
-      generatedIRCode.stateMachinesByDomain[domainName] = std::move(smContexts);
       auto domainExternalInputNode = domainDecl->getPropertyValue("inputs");
       if (domainExternalInputNode) {
         for (const auto &externalInput :
@@ -119,7 +127,9 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
                                                      std::move(it->second));
     processFunc->callType = CallableType::DomainFunction;
 
-    processFunc->codegen(state);
+    if (auto *processLlvm = processFunc->codegen(state)) {
+      generateInvoker(processLlvm, state);
+    }
 
     auto initProto = std::make_unique<PrototypeAST>(
         std::string(domainName + "_init"),
@@ -311,7 +321,9 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
     // for (const auto &global : generatedIRCode.GlobalSignals) {
     //   initFunc->internalVariables.push_back(global);
     // }
-    initFunc->codegen(state);
+    if (auto *initLlvm = initFunc->codegen(state)) {
+      generateInvoker(initLlvm, state);
+    }
 
     state.domainArgs[domainName] = generatedIRCode.domainArgs;
   }

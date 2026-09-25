@@ -8,6 +8,7 @@
 
 #include "stride/parser/ast.h"
 #include "stride/stridejit/stridecompiler.hpp"
+#include "stride/utils/logger.h"
 
 // llvm forward declarations
 namespace llvm {
@@ -149,6 +150,10 @@ template <typename T> T *StrideEnvironment::getGlobal(std::string varName) {
       // std::cerr << "Can't cast variable to type" << std::endl;
     }
     return host_ptr;
+  } else {
+    auto err = Symbol.takeError();
+    LOG_ERROR() << "Global variable not found: " << varName
+                << ". Error: " << llvm::toString(std::move(err)) << std::endl;
   }
   return nullptr;
 }

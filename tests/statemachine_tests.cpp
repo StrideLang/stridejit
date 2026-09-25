@@ -86,3 +86,64 @@ TEST(StateMachine, StreamScoping) {
   // or `LocalSig` inside the streams.
   EXPECT_TRUE(success);
 }
+
+TEST(StateMachine, DomainInvokerGeneration) {
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                              "statemachines_streams.stride");
+  EXPECT_NE(tree, nullptr);
+
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+  bool success = strenv.generateIr(tree);
+  EXPECT_TRUE(success);
+  success = strenv.compileInMemory();
+  EXPECT_TRUE(success);
+
+  // The domain should have its _init and _process invokers compiled and exposed to the JIT.
+  // Before the fix, these functions were compiled to IR but never exposed with invokers.
+  auto initSym = strenv.getFunction("RootDomain_init_invoker");
+  EXPECT_TRUE(static_cast<bool>(initSym)) << "RootDomain_init_invoker not found in JIT";
+  if (!initSym) llvm::consumeError(initSym.takeError());
+
+  auto processSym = strenv.getFunction("RootDomain_process_invoker");
+  EXPECT_TRUE(static_cast<bool>(processSym)) << "RootDomain_process_invoker not found in JIT";
+  if (!processSym) llvm::consumeError(processSym.takeError());
+}
+
+TEST(StateMachine, CodegenExecution) {
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                              "statemachines_streams.stride");
+  EXPECT_NE(tree, nullptr);
+
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+  bool success = strenv.generateIr(tree);
+  EXPECT_TRUE(success);
+  success = strenv.compileInMemory();
+  EXPECT_TRUE(success);
+  
+  // We expect statemachines_streams.stride to have a counter that increments 
+  // on every tick in the active state's onProcess stream.
+  
+  // Initialize the domain (this should reset activeState to State1's ID which is 2)
+  strenv.invoke("RootDomain_init", nullptr);
+
+  auto *activeState = strenv.getGlobal<int32_t>("__RootDomain_MyStateMachine_active_state_id");
+  ASSERT_NE(activeState, nullptr);
+  EXPECT_EQ(*activeState, 2);
+  
+  // Counter should start at 0
+  auto *counter = strenv.getGlobal<int32_t>("Counter");
+  ASSERT_NE(counter, nullptr);
+  EXPECT_EQ(*counter, 0);
+
+  // Tick the domain multiple times, since MyStateMachine is the active state 
+  // and has an onProcess block that does `Counter = Counter + 1`, it should tick.
+  strenv.invoke("RootDomain_process", nullptr);
+  EXPECT_EQ(*counter, 1);
+  
+  strenv.invoke("RootDomain_process", nullptr);
+  EXPECT_EQ(*counter, 2);
+}
