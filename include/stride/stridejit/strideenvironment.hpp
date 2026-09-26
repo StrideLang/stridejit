@@ -92,6 +92,7 @@ public:
 
   // State struct management
   void *allocateState(const std::string &funcName);
+  std::shared_ptr<void> allocateSharedState(const std::string &funcName);
   void deallocateState(void *statePtr);
   bool hasState(const std::string &funcName) const;
   size_t getStateSize(const std::string &funcName) const;

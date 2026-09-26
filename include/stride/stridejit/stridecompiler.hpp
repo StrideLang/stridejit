@@ -147,6 +147,14 @@ public:
     llvm::Constant *getChildDefaultConstant(ASTNode childInstance) const;
   };
 
+  struct DynamicDomainField {
+    std::string name;
+    llvm::Type *type;
+    llvm::Constant *defaultVal;
+  };
+  std::map<ASTNode, std::vector<DynamicDomainField>> dynamicDomainFields;
+  void addDynamicDomainField(ASTNode domainNode, const std::string &name, llvm::Type *type, llvm::Constant *defaultVal);
+
   std::map<ASTNode, StateStructInfo> stateStructMap;
   llvm::Value *currentFunctionStatePtr{nullptr};
   const StateStructInfo *currentFunctionStateInfo{nullptr};

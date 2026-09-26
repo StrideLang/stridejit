@@ -28,10 +28,13 @@ TEST(StateMachine, DomainInitialization) {
 
   strenv.generateIr(tree);
 
-  // We should verify that `__MyDomain_MyStateMachine_active_state_id` global
-  // exists and is initialized correctly.
-  bool foundVar =
-      strenv.state.globalExists("__RootDomain_MyStateMachine_active_state_id");
+  bool foundVar = false;
+  auto domainDecl = strd::ASTQuery::findDeclarationByName("RootDomain", scope, tree);
+  if (domainDecl && strenv.state.dynamicDomainFields.find(domainDecl) != strenv.state.dynamicDomainFields.end()) {
+      for (auto& f : strenv.state.dynamicDomainFields[domainDecl]) {
+          if (f.name == "__RootDomain_MyStateMachine_active_state_id") foundVar = true;
+      }
+  }
   EXPECT_TRUE(foundVar);
 }
 
@@ -129,30 +132,26 @@ TEST(StateMachine, CodegenExecution) {
   success = strenv.compileInMemory();
   EXPECT_TRUE(success);
 
-  // We expect statemachines_streams.stride to have a counter that increments
-  // on every tick in the active state's onProcess stream.
+  struct RootDomainState {
+      int32_t active_state_id;
+      int32_t transition_request_id;
+  };
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr, nullptr);
+  RootDomainState* ds = reinterpret_cast<RootDomainState*>(statePtr.get());
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_init", args);
 
-  // Initialize the domain (this should reset activeState to State1's ID which
-  // is 2)
-  strenv.invoke("RootDomain_init", nullptr);
+  EXPECT_EQ(ds->active_state_id, 2);
 
-  auto *activeState =
-      strenv.getGlobal<int32_t>("__RootDomain_MyStateMachine_active_state_id");
-  ASSERT_NE(activeState, nullptr);
-  EXPECT_EQ(*activeState, 2);
-
-  // Counter should start at 0
   auto *counter = strenv.getGlobal<int32_t>("Counter");
   ASSERT_NE(counter, nullptr);
   EXPECT_EQ(*counter, 0);
 
-  // Tick the domain multiple times, since MyStateMachine is the active state
-  // and has an onProcess block that does `Counter = Counter + 1`, it should
-  // tick.
-  strenv.invoke("RootDomain_process", nullptr);
+  strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(*counter, 1);
 
-  strenv.invoke("RootDomain_process", nullptr);
+  strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(*counter, 2);
 }
 
@@ -212,37 +211,41 @@ TEST(StateMachine, TransitionExecution) {
   success = strenv.compileInMemory();
   EXPECT_TRUE(success);
 
-  strenv.invoke("RootDomain_init", nullptr);
-
-  auto *activeState =
-      strenv.getGlobal<int32_t>("__RootDomain_MyStateMachine_active_state_id");
-  auto *reqState = strenv.getGlobal<int32_t>(
-      "__RootDomain_MyStateMachine_transition_request_id");
+  struct RootDomainState {
+      int32_t active_state_id;
+      int32_t transition_request_id;
+  };
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr, nullptr);
+  RootDomainState* ds = reinterpret_cast<RootDomainState*>(statePtr.get());
+  void *args[] = {statePtr.get()};
+  
   auto *counter = strenv.getGlobal<int32_t>("Counter");
+  ASSERT_NE(counter, nullptr);
 
-  EXPECT_EQ(*activeState, 2); // State1 is 2
+  strenv.invoke("RootDomain_init", args);
+
+  EXPECT_EQ(ds->active_state_id, 2); // State1 is 2
   EXPECT_EQ(*counter, 0);
 
   // Tick the domain without a request, nothing should happen
-  strenv.invoke("RootDomain_process", nullptr);
-  EXPECT_EQ(*activeState, 2);
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(ds->active_state_id, 2);
   EXPECT_EQ(*counter, 0);
 
   // Request transition 1 (ToState2)
-  *reqState = 1;
-  strenv.invoke("RootDomain_process", nullptr);
+  ds->transition_request_id = 1;
+  strenv.invoke("RootDomain_process", args);
 
   // activeState should be 3 (State2)
-  EXPECT_EQ(*activeState, 3);
-  // Counter should be 1
+  EXPECT_EQ(ds->active_state_id, 3);
   EXPECT_EQ(*counter, 1);
-  // reqState should be reset
-  EXPECT_EQ(*reqState, 0);
+  EXPECT_EQ(ds->transition_request_id, 0);
 
   // Request transition 2 (ToState3)
-  *reqState = 2;
-  strenv.invoke("RootDomain_process", nullptr);
+  ds->transition_request_id = 2;
+  strenv.invoke("RootDomain_process", args);
 
-  EXPECT_EQ(*activeState, 4); // State3
+  EXPECT_EQ(ds->active_state_id, 4); // State3
   EXPECT_EQ(*counter, 2);
 }

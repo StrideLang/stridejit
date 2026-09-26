@@ -287,16 +287,45 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   const StrideCompiler::StateStructInfo *prevFunctionStateInfo =
       state.currentFunctionStateInfo;
 
+
+
   if (hasState) {
     auto stateArgIt = state.NamedValues.find("__state");
     if (stateArgIt != state.NamedValues.end()) {
       state.currentFunctionStatePtr = stateArgIt->second.first;
+
       state.currentFunctionStateInfo = state.getStateStructInfo(funcInstance);
-      if (!state.currentFunctionStateInfo && state.m_tree) {
-        state.currentFunctionStateInfo =
-            state.getStateStructInfo(ASTQuery::findDeclarationByName(
-                Proto->getName(), {}, state.m_tree));
+      if (state.currentFunctionStateInfo) {
+         std::cout << "DEBUG: currentFunctionStateInfo is valid!\n";
+      } else {
+         std::cout << "DEBUG: currentFunctionStateInfo is NULL!\n";
       }
+
+
+
+      if (!state.currentFunctionStateInfo && state.m_tree) {
+        std::string searchName = P.getName();
+        size_t pos = searchName.find("_process");
+        if (pos != std::string::npos) {
+          searchName = searchName.substr(0, pos);
+        } else {
+          pos = searchName.find("_init");
+          if (pos != std::string::npos) {
+            searchName = searchName.substr(0, pos);
+          }
+        }
+        
+        state.currentFunctionStateInfo = state.getStateStructInfo(searchName);
+        
+        if (!state.currentFunctionStateInfo) {
+          state.currentFunctionStateInfo =
+              state.getStateStructInfo(ASTQuery::findDeclarationByName(
+                  searchName, {}, state.m_tree));
+        }
+      }
+
+
+
       if (state.currentFunctionStateInfo &&
           state.currentFunctionStateInfo->structType) {
         for (const auto &[varName, idx] :
@@ -307,8 +336,12 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
               state.currentFunctionStateInfo->structType,
               state.currentFunctionStatePtr, idx, varName + "_ptr");
           state.NamedValues[varName] = {fieldPtr, elemTy};
+          std::cout << "DEBUG: Added " << varName << " to NamedValues!\n";
         }
       }
+
+
+
     }
   } else {
     state.currentFunctionStatePtr = nullptr;

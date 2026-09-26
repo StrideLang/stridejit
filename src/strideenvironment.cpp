@@ -295,6 +295,14 @@ void *StrideEnvironment::allocateState(const std::string &funcName) {
   return mem;
 }
 
+std::shared_ptr<void> StrideEnvironment::allocateSharedState(const std::string &funcName) {
+  void *ptr = allocateState(funcName);
+  if (!ptr) {
+    return nullptr;
+  }
+  return std::shared_ptr<void>(ptr, [this](void *p) { deallocateState(p); });
+}
+
 void StrideEnvironment::deallocateState(void *statePtr) {
   if (statePtr) {
     free(statePtr);

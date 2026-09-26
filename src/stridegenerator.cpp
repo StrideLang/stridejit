@@ -53,20 +53,6 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
       for (auto &smCtx : smContexts) {
         processStateStreams(smCtx, smCtx.smDecl, scope, tree, state,
                             domainName);
-        auto stateVarDecl = std::make_shared<DeclarationNode>(
-            smCtx.activeStateVarName, "signal", nullptr, "", 0);
-        auto typeProp = std::make_shared<PropertyNode>(
-            "type", std::make_shared<BlockNode>("_IntType", "", 0), "", 0);
-        stateVarDecl->addProperty(typeProp);
-
-        // Track the active state variable internally without exposing it as a
-        // user-level global
-        state.createGlobal(stateVarDecl);
-
-        auto reqVarDecl = std::make_shared<DeclarationNode>(
-            smCtx.transitionRequestVarName, "signal", nullptr, "", 0);
-        reqVarDecl->addProperty(typeProp);
-        state.createGlobal(reqVarDecl);
 
         // Save init info before moving smCtx
         generatedIRCode.stateMachinesByDomain[domainName].push_back(
@@ -124,16 +110,26 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
       }
     }
 
+    auto domainTypeNode = state.findTypeTreeNode(domainDecl);
+    bool domainNeedsState = (state.dynamicDomainFields.find(domainDecl) != state.dynamicDomainFields.end());
+
+    std::vector<PrototypeArg> internalArgs;
+    if (domainNeedsState) {
+        internalArgs.push_back(PrototypeArg{"__state", llvm::PointerType::get(*state.TheContext, 0)});
+    }
+
     auto processProto = std::make_unique<PrototypeAST>(
         std::string(domainName + "_process"),
         /* InArgs */ std::vector<PrototypeArg>{},
         /* OutArgs */ std::vector<PrototypeArg>{},
-        /* InternalPersistentArgs */ std::vector<PrototypeArg>{},
+        /* InternalPersistentArgs */ internalArgs,
         /* PropertyArgs */ std::vector<PrototypeArg>{}, ExternalArgs,
         std::vector<PrototypeArg>{});
     auto processFunc = std::make_unique<FunctionAST>(std::move(processProto),
                                                      std::move(it->second));
     processFunc->callType = CallableType::DomainFunction;
+    processFunc->hasState = domainNeedsState;
+    processFunc->funcInstance = domainDecl;
 
     if (auto *processLlvm = processFunc->codegen(state)) {
       generateInvoker(processLlvm, state);
@@ -143,7 +139,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
         std::string(domainName + "_init"),
         /* InArgs */ std::vector<PrototypeArg>{},
         /* OutArgs */ std::vector<PrototypeArg>{},
-        /* InternalPersistentArgs */ std::vector<PrototypeArg>{},
+        /* InternalPersistentArgs */ internalArgs,
         /* PropertyArgs */ std::vector<PrototypeArg>{}, ExternalArgs,
         std::vector<PrototypeArg>{});
     std::vector<std::unique_ptr<ExprAST>> resetBody;
@@ -325,6 +321,8 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
     auto initFunc = std::make_unique<FunctionAST>(std::move(initProto),
                                                   std::move(resetBody));
     initFunc->callType = CallableType::DomainFunction;
+    initFunc->hasState = domainNeedsState;
+    initFunc->funcInstance = domainDecl;
     // Add domain member variables (globals)
     // for (const auto &global : generatedIRCode.GlobalSignals) {
     //   initFunc->internalVariables.push_back(global);
@@ -520,6 +518,33 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
 
   state.m_tree = tree;
   state.m_intanceTree = CodeAnalysis::getStateStructInformation({}, tree);
+
+  // PRE-PASS: Find all globals and state machine variables, and inject them
+  // into dynamic fields
+  for (const auto &node : tree->getChildren()) {
+    if (node->getNodeType() == AST::Declaration) {
+      auto decl = std::static_pointer_cast<DeclarationNode>(node);
+      if (decl->getObjectType() == "_domainDefinition") {
+
+        auto smContexts = StateMachine::collectStateMachines(decl, scope, tree);
+        for (const auto &smCtx : smContexts) {
+          std::cout << "DEBUG: PRE-PASS adding dynamicDomainField to node: " << node.get() << " decl: " << decl.get() << "\n";
+          state.addDynamicDomainField(
+
+              node, smCtx.activeStateVarName,
+              llvm::Type::getInt32Ty(*state.TheContext),
+              llvm::ConstantInt::get(llvm::Type::getInt32Ty(*state.TheContext),
+                                     smCtx.initialStateId));
+          state.addDynamicDomainField(
+              node, smCtx.transitionRequestVarName,
+              llvm::Type::getInt32Ty(*state.TheContext),
+              llvm::ConstantInt::get(llvm::Type::getInt32Ty(*state.TheContext),
+                                     0));
+        }
+      }
+    }
+  }
+
   state.buildStateStructTypes(state.m_intanceTree);
   StrideGenerator::GeneratedIRCode generatedIRCode;
   for (const auto &node : tree->getChildren()) {

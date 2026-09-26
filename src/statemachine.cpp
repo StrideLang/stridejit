@@ -148,8 +148,16 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
   auto *func = state.Builder->GetInsertBlock()->getParent();
 
   // 1. Load activeStateVar
-  llvm::GlobalVariable *activeStatePtr =
-      state.TheModule->getNamedGlobal(smContext.activeStateVarName);
+
+  llvm::Value *activeStatePtr = nullptr;
+  std::cout << "DEBUG: Looking for " << smContext.activeStateVarName << " in NamedValues...\n";
+  auto activeStateIt = state.NamedValues.find(smContext.activeStateVarName);
+
+  if (activeStateIt != state.NamedValues.end()) {
+    activeStatePtr = activeStateIt->second.first;
+  } else {
+    activeStatePtr = state.TheModule->getNamedGlobal(smContext.activeStateVarName);
+  }
   assert(activeStatePtr && "Active state variable global not found!");
   auto *activeStateVal =
       state.Builder->CreateLoad(state.Builder->getInt32Ty(), activeStatePtr);
@@ -168,8 +176,14 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
     state.Builder->SetInsertPoint(stateBB);
 
     // Evaluate Transitions (Phase 4 Step 3)
-    llvm::GlobalVariable *reqVarPtr =
-        state.TheModule->getNamedGlobal(smContext.transitionRequestVarName);
+    llvm::Value *reqVarPtr = nullptr;
+    auto reqVarIt = state.NamedValues.find(smContext.transitionRequestVarName);
+    if (reqVarIt != state.NamedValues.end()) {
+      reqVarPtr = reqVarIt->second.first;
+    } else {
+      reqVarPtr = state.TheModule->getNamedGlobal(smContext.transitionRequestVarName);
+    }
+    
     llvm::Value *reqVal = nullptr;
     if (reqVarPtr) {
       reqVal =
