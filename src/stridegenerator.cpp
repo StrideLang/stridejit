@@ -540,6 +540,15 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
               llvm::Type::getInt32Ty(*state.TheContext),
               llvm::ConstantInt::get(llvm::Type::getInt32Ty(*state.TheContext),
                                      0));
+          for (const auto &fs : smCtx.flattenedStates) {
+            if (fs.resumeLastState && !fs.historyStateVarName.empty()) {
+              state.addDynamicDomainField(
+                  node, fs.historyStateVarName,
+                  llvm::Type::getInt32Ty(*state.TheContext),
+                  llvm::ConstantInt::get(llvm::Type::getInt32Ty(*state.TheContext),
+                                         0));
+            }
+          }
         }
       }
     }

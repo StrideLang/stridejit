@@ -18,13 +18,35 @@ namespace strd {
 
 void StateMachine::flattenStateMachine(
     std::shared_ptr<DeclarationNode> stateNode, int &idCounter,
-    StateMachine &sm, ScopeStack &scope, ASTNode tree) {
+    StateMachine &sm, ScopeStack &scope, ASTNode tree, int parentId) {
   if (!stateNode)
     return;
 
   FlattenedState fs;
   fs.id = idCounter++;
+  fs.parentId = parentId;
   fs.stateDecl = stateNode;
+
+  auto isParProp = stateNode->getPropertyValue("isParallel");
+  if (isParProp && isParProp->getNodeType() == AST::Switch) {
+    fs.isParallel = std::static_pointer_cast<ValueNode>(isParProp)->getSwitchValue();
+  }
+
+  auto resProp = stateNode->getPropertyValue("resumeLastState");
+  if (resProp && resProp->getNodeType() == AST::Switch) {
+    fs.resumeLastState = std::static_pointer_cast<ValueNode>(resProp)->getSwitchValue();
+  }
+
+  auto isFinProp = stateNode->getPropertyValue("isFinal");
+  if (isFinProp && isFinProp->getNodeType() == AST::Switch) {
+    fs.isFinal = std::static_pointer_cast<ValueNode>(isFinProp)->getSwitchValue();
+  }
+
+  if (fs.resumeLastState) {
+    fs.historyStateVarName = "__" + sm.name + "_" + stateNode->getName() + "_history_state_id";
+  }
+
+  int currentId = fs.id;
   sm.flattenedStates.push_back(std::move(fs));
 
   auto statesProp = stateNode->getPropertyValue("states");
@@ -35,7 +57,7 @@ void StateMachine::flattenStateMachine(
         auto childDecl =
             ASTQuery::findDeclarationByName(childName, scope, tree);
         if (childDecl) {
-          flattenStateMachine(childDecl, idCounter, sm, scope, tree);
+          flattenStateMachine(childDecl, idCounter, sm, scope, tree, currentId);
         }
       }
     }
@@ -236,17 +258,44 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
       for (auto &expr : fs.onExitCode) {
         expr->codegen(state);
       }
+
+      // Update parent history state if parent state has resumeLastState
+      if (fs.parentId != -1) {
+        for (auto &pFs : smContext.flattenedStates) {
+          if (pFs.id == fs.parentId && pFs.resumeLastState && !pFs.historyStateVarName.empty()) {
+            auto histIt = state.NamedValues.find(pFs.historyStateVarName);
+            if (histIt != state.NamedValues.end()) {
+              state.Builder->CreateStore(state.Builder->getInt32(fs.id), histIt->second.first);
+            }
+          }
+        }
+      }
+
       for (auto &expr : t.onTransitionCode) {
         expr->codegen(state);
       }
-      state.Builder->CreateStore(state.Builder->getInt32(t.targetStateId),
-                                 activeStatePtr);
-      if (reqVarPtr) {
-        state.Builder->CreateStore(state.Builder->getInt32(0), reqVarPtr);
-      }
 
+      // Handle transition to target state (checking resumeLastState history)
       for (auto &targetFs : smContext.flattenedStates) {
         if (targetFs.id == t.targetStateId) {
+          if (targetFs.resumeLastState && !targetFs.historyStateVarName.empty()) {
+            auto histIt = state.NamedValues.find(targetFs.historyStateVarName);
+            if (histIt != state.NamedValues.end()) {
+              auto *histVal = state.Builder->CreateLoad(state.Builder->getInt32Ty(), histIt->second.first);
+              auto *hasHist = state.Builder->CreateICmpNE(histVal, state.Builder->getInt32(0));
+              auto *chosenId = state.Builder->CreateSelect(hasHist, histVal, state.Builder->getInt32(t.targetStateId));
+              state.Builder->CreateStore(chosenId, activeStatePtr);
+            } else {
+              state.Builder->CreateStore(state.Builder->getInt32(t.targetStateId), activeStatePtr);
+            }
+          } else {
+            state.Builder->CreateStore(state.Builder->getInt32(t.targetStateId), activeStatePtr);
+          }
+
+          if (reqVarPtr) {
+            state.Builder->CreateStore(state.Builder->getInt32(0), reqVarPtr);
+          }
+
           for (auto &expr : targetFs.onEntryCode) {
             expr->codegen(state);
           }
@@ -264,6 +313,17 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
     // Run onProcessCode
     for (auto &expr : fs.onProcessCode) {
       expr->codegen(state);
+    }
+
+    // If parallel state, also execute process code of all child states
+    if (fs.isParallel) {
+      for (auto &childFs : smContext.flattenedStates) {
+        if (childFs.parentId == fs.id) {
+          for (auto &expr : childFs.onProcessCode) {
+            expr->codegen(state);
+          }
+        }
+      }
     }
 
     state.Builder->CreateBr(endBB);

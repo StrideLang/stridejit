@@ -38,7 +38,13 @@ struct FlattenedState {
   FlattenedState &operator=(FlattenedState &&) noexcept = default;
 
   int id;
+  int parentId = -1;
   std::shared_ptr<DeclarationNode> stateDecl;
+
+  bool isParallel = false;
+  bool resumeLastState = false;
+  bool isFinal = false;
+  std::string historyStateVarName;
 
   std::vector<std::unique_ptr<ExprAST>> onEntryCode;
   std::vector<std::unique_ptr<ExprAST>> onProcessCode;
@@ -63,7 +69,8 @@ public:
 
   static void flattenStateMachine(std::shared_ptr<DeclarationNode> stateNode,
                                   int &idCounter, StateMachine &sm,
-                                  ScopeStack &scope, ASTNode tree);
+                                  ScopeStack &scope, ASTNode tree,
+                                  int parentId = -1);
 
   static std::vector<StateMachine>
   collectStateMachines(std::shared_ptr<DeclarationNode> domainDecl,

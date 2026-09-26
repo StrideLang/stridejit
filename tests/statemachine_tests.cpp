@@ -249,3 +249,27 @@ TEST(StateMachine, TransitionExecution) {
   EXPECT_EQ(ds->active_state_id, 4); // State3
   EXPECT_EQ(*counter, 2);
 }
+
+TEST(StateMachine, AdvancedFormalizations) {
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                              "statemachines.stride");
+  EXPECT_NE(tree, nullptr);
+
+  strd::ScopeStack scope;
+  auto domainDecl =
+      strd::ASTQuery::findDeclarationByName("RootDomain", scope, tree);
+  EXPECT_NE(domainDecl, nullptr);
+
+  auto smContexts =
+      strd::StateMachine::collectStateMachines(domainDecl, scope, tree);
+  EXPECT_EQ(smContexts.size(), 1);
+  auto &sm = smContexts[0];
+
+  // Verify FlattenedState Phase 5 property defaults
+  for (const auto &fs : sm.flattenedStates) {
+    EXPECT_FALSE(fs.isParallel);
+    EXPECT_FALSE(fs.resumeLastState);
+    EXPECT_FALSE(fs.isFinal);
+  }
+}
