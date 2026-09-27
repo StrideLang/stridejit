@@ -287,8 +287,6 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   const StrideCompiler::StateStructInfo *prevFunctionStateInfo =
       state.currentFunctionStateInfo;
 
-
-
   if (hasState) {
     auto stateArgIt = state.NamedValues.find("__state");
     if (stateArgIt != state.NamedValues.end()) {
@@ -296,12 +294,10 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
 
       state.currentFunctionStateInfo = state.getStateStructInfo(funcInstance);
       if (state.currentFunctionStateInfo) {
-         std::cout << "DEBUG: currentFunctionStateInfo is valid!\n";
+        std::cout << "DEBUG: currentFunctionStateInfo is valid!\n";
       } else {
-         std::cout << "DEBUG: currentFunctionStateInfo is NULL!\n";
+        std::cout << "DEBUG: currentFunctionStateInfo is NULL!\n";
       }
-
-
 
       if (!state.currentFunctionStateInfo && state.m_tree) {
         std::string searchName = P.getName();
@@ -314,17 +310,14 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
             searchName = searchName.substr(0, pos);
           }
         }
-        
+
         state.currentFunctionStateInfo = state.getStateStructInfo(searchName);
-        
+
         if (!state.currentFunctionStateInfo) {
-          state.currentFunctionStateInfo =
-              state.getStateStructInfo(ASTQuery::findDeclarationByName(
-                  searchName, {}, state.m_tree));
+          state.currentFunctionStateInfo = state.getStateStructInfo(
+              ASTQuery::findDeclarationByName(searchName, {}, state.m_tree));
         }
       }
-
-
 
       if (state.currentFunctionStateInfo &&
           state.currentFunctionStateInfo->structType) {
@@ -339,9 +332,6 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
           std::cout << "DEBUG: Added " << varName << " to NamedValues!\n";
         }
       }
-
-
-
     }
   } else {
     state.currentFunctionStatePtr = nullptr;
@@ -808,6 +798,40 @@ void processArgGroup(
       assert(list);
       for (const auto &expr : list->elements()) {
         auto [val, elemType] = expr->codegen(state);
+        if (auto *varExpr = dynamic_cast<VariableExprAST *>(expr.get())) {
+          auto indeces = varExpr->getIndeces();
+          if (!indeces.empty() && val->getType()->isPointerTy()) {
+            std::vector<llvm::Value *> idxList;
+            auto idx = indeces[0];
+            const size_t *intIdx = std::get_if<size_t>(&idx);
+            if (intIdx) {
+              idxList.push_back(llvm::ConstantInt::get(
+                  *state.TheContext, llvm::APInt(64, *intIdx)));
+            }
+            const std::string *strIdx = std::get_if<std::string>(&idx);
+            if (strIdx) {
+              auto it = state.NamedValues.find(*strIdx);
+              if (it != state.NamedValues.end()) {
+                llvm::Value *indexVal = it->second.first;
+                if (indexVal->getType()->isPointerTy()) {
+                  indexVal = state.Builder->CreateLoad(
+                      it->second.second.value(), indexVal, *strIdx);
+                }
+                idxList.push_back(indexVal);
+              }
+            }
+            if (!idxList.empty()) {
+              llvm::Type *gepElemType =
+                  elemType.value_or(llvm::Type::getDoubleTy(*state.TheContext));
+              if (gepElemType->isArrayTy()) {
+                gepElemType = static_cast<llvm::ArrayType *>(gepElemType)
+                                  ->getElementType();
+              }
+              val = state.Builder->CreateGEP(gepElemType, val, idxList);
+              elemType = gepElemType;
+            }
+          }
+        }
         size_t currentIdx = CallArgs.size();
         llvm::Argument *currentArg = (currentIdx < CalleeF->arg_size())
                                          ? CalleeF->getArg(currentIdx)
@@ -1185,6 +1209,52 @@ std::pair<llvm::Value *, std::optional<llvm::Type *>>
 LLVMCommandAST::codegen(StrideCompiler &state) {
   std::vector<std::pair<llvm::Value *, std::optional<llvm::Type *>>> CallArgs;
 
+  auto processArg = [&](ExprAST *expr, llvm::Value *val,
+                        std::optional<llvm::Type *> elemType)
+      -> std::pair<llvm::Value *, std::optional<llvm::Type *>> {
+    if (auto *varExpr = dynamic_cast<VariableExprAST *>(expr)) {
+      auto indeces = varExpr->getIndeces();
+      if (!indeces.empty() && val->getType()->isPointerTy()) {
+        std::vector<llvm::Value *> idxList;
+        auto idx = indeces[0];
+        const size_t *intIdx = std::get_if<size_t>(&idx);
+        if (intIdx) {
+          idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
+                                                   llvm::APInt(64, *intIdx)));
+        }
+        const std::string *strIdx = std::get_if<std::string>(&idx);
+        if (strIdx) {
+          auto it = state.NamedValues.find(*strIdx);
+          if (it != state.NamedValues.end()) {
+            llvm::Value *indexVal = it->second.first;
+            if (indexVal->getType()->isPointerTy()) {
+              indexVal = state.Builder->CreateLoad(it->second.second.value(),
+                                                   indexVal, *strIdx);
+            }
+            idxList.push_back(indexVal);
+          }
+        }
+        if (!idxList.empty()) {
+          llvm::Type *gepElemType =
+              elemType.value_or(llvm::Type::getDoubleTy(*state.TheContext));
+          if (gepElemType->isArrayTy()) {
+            gepElemType =
+                static_cast<llvm::ArrayType *>(gepElemType)->getElementType();
+          }
+          val = state.Builder->CreateGEP(gepElemType, val, idxList);
+          elemType = gepElemType;
+        }
+      }
+    }
+    if (val->getType()->isPointerTy()) {
+      if (!elemType.has_value()) {
+        return {nullptr, std::nullopt};
+      }
+      val = state.Builder->CreateLoad(elemType.value(), val, "");
+    }
+    return {val, elemType};
+  };
+
   for (unsigned i = 0, e = InArgs.size(); i != e; ++i) {
     auto [value, type] = InArgs[i]->codegen(state);
     if (value->getType()->isTokenTy()) {
@@ -1192,66 +1262,68 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
       assert(list);
       for (const auto &expr : list->elements()) {
         auto [exprValue, exprType] = expr->codegen(state);
-        CallArgs.push_back({exprValue, exprType});
-        if (CallArgs.back().first->getType()->isPointerTy()) {
-          if (!CallArgs.back().second.has_value()) {
-            return {nullptr, std::nullopt};
-          }
-          CallArgs.back() = {
-              state.Builder->CreateLoad(CallArgs.back().second.value(),
-                                        CallArgs.back().first, ""),
-              CallArgs.back().second.value()};
-        }
-      }
-    } else {
-      CallArgs.push_back({value, type});
-      if (CallArgs.back().first->getType()->isPointerTy()) {
-        if (!CallArgs.back().second.has_value()) {
+        auto processed = processArg(expr.get(), exprValue, exprType);
+        if (!processed.first) {
           return {nullptr, std::nullopt};
         }
-        CallArgs.back() = {
-            state.Builder->CreateLoad(CallArgs.back().second.value(),
-                                      CallArgs.back().first, ""),
-            type};
+        CallArgs.push_back(processed);
       }
+    } else {
+      auto processed = processArg(InArgs[i].get(), value, type);
+      if (!processed.first) {
+        return {nullptr, std::nullopt};
+      }
+      CallArgs.push_back(processed);
     }
   }
+
+  size_t inArgCount = CallArgs.size();
+
   for (unsigned i = 0, e = OutArgs.size(); i != e; ++i) {
     auto [value, type] = OutArgs[i]->codegen(state);
     if (value->getType()->isTokenTy()) {
       auto *list = dynamic_cast<ListExprAST *>(OutArgs[i].get());
       assert(list);
       for (const auto &expr : list->elements()) {
-        CallArgs.push_back(expr->codegen(state));
-        if (CallArgs.back().first->getType()->isPointerTy()) {
-          CallArgs.back() = {
-              state.Builder->CreateLoad(CallArgs.back().first->getType(),
-                                        CallArgs.back().first, ""),
-              std::nullopt};
+        auto [exprValue, exprType] = expr->codegen(state);
+        auto processed = processArg(expr.get(), exprValue, exprType);
+        if (!processed.first) {
+          return {nullptr, std::nullopt};
         }
+        CallArgs.push_back(processed);
       }
     } else {
-      CallArgs.push_back({value, type});
-      if (CallArgs.back().first->getType()->isPointerTy()) {
-        CallArgs.back() = {
-            state.Builder->CreateLoad(CallArgs.back().second.value(),
-                                      CallArgs.back().first, ""),
-            std::nullopt};
+      auto processed = processArg(OutArgs[i].get(), value, type);
+      if (!processed.first) {
+        return {nullptr, std::nullopt};
       }
+      CallArgs.push_back(processed);
     }
   }
+
+  size_t outArgStart = inArgCount;
+  size_t outArgCount = CallArgs.size() - inArgCount;
+
   for (unsigned i = 0, e = ExternalArgs.size(); i != e; ++i) {
     auto [value, type] = ExternalArgs[i]->codegen(state);
     if (value->getType()->isTokenTy()) {
-      auto *list = dynamic_cast<ListExprAST *>(OutArgs[i].get());
-    } else {
-      CallArgs.push_back({value, type});
-      if (CallArgs.back().first->getType()->isPointerTy()) {
-        CallArgs.back() = {
-            state.Builder->CreateLoad(CallArgs.back().second.value(),
-                                      CallArgs.back().first, ""),
-            std::nullopt};
+      auto *list = dynamic_cast<ListExprAST *>(ExternalArgs[i].get());
+      if (list) {
+        for (const auto &expr : list->elements()) {
+          auto [exprValue, exprType] = expr->codegen(state);
+          auto processed = processArg(expr.get(), exprValue, exprType);
+          if (!processed.first) {
+            return {nullptr, std::nullopt};
+          }
+          CallArgs.push_back(processed);
+        }
       }
+    } else {
+      auto processed = processArg(ExternalArgs[i].get(), value, type);
+      if (!processed.first) {
+        return {nullptr, std::nullopt};
+      }
+      CallArgs.push_back(processed);
     }
   }
 
@@ -1266,7 +1338,7 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
   std::vector<std::string> inTokens;
   std::vector<std::string> outTokens;
 
-  for (size_t i = 0; i < InArgs.size() && i < CallArgs.size(); ++i) {
+  for (size_t i = 0; i < inArgCount; ++i) {
     llvm::Value *val = CallArgs[i].first;
     if (val->hasName() && !val->getName().empty()) {
       inTokens.push_back("%" + val->getName().str());
@@ -1281,7 +1353,7 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
     }
   }
 
-  for (size_t i = 0; i < OutArgs.size(); ++i) {
+  for (size_t i = 0; i < outArgCount; ++i) {
     outTokens.push_back("%out_" + std::to_string(i));
   }
   if (outTokens.empty()) {
@@ -1305,6 +1377,51 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
     llvm::Value *lhs = nullptr;
     llvm::Value *rhs = nullptr;
 
+    auto resolveOperand = [&](const std::string &opStr) -> llvm::Value * {
+      for (size_t i = 0; i < inTokens.size(); ++i) {
+        if (opStr == inTokens[i]) {
+          return CallArgs[i].first;
+        }
+      }
+      for (size_t i = 0; i < outTokens.size(); ++i) {
+        if (opStr == outTokens[i]) {
+          if (outArgStart + i < CallArgs.size()) {
+            return CallArgs[outArgStart + i].first;
+          }
+        }
+      }
+      return nullptr;
+    };
+
+    auto parseLiteral = [&](const std::string &str,
+                            llvm::Type *type) -> llvm::Value * {
+      try {
+        if (type->isDoubleTy()) {
+          return llvm::ConstantFP::get(*state.TheContext,
+                                       llvm::APFloat(std::stod(str)));
+        } else if (type->isFloatTy()) {
+          return llvm::ConstantFP::get(*state.TheContext,
+                                       llvm::APFloat((float)std::stof(str)));
+        } else if (type->isIntegerTy(32)) {
+          return llvm::ConstantInt::get(*state.TheContext,
+                                        llvm::APInt(32, std::stoi(str)));
+        } else if (type->isIntegerTy(64)) {
+          return llvm::ConstantInt::get(*state.TheContext,
+                                        llvm::APInt(64, std::stoll(str)));
+        } else if (type->isIntegerTy(1)) {
+          if (str == "true" || str == "1") {
+            return llvm::ConstantInt::getTrue(*state.TheContext);
+          } else if (str == "false" || str == "0") {
+            return llvm::ConstantInt::getFalse(*state.TheContext);
+          }
+          return llvm::ConstantInt::get(*state.TheContext,
+                                        llvm::APInt(1, std::stoi(str)));
+        }
+      } catch (...) {
+      }
+      return nullptr;
+    };
+
     size_t comma = instr.find(',');
     if (comma != std::string::npos) {
       std::string op1Str = instr.substr(0, comma);
@@ -1317,45 +1434,8 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
       op2Str.erase(0, op2Str.find_first_not_of(" \t"));
       op2Str.erase(op2Str.find_last_not_of(" \t\r\n") + 1);
 
-      auto resolveOperand = [&](const std::string &opStr) -> llvm::Value * {
-        for (size_t i = 0; i < inTokens.size(); ++i) {
-          if (opStr == inTokens[i]) {
-            return CallArgs[i].first;
-          }
-        }
-        for (size_t i = 0; i < outTokens.size(); ++i) {
-          if (opStr == outTokens[i]) {
-            if (InArgs.size() + i < CallArgs.size()) {
-              return CallArgs[InArgs.size() + i].first;
-            }
-          }
-        }
-        return nullptr;
-      };
-
       lhs = resolveOperand(op1Str);
       rhs = resolveOperand(op2Str);
-
-      auto parseLiteral = [&](const std::string &str,
-                              llvm::Type *type) -> llvm::Value * {
-        try {
-          if (type->isDoubleTy()) {
-            return llvm::ConstantFP::get(*state.TheContext,
-                                         llvm::APFloat(std::stod(str)));
-          } else if (type->isFloatTy()) {
-            return llvm::ConstantFP::get(*state.TheContext,
-                                         llvm::APFloat((float)std::stof(str)));
-          } else if (type->isIntegerTy(32)) {
-            return llvm::ConstantInt::get(*state.TheContext,
-                                          llvm::APInt(32, std::stoi(str)));
-          } else if (type->isIntegerTy(64)) {
-            return llvm::ConstantInt::get(*state.TheContext,
-                                          llvm::APInt(64, std::stoll(str)));
-          }
-        } catch (...) {
-        }
-        return nullptr;
-      };
 
       if (!rhs && lhs) {
         rhs = parseLiteral(op2Str, lhs->getType());
@@ -1364,27 +1444,64 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
         lhs = parseLiteral(op1Str, rhs->getType());
       }
     } else {
-      lhs = CallArgs.size() > 0 ? CallArgs[0].first : nullptr;
+      size_t lastSpace = instr.find_last_of(" \t");
+      if (lastSpace != std::string::npos) {
+        std::string opStr = instr.substr(lastSpace + 1);
+        lhs = resolveOperand(opStr);
+      }
+      if (!lhs) {
+        lhs = CallArgs.size() > 0 ? CallArgs[0].first : nullptr;
+      }
       rhs = CallArgs.size() > 1 ? CallArgs[1].first : nullptr;
     }
 
     if (instr.rfind("icmp sgt", 0) == 0) {
       outval = state.Builder->CreateICmpSGT(lhs, rhs);
       outtype = llvm::Type::getInt1Ty(*state.TheContext);
-    } else if (instr.rfind("icmp eq", 0) == 0) {
-      outval = state.Builder->CreateICmpEQ(lhs, rhs);
+    } else if (instr.rfind("icmp sge", 0) == 0) {
+      outval = state.Builder->CreateICmpSGE(lhs, rhs);
       outtype = llvm::Type::getInt1Ty(*state.TheContext);
     } else if (instr.rfind("icmp slt", 0) == 0) {
       outval = state.Builder->CreateICmpSLT(lhs, rhs);
       outtype = llvm::Type::getInt1Ty(*state.TheContext);
+    } else if (instr.rfind("icmp sle", 0) == 0) {
+      outval = state.Builder->CreateICmpSLE(lhs, rhs);
+      outtype = llvm::Type::getInt1Ty(*state.TheContext);
+    } else if (instr.rfind("icmp eq", 0) == 0) {
+      outval = state.Builder->CreateICmpEQ(lhs, rhs);
+      outtype = llvm::Type::getInt1Ty(*state.TheContext);
+    } else if (instr.rfind("icmp ne", 0) == 0) {
+      outval = state.Builder->CreateICmpNE(lhs, rhs);
+      outtype = llvm::Type::getInt1Ty(*state.TheContext);
+    } else if (instr.rfind("icmp ugt", 0) == 0) {
+      outval = state.Builder->CreateICmpUGT(lhs, rhs);
+      outtype = llvm::Type::getInt1Ty(*state.TheContext);
+    } else if (instr.rfind("icmp uge", 0) == 0) {
+      outval = state.Builder->CreateICmpUGE(lhs, rhs);
+      outtype = llvm::Type::getInt1Ty(*state.TheContext);
+    } else if (instr.rfind("icmp ult", 0) == 0) {
+      outval = state.Builder->CreateICmpULT(lhs, rhs);
+      outtype = llvm::Type::getInt1Ty(*state.TheContext);
+    } else if (instr.rfind("icmp ule", 0) == 0) {
+      outval = state.Builder->CreateICmpULE(lhs, rhs);
+      outtype = llvm::Type::getInt1Ty(*state.TheContext);
     } else if (instr.rfind("fcmp ogt", 0) == 0) {
       outval = state.Builder->CreateFCmpOGT(lhs, rhs);
+      outtype = llvm::Type::getInt1Ty(*state.TheContext);
+    } else if (instr.rfind("fcmp oge", 0) == 0) {
+      outval = state.Builder->CreateFCmpOGE(lhs, rhs);
+      outtype = llvm::Type::getInt1Ty(*state.TheContext);
+    } else if (instr.rfind("fcmp olt", 0) == 0) {
+      outval = state.Builder->CreateFCmpOLT(lhs, rhs);
+      outtype = llvm::Type::getInt1Ty(*state.TheContext);
+    } else if (instr.rfind("fcmp ole", 0) == 0) {
+      outval = state.Builder->CreateFCmpOLE(lhs, rhs);
       outtype = llvm::Type::getInt1Ty(*state.TheContext);
     } else if (instr.rfind("fcmp oeq", 0) == 0) {
       outval = state.Builder->CreateFCmpOEQ(lhs, rhs);
       outtype = llvm::Type::getInt1Ty(*state.TheContext);
-    } else if (instr.rfind("fcmp olt", 0) == 0) {
-      outval = state.Builder->CreateFCmpOLT(lhs, rhs);
+    } else if (instr.rfind("fcmp one", 0) == 0) {
+      outval = state.Builder->CreateFCmpONE(lhs, rhs);
       outtype = llvm::Type::getInt1Ty(*state.TheContext);
     } else if (instr.rfind("add", 0) == 0) {
       outval = state.Builder->CreateAdd(lhs, rhs);
@@ -1430,6 +1547,15 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
       outtype = lhs->getType();
     } else if (instr.rfind("ashr", 0) == 0) {
       outval = state.Builder->CreateAShr(lhs, rhs);
+      outtype = lhs->getType();
+    } else if (instr.rfind("not", 0) == 0) {
+      outval = state.Builder->CreateNot(lhs);
+      outtype = lhs->getType();
+    } else if (instr.rfind("nand", 0) == 0) {
+      outval = state.Builder->CreateNot(state.Builder->CreateAnd(lhs, rhs));
+      outtype = lhs->getType();
+    } else if (instr.rfind("nor", 0) == 0) {
+      outval = state.Builder->CreateNot(state.Builder->CreateOr(lhs, rhs));
       outtype = lhs->getType();
     } else if (instr.rfind("and", 0) == 0) {
       outval = state.Builder->CreateAnd(lhs, rhs);
@@ -1484,8 +1610,8 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
         }
         for (size_t i = 0; i < outTokens.size(); ++i) {
           if (cleanOp == outTokens[i]) {
-            if (InArgs.size() + i < CallArgs.size()) {
-              return CallArgs[InArgs.size() + i].first;
+            if (outArgStart + i < CallArgs.size()) {
+              return CallArgs[outArgStart + i].first;
             }
           }
         }
@@ -1519,7 +1645,7 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
         start = comma + 1;
       }
     } else {
-      for (unsigned i = 0; i < InArgs.size() && i < CallArgs.size(); ++i) {
+      for (unsigned i = 0; i < inArgCount && i < CallArgs.size(); ++i) {
         argVals.push_back(CallArgs[i].first);
         argTypes.push_back(CallArgs[i].first->getType());
       }

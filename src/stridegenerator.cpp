@@ -465,8 +465,8 @@ void StrideGenerator::processStateStreams(
     if (fs.stateDecl == stateNode) {
       auto updateGuardProp = stateNode->getPropertyValue("updateGuard");
       if (updateGuardProp && updateGuardProp->getNodeType() == AST::List) {
-        fs.updateGuardCode = generateStreamsForNodes(updateGuardProp->getChildren(),
-                                                     scope, state, domainName);
+        fs.updateGuardCode = generateStreamsForNodes(
+            updateGuardProp->getChildren(), scope, state, domainName);
       }
       auto onEntryProp = stateNode->getPropertyValue("onEntry");
       if (onEntryProp && onEntryProp->getNodeType() == AST::List) {
@@ -490,29 +490,36 @@ void StrideGenerator::processStateStreams(
           auto guardProp = t.transitionDecl->getPropertyValue("guard");
           if (guardProp) {
             if (guardProp->getNodeType() == AST::Block) {
-              auto name = std::static_pointer_cast<BlockNode>(guardProp)->getName();
+              auto name =
+                  std::static_pointer_cast<BlockNode>(guardProp)->getName();
               if (name != "none" && name != "None") {
                 t.guardCode.push_back(std::make_unique<VariableExprAST>(name));
               }
             } else if (guardProp->getNodeType() == AST::String) {
-              auto str = std::static_pointer_cast<ValueNode>(guardProp)->getStringValue();
+              auto str = std::static_pointer_cast<ValueNode>(guardProp)
+                             ->getStringValue();
               if (str != "none" && str != "None") {
                 t.guardCode.push_back(std::make_unique<VariableExprAST>(str));
               }
             } else if (guardProp->getNodeType() == AST::List) {
               for (const auto &child : guardProp->getChildren()) {
                 if (child->getNodeType() == AST::Block) {
-                  auto name = std::static_pointer_cast<BlockNode>(child)->getName();
+                  auto name =
+                      std::static_pointer_cast<BlockNode>(child)->getName();
                   if (name != "none" && name != "None") {
-                    t.guardCode.push_back(std::make_unique<VariableExprAST>(name));
+                    t.guardCode.push_back(
+                        std::make_unique<VariableExprAST>(name));
                   }
                 } else if (child->getNodeType() == AST::String) {
-                  auto str = std::static_pointer_cast<ValueNode>(child)->getStringValue();
+                  auto str = std::static_pointer_cast<ValueNode>(child)
+                                 ->getStringValue();
                   if (str != "none" && str != "None") {
-                    t.guardCode.push_back(std::make_unique<VariableExprAST>(str));
+                    t.guardCode.push_back(
+                        std::make_unique<VariableExprAST>(str));
                   }
                 } else if (child->getNodeType() == AST::Stream) {
-                  auto code = generateStreamsForNodes({child}, scope, state, domainName);
+                  auto code = generateStreamsForNodes({child}, scope, state,
+                                                      domainName);
                   for (auto &c : code) {
                     t.guardCode.push_back(std::move(c));
                   }

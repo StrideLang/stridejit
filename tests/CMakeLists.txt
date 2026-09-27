@@ -26,6 +26,7 @@ if (STRIDEJIT_BUILD_TESTS)
       ast_node_tests.cpp
       nested_function_tests.cpp
       statemachine_tests.cpp
+      logical_comparisons_tests.cpp
       # error_tests.cpp
     )
     add_executable(stridejit_tests ${TEST_SOURCES})

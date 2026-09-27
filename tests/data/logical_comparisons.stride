@@ -1,0 +1,26 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+        switch InA { domain: RootDomain default: off }
+        switch InB { domain: RootDomain default: off }
+    ]
+    outputs: [
+        switch OutAnd { domain: RootDomain default: off }
+        switch OutOr { domain: RootDomain default: off }
+        switch OutNot { domain: RootDomain default: off }
+        switch OutXor { domain: RootDomain default: off }
+        switch OutNand { domain: RootDomain default: off }
+        switch OutNor { domain: RootDomain default: off }
+    ]
+	domainFunctionCode: ''
+}
+
+[InA, InB] >> And() >> OutAnd;
+[InA, InB] >> Or() >> OutOr;
+InA >> Not() >> OutNot;
+[InA, InB] >> Xor() >> OutXor;
+[InA, InB] >> Nand() >> OutNand;
+[InA, InB] >> Nor() >> OutNor;
