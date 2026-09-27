@@ -463,10 +463,12 @@ void StrideGenerator::processStateStreams(
   // 2. Evaluate streams and track them in the state machine structs
   for (auto &fs : sm.flattenedStates) {
     if (fs.stateDecl == stateNode) {
-      auto onEntryProp = stateNode->getPropertyValue("onEntry");
-      if (!onEntryProp) {
-        onEntryProp = stateNode->getPropertyValue("onEnter");
+      auto updateGuardProp = stateNode->getPropertyValue("updateGuard");
+      if (updateGuardProp && updateGuardProp->getNodeType() == AST::List) {
+        fs.updateGuardCode = generateStreamsForNodes(updateGuardProp->getChildren(),
+                                                     scope, state, domainName);
       }
+      auto onEntryProp = stateNode->getPropertyValue("onEntry");
       if (onEntryProp && onEntryProp->getNodeType() == AST::List) {
         fs.onEntryCode = generateStreamsForNodes(onEntryProp->getChildren(),
                                                  scope, state, domainName);

@@ -1,0 +1,46 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    stateMachines: [MyStateMachine]
+    inputs: []
+    outputs: []
+	domainFunctionCode: ''
+}
+
+signal Counter { domain: RootDomain type: _IntType default: 0 }
+
+state SubState1 {
+    transitions: [
+        transition ToSubState2 {
+            targetState: SubState2
+        }
+    ]
+}
+
+state SubState2 {}
+
+state CompositeState {
+    resumeLastState: on
+    initialState: SubState1
+    states: [SubState1, SubState2]
+    transitions: [
+        transition ToOtherState {
+            targetState: OtherState
+        }
+    ]
+}
+
+state OtherState {
+    transitions: [
+        transition ToComposite {
+            targetState: CompositeState
+        }
+    ]
+}
+
+state MyStateMachine {
+    initialState: CompositeState
+    states: [CompositeState, OtherState]
+}

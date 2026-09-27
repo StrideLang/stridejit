@@ -1,0 +1,35 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    stateMachines: [MyStateMachine]
+    inputs: []
+    outputs: []
+	domainFunctionCode: ''
+}
+
+signal Counter { domain: RootDomain type: _IntType default: 0 }
+signal ParentOrder { domain: RootDomain type: _IntType default: 0 }
+signal ChildOrder { domain: RootDomain type: _IntType default: 0 }
+
+state Child1 {
+    updateGuard: [
+        Counter + 1 >> Counter;
+        Counter >> ChildOrder;
+    ]
+}
+
+state ParentState {
+    initialState: Child1
+    states: [Child1]
+    updateGuard: [
+        Counter + 1 >> Counter;
+        Counter >> ParentOrder;
+    ]
+}
+
+state MyStateMachine {
+    initialState: ParentState
+    states: [ParentState]
+}

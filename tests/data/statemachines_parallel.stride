@@ -1,0 +1,39 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    stateMachines: [MyStateMachine]
+    inputs: []
+    outputs: []
+	domainFunctionCode: ''
+}
+
+signal ParentCounter { domain: RootDomain type: _IntType default: 0 }
+signal Region1Counter { domain: RootDomain type: _IntType default: 0 }
+signal Region2Counter { domain: RootDomain type: _IntType default: 0 }
+
+state Region1 {
+    onProcess: [
+        Region1Counter + 10 >> Region1Counter;
+    ]
+}
+
+state Region2 {
+    onProcess: [
+        Region2Counter + 20 >> Region2Counter;
+    ]
+}
+
+state ParallelState {
+    isParallel: on
+    states: [Region1, Region2]
+    onProcess: [
+        ParentCounter + 1 >> ParentCounter;
+    ]
+}
+
+state MyStateMachine {
+    initialState: ParallelState
+    states: [ParallelState]
+}

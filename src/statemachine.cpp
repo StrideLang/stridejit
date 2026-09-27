@@ -79,6 +79,11 @@ void StateMachine::flattenStateMachine(
     fs.isFinal = std::static_pointer_cast<ValueNode>(isFinProp)->getSwitchValue();
   }
 
+  auto updGuardDomProp = stateNode->getPropertyValue("updateGuardOnDomain");
+  if (updGuardDomProp && updGuardDomProp->getNodeType() == AST::Switch) {
+    fs.updateGuardOnDomain = std::static_pointer_cast<ValueNode>(updGuardDomProp)->getSwitchValue();
+  }
+
   if (fs.resumeLastState) {
     fs.historyStateVarName = "__" + sm.name + "_" + stateNode->getName() + "_history_state_id";
   }
@@ -235,6 +240,29 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
 
     state.Builder->SetInsertPoint(stateBB);
 
+    // Execute updateGuard streams top-down (parent state first, then child state)
+    std::vector<const FlattenedState *> topDownAncestry;
+    int ancId = fs.id;
+    while (ancId != -1) {
+      const FlattenedState *aFs = nullptr;
+      for (const auto &s : smContext.flattenedStates) {
+        if (s.id == ancId) {
+          aFs = &s;
+          break;
+        }
+      }
+      if (!aFs) break;
+      topDownAncestry.push_back(aFs);
+      ancId = aFs->parentId;
+    }
+    std::reverse(topDownAncestry.begin(), topDownAncestry.end());
+
+    for (const auto *aFs : topDownAncestry) {
+      for (auto &expr : aFs->updateGuardCode) {
+        expr->codegen(state);
+      }
+    }
+
     // Evaluate Transitions (Phase 4 Step 3)
     llvm::Value *reqVarPtr = nullptr;
     auto reqVarIt = state.NamedValues.find(smContext.transitionRequestVarName);
@@ -371,27 +399,32 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
 
       // Handle transition to target state (checking resumeLastState history)
       int resolvedTargetId = resolveLeafInitialState(t.targetStateId, smContext);
-      for (auto &targetFs : smContext.flattenedStates) {
-        if (targetFs.id == resolvedTargetId) {
-          if (targetFs.resumeLastState && !targetFs.historyStateVarName.empty()) {
-            auto histIt = state.NamedValues.find(targetFs.historyStateVarName);
-            if (histIt != state.NamedValues.end()) {
-              auto *histVal = state.Builder->CreateLoad(state.Builder->getInt32Ty(), histIt->second.first);
-              auto *hasHist = state.Builder->CreateICmpNE(histVal, state.Builder->getInt32(0));
-              auto *chosenId = state.Builder->CreateSelect(hasHist, histVal, state.Builder->getInt32(resolvedTargetId));
-              state.Builder->CreateStore(chosenId, activeStatePtr);
-            } else {
-              state.Builder->CreateStore(state.Builder->getInt32(resolvedTargetId), activeStatePtr);
-            }
-          } else {
-            state.Builder->CreateStore(state.Builder->getInt32(resolvedTargetId), activeStatePtr);
-          }
+      const FlattenedState *targetFs = nullptr;
+      for (const auto &s : smContext.flattenedStates) {
+        if (s.id == t.targetStateId) {
+          targetFs = &s;
+          break;
+        }
+      }
 
-          if (reqVarPtr) {
-            state.Builder->CreateStore(state.Builder->getInt32(0), reqVarPtr);
-          }
+      llvm::Value *finalTargetIdVal = state.Builder->getInt32(resolvedTargetId);
+      if (targetFs && targetFs->resumeLastState && !targetFs->historyStateVarName.empty()) {
+        auto histIt = state.NamedValues.find(targetFs->historyStateVarName);
+        if (histIt != state.NamedValues.end()) {
+          auto *histVal = state.Builder->CreateLoad(state.Builder->getInt32Ty(), histIt->second.first);
+          auto *hasHist = state.Builder->CreateICmpNE(histVal, state.Builder->getInt32(0));
+          finalTargetIdVal = state.Builder->CreateSelect(hasHist, histVal, finalTargetIdVal);
+        }
+      }
 
-          for (auto &expr : targetFs.onEntryCode) {
+      state.Builder->CreateStore(finalTargetIdVal, activeStatePtr);
+      if (reqVarPtr) {
+        state.Builder->CreateStore(state.Builder->getInt32(0), reqVarPtr);
+      }
+
+      for (const auto &s : smContext.flattenedStates) {
+        if (s.id == resolvedTargetId) {
+          for (auto &expr : s.onEntryCode) {
             expr->codegen(state);
           }
           break;

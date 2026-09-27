@@ -44,8 +44,10 @@ struct FlattenedState {
   bool isParallel = false;
   bool resumeLastState = false;
   bool isFinal = false;
+  bool updateGuardOnDomain = false;
   std::string historyStateVarName;
 
+  std::vector<std::unique_ptr<ExprAST>> updateGuardCode;
   std::vector<std::unique_ptr<ExprAST>> onEntryCode;
   std::vector<std::unique_ptr<ExprAST>> onProcessCode;
   std::vector<std::unique_ptr<ExprAST>> onExitCode;
