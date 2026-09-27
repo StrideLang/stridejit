@@ -495,41 +495,6 @@ void StrideGenerator::processStateStreams(
               if (name != "none" && name != "None") {
                 t.guardCode.push_back(std::make_unique<VariableExprAST>(name));
               }
-            } else if (guardProp->getNodeType() == AST::String) {
-              auto str = std::static_pointer_cast<ValueNode>(guardProp)
-                             ->getStringValue();
-              if (str != "none" && str != "None") {
-                t.guardCode.push_back(std::make_unique<VariableExprAST>(str));
-              }
-            } else if (guardProp->getNodeType() == AST::List) {
-              for (const auto &child : guardProp->getChildren()) {
-                if (child->getNodeType() == AST::Block) {
-                  auto name =
-                      std::static_pointer_cast<BlockNode>(child)->getName();
-                  if (name != "none" && name != "None") {
-                    t.guardCode.push_back(
-                        std::make_unique<VariableExprAST>(name));
-                  }
-                } else if (child->getNodeType() == AST::String) {
-                  auto str = std::static_pointer_cast<ValueNode>(child)
-                                 ->getStringValue();
-                  if (str != "none" && str != "None") {
-                    t.guardCode.push_back(
-                        std::make_unique<VariableExprAST>(str));
-                  }
-                } else if (child->getNodeType() == AST::Stream) {
-                  auto code = generateStreamsForNodes({child}, scope, state,
-                                                      domainName);
-                  for (auto &c : code) {
-                    t.guardCode.push_back(std::move(c));
-                  }
-                } else {
-                  auto expr = createExpr(child);
-                  if (expr) {
-                    t.guardCode.push_back(std::move(expr));
-                  }
-                }
-              }
             }
           }
           auto onTransProp = t.transitionDecl->getPropertyValue("onTransition");
