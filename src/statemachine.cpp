@@ -16,6 +16,43 @@
 
 namespace strd {
 
+static int resolveLeafInitialState(int stateId, const StateMachine &sm) {
+  for (const auto &fs : sm.flattenedStates) {
+    if (fs.id == stateId) {
+      auto initProp = fs.stateDecl->getPropertyValue("initialState");
+      if (initProp && initProp->getNodeType() == AST::Block) {
+        auto initName = std::static_pointer_cast<BlockNode>(initProp)->getName();
+        for (const auto &childFs : sm.flattenedStates) {
+          if (childFs.stateDecl->getName() == initName) {
+            return resolveLeafInitialState(childFs.id, sm);
+          }
+        }
+      }
+      break;
+    }
+  }
+  return stateId;
+}
+
+static bool isTrueProp(ASTNode prop) {
+  if (!prop) return false;
+  if (prop->getNodeType() == AST::Switch) {
+    return std::static_pointer_cast<ValueNode>(prop)->getSwitchValue();
+  }
+  if (prop->getNodeType() == AST::Block) {
+    auto name = std::static_pointer_cast<BlockNode>(prop)->getName();
+    return (name == "true" || name == "on" || name == "1" || name == "ON" || name == "TRUE");
+  }
+  if (prop->getNodeType() == AST::Int) {
+    return std::static_pointer_cast<ValueNode>(prop)->getIntValue() != 0;
+  }
+  if (prop->getNodeType() == AST::String) {
+    auto str = std::static_pointer_cast<ValueNode>(prop)->getStringValue();
+    return (str == "true" || str == "on" || str == "1");
+  }
+  return false;
+}
+
 void StateMachine::flattenStateMachine(
     std::shared_ptr<DeclarationNode> stateNode, int &idCounter,
     StateMachine &sm, ScopeStack &scope, ASTNode tree, int parentId) {
@@ -155,6 +192,7 @@ StateMachine::collectStateMachines(std::shared_ptr<DeclarationNode> domainDecl,
               }
             }
           }
+          sm.initialStateId = resolveLeafInitialState(sm.initialStateId, sm);
           machines.push_back(std::move(sm));
         }
       }
@@ -216,7 +254,29 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
         *state.TheContext, "state_" + std::to_string(fs.id) + "_process", func,
         endBB);
 
-    for (auto &t : fs.transitions) {
+    struct ApplicableTransition {
+      const Transition *trans;
+      const FlattenedState *ownerState;
+    };
+    std::vector<ApplicableTransition> applicableTransitions;
+    int currId = fs.id;
+    while (currId != -1) {
+      const FlattenedState *currFs = nullptr;
+      for (const auto &s : smContext.flattenedStates) {
+        if (s.id == currId) {
+          currFs = &s;
+          break;
+        }
+      }
+      if (!currFs) break;
+      for (const auto &t : currFs->transitions) {
+        applicableTransitions.push_back({&t, currFs});
+      }
+      currId = currFs->parentId;
+    }
+
+    for (auto &appTrans : applicableTransitions) {
+      auto &t = *appTrans.trans;
       llvm::BasicBlock *transCondBB = llvm::BasicBlock::Create(
           *state.TheContext, "trans_" + std::to_string(t.id) + "_cond", func,
           processBB);
@@ -236,16 +296,23 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
       if (!t.guardCode.empty()) {
         auto result = t.guardCode.back()->codegen(state);
         llvm::Value *CondV = result.first;
-        if (CondV->getType()->isDoubleTy()) {
-          CondV = state.Builder->CreateFCmpONE(
-              CondV,
-              llvm::ConstantFP::get(*state.TheContext, llvm::APFloat(0.0)),
-              "ifcond");
-        } else if (CondV->getType()->isIntegerTy(32)) {
-          CondV = state.Builder->CreateICmpNE(CondV, state.Builder->getInt32(0),
-                                              "ifcond");
+        if (CondV) {
+          if (CondV->getType()->isPointerTy()) {
+            CondV = state.Builder->CreateLoad(state.Builder->getInt32Ty(), CondV);
+          }
+          if (CondV->getType()->isIntegerTy(1)) {
+            // Already i1 boolean
+          } else if (CondV->getType()->isIntegerTy()) {
+            CondV = state.Builder->CreateICmpNE(
+                CondV, llvm::ConstantInt::get(CondV->getType(), 0), "ifcond");
+          } else if (CondV->getType()->isDoubleTy()) {
+            CondV = state.Builder->CreateFCmpONE(
+                CondV,
+                llvm::ConstantFP::get(*state.TheContext, llvm::APFloat(0.0)),
+                "ifcond");
+          }
+          guardVal = state.Builder->CreateAnd(guardVal, CondV);
         }
-        guardVal = state.Builder->CreateAnd(guardVal, CondV);
       }
 
       llvm::BasicBlock *nextBB = llvm::BasicBlock::Create(
@@ -255,18 +322,45 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
 
       state.Builder->SetInsertPoint(transFireBB);
 
-      for (auto &expr : fs.onExitCode) {
-        expr->codegen(state);
+      // Collect states being exited from active state fs up to appTrans.ownerState
+      std::vector<const FlattenedState *> exitedStates;
+      int walkId = fs.id;
+      while (walkId != -1) {
+        const FlattenedState *wFs = nullptr;
+        for (const auto &s : smContext.flattenedStates) {
+          if (s.id == walkId) {
+            wFs = &s;
+            break;
+          }
+        }
+        if (!wFs) break;
+        exitedStates.push_back(wFs);
+        if (wFs->id == appTrans.ownerState->id) {
+          break;
+        }
+        walkId = wFs->parentId;
       }
 
-      // Update parent history state if parent state has resumeLastState
-      if (fs.parentId != -1) {
-        for (auto &pFs : smContext.flattenedStates) {
-          if (pFs.id == fs.parentId && pFs.resumeLastState && !pFs.historyStateVarName.empty()) {
-            auto histIt = state.NamedValues.find(pFs.historyStateVarName);
-            if (histIt != state.NamedValues.end()) {
-              state.Builder->CreateStore(state.Builder->getInt32(fs.id), histIt->second.first);
+      for (const auto *eFs : exitedStates) {
+        for (auto &expr : eFs->onExitCode) {
+          expr->codegen(state);
+        }
+
+        // Update parent history state if parent state has resumeLastState
+        if (eFs->parentId != -1) {
+          for (auto &pFs : smContext.flattenedStates) {
+            if (pFs.id == eFs->parentId && pFs.resumeLastState && !pFs.historyStateVarName.empty()) {
+              auto histIt = state.NamedValues.find(pFs.historyStateVarName);
+              if (histIt != state.NamedValues.end()) {
+                state.Builder->CreateStore(state.Builder->getInt32(fs.id), histIt->second.first);
+              }
             }
+          }
+        }
+        if (eFs->resumeLastState && !eFs->historyStateVarName.empty()) {
+          auto histIt = state.NamedValues.find(eFs->historyStateVarName);
+          if (histIt != state.NamedValues.end()) {
+            state.Builder->CreateStore(state.Builder->getInt32(fs.id), histIt->second.first);
           }
         }
       }
@@ -276,20 +370,21 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
       }
 
       // Handle transition to target state (checking resumeLastState history)
+      int resolvedTargetId = resolveLeafInitialState(t.targetStateId, smContext);
       for (auto &targetFs : smContext.flattenedStates) {
-        if (targetFs.id == t.targetStateId) {
+        if (targetFs.id == resolvedTargetId) {
           if (targetFs.resumeLastState && !targetFs.historyStateVarName.empty()) {
             auto histIt = state.NamedValues.find(targetFs.historyStateVarName);
             if (histIt != state.NamedValues.end()) {
               auto *histVal = state.Builder->CreateLoad(state.Builder->getInt32Ty(), histIt->second.first);
               auto *hasHist = state.Builder->CreateICmpNE(histVal, state.Builder->getInt32(0));
-              auto *chosenId = state.Builder->CreateSelect(hasHist, histVal, state.Builder->getInt32(t.targetStateId));
+              auto *chosenId = state.Builder->CreateSelect(hasHist, histVal, state.Builder->getInt32(resolvedTargetId));
               state.Builder->CreateStore(chosenId, activeStatePtr);
             } else {
-              state.Builder->CreateStore(state.Builder->getInt32(t.targetStateId), activeStatePtr);
+              state.Builder->CreateStore(state.Builder->getInt32(resolvedTargetId), activeStatePtr);
             }
           } else {
-            state.Builder->CreateStore(state.Builder->getInt32(t.targetStateId), activeStatePtr);
+            state.Builder->CreateStore(state.Builder->getInt32(resolvedTargetId), activeStatePtr);
           }
 
           if (reqVarPtr) {

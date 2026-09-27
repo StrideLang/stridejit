@@ -1,0 +1,48 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    stateMachines: [MyStateMachine]
+    inputs: []
+    outputs: []
+	domainFunctionCode: ''
+}
+
+signal Counter { domain: RootDomain type: _IntType default: 0 }
+signal EntryCounter { domain: RootDomain type: _IntType default: 0 }
+signal ExitCounter { domain: RootDomain type: _IntType default: 0 }
+
+state Child1 {
+    onEntry: [
+        1 >> EntryCounter;
+    ]
+    onProcess: [
+        10 >> Counter;
+    ]
+    onExit: [
+        1 >> ExitCounter;
+    ]
+}
+state Child2 {}
+
+state CompositeState {
+    resumeLastState: on
+    initialState: Child1
+    states: [Child1, Child2]
+    transitions: [
+        transition ToFinal {
+            targetState: FinalState
+            guard: [ 1 ]
+        }
+    ]
+}
+
+state FinalState {
+    isFinal: on
+}
+
+state MyStateMachine {
+    initialState: CompositeState
+    states: [CompositeState, FinalState]
+}

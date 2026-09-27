@@ -111,11 +111,13 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
     }
 
     auto domainTypeNode = state.findTypeTreeNode(domainDecl);
-    bool domainNeedsState = (state.dynamicDomainFields.find(domainDecl) != state.dynamicDomainFields.end());
+    bool domainNeedsState = (state.dynamicDomainFields.find(domainDecl) !=
+                             state.dynamicDomainFields.end());
 
     std::vector<PrototypeArg> internalArgs;
     if (domainNeedsState) {
-        internalArgs.push_back(PrototypeArg{"__state", llvm::PointerType::get(*state.TheContext, 0)});
+      internalArgs.push_back(PrototypeArg{
+          "__state", llvm::PointerType::get(*state.TheContext, 0)});
     }
 
     auto processProto = std::make_unique<PrototypeAST>(
@@ -462,6 +464,9 @@ void StrideGenerator::processStateStreams(
   for (auto &fs : sm.flattenedStates) {
     if (fs.stateDecl == stateNode) {
       auto onEntryProp = stateNode->getPropertyValue("onEntry");
+      if (!onEntryProp) {
+        onEntryProp = stateNode->getPropertyValue("onEnter");
+      }
       if (onEntryProp && onEntryProp->getNodeType() == AST::List) {
         fs.onEntryCode = generateStreamsForNodes(onEntryProp->getChildren(),
                                                  scope, state, domainName);
@@ -481,9 +486,42 @@ void StrideGenerator::processStateStreams(
       for (auto &t : fs.transitions) {
         if (t.transitionDecl) {
           auto guardProp = t.transitionDecl->getPropertyValue("guard");
-          if (guardProp && guardProp->getNodeType() == AST::List) {
-            t.guardCode = generateStreamsForNodes(guardProp->getChildren(),
-                                                  scope, state, domainName);
+          if (guardProp) {
+            if (guardProp->getNodeType() == AST::Block) {
+              auto name = std::static_pointer_cast<BlockNode>(guardProp)->getName();
+              if (name != "none" && name != "None") {
+                t.guardCode.push_back(std::make_unique<VariableExprAST>(name));
+              }
+            } else if (guardProp->getNodeType() == AST::String) {
+              auto str = std::static_pointer_cast<ValueNode>(guardProp)->getStringValue();
+              if (str != "none" && str != "None") {
+                t.guardCode.push_back(std::make_unique<VariableExprAST>(str));
+              }
+            } else if (guardProp->getNodeType() == AST::List) {
+              for (const auto &child : guardProp->getChildren()) {
+                if (child->getNodeType() == AST::Block) {
+                  auto name = std::static_pointer_cast<BlockNode>(child)->getName();
+                  if (name != "none" && name != "None") {
+                    t.guardCode.push_back(std::make_unique<VariableExprAST>(name));
+                  }
+                } else if (child->getNodeType() == AST::String) {
+                  auto str = std::static_pointer_cast<ValueNode>(child)->getStringValue();
+                  if (str != "none" && str != "None") {
+                    t.guardCode.push_back(std::make_unique<VariableExprAST>(str));
+                  }
+                } else if (child->getNodeType() == AST::Stream) {
+                  auto code = generateStreamsForNodes({child}, scope, state, domainName);
+                  for (auto &c : code) {
+                    t.guardCode.push_back(std::move(c));
+                  }
+                } else {
+                  auto expr = createExpr(child);
+                  if (expr) {
+                    t.guardCode.push_back(std::move(expr));
+                  }
+                }
+              }
+            }
           }
           auto onTransProp = t.transitionDecl->getPropertyValue("onTransition");
           if (onTransProp && onTransProp->getNodeType() == AST::List) {
@@ -528,7 +566,8 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
 
         auto smContexts = StateMachine::collectStateMachines(decl, scope, tree);
         for (const auto &smCtx : smContexts) {
-          std::cout << "DEBUG: PRE-PASS adding dynamicDomainField to node: " << node.get() << " decl: " << decl.get() << "\n";
+          std::cout << "DEBUG: PRE-PASS adding dynamicDomainField to node: "
+                    << node.get() << " decl: " << decl.get() << "\n";
           state.addDynamicDomainField(
 
               node, smCtx.activeStateVarName,
@@ -545,8 +584,8 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
               state.addDynamicDomainField(
                   node, fs.historyStateVarName,
                   llvm::Type::getInt32Ty(*state.TheContext),
-                  llvm::ConstantInt::get(llvm::Type::getInt32Ty(*state.TheContext),
-                                         0));
+                  llvm::ConstantInt::get(
+                      llvm::Type::getInt32Ty(*state.TheContext), 0));
             }
           }
         }

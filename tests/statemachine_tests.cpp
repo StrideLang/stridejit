@@ -7,6 +7,7 @@
 
 // stride
 #include "stride/codegen/codeanalysis.hpp"
+#include "stride/codegen/codevalidator.hpp"
 #include "stride/utils/astfunctions.h"
 #include "stride/utils/astquery.h"
 
@@ -26,14 +27,28 @@ TEST(StateMachine, DomainInitialization) {
   strd::StrideEnvironment strenv;
   strd::ScopeStack scope;
 
+  strenv.prepareTree(tree);
+
+  strd::CodeValidator validator(tree);
+  EXPECT_TRUE(validator.isValid());
+
+  if (!validator.isValid()) {
+    for (auto &error : validator.getErrors()) {
+      std::cerr << error.getErrorText() << std::endl;
+    }
+  }
+
   strenv.generateIr(tree);
 
   bool foundVar = false;
-  auto domainDecl = strd::ASTQuery::findDeclarationByName("RootDomain", scope, tree);
-  if (domainDecl && strenv.state.dynamicDomainFields.find(domainDecl) != strenv.state.dynamicDomainFields.end()) {
-      for (auto& f : strenv.state.dynamicDomainFields[domainDecl]) {
-          if (f.name == "__RootDomain_MyStateMachine_active_state_id") foundVar = true;
-      }
+  auto domainDecl =
+      strd::ASTQuery::findDeclarationByName("RootDomain", scope, tree);
+  if (domainDecl && strenv.state.dynamicDomainFields.find(domainDecl) !=
+                        strenv.state.dynamicDomainFields.end()) {
+    for (auto &f : strenv.state.dynamicDomainFields[domainDecl]) {
+      if (f.name == "__RootDomain_MyStateMachine_active_state_id")
+        foundVar = true;
+    }
   }
   EXPECT_TRUE(foundVar);
 }
@@ -44,7 +59,20 @@ TEST(StateMachine, Flattening) {
       strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "statemachines.stride");
   EXPECT_NE(tree, nullptr);
 
+  strd::StrideEnvironment strenv;
   strd::ScopeStack scope;
+
+  strenv.prepareTree(tree);
+
+  strd::CodeValidator validator(tree);
+  EXPECT_TRUE(validator.isValid());
+
+  if (!validator.isValid()) {
+    for (auto &error : validator.getErrors()) {
+      std::cerr << error.getErrorText() << std::endl;
+    }
+  }
+
   auto domainDecl =
       strd::ASTQuery::findDeclarationByName("RootDomain", scope, tree);
   EXPECT_NE(domainDecl, nullptr);
@@ -133,12 +161,12 @@ TEST(StateMachine, CodegenExecution) {
   EXPECT_TRUE(success);
 
   struct RootDomainState {
-      int32_t active_state_id;
-      int32_t transition_request_id;
+    int32_t active_state_id;
+    int32_t transition_request_id;
   };
   auto statePtr = strenv.allocateSharedState("RootDomain");
   ASSERT_NE(statePtr, nullptr);
-  RootDomainState* ds = reinterpret_cast<RootDomainState*>(statePtr.get());
+  RootDomainState *ds = reinterpret_cast<RootDomainState *>(statePtr.get());
   void *args[] = {statePtr.get()};
   strenv.invoke("RootDomain_init", args);
 
@@ -148,11 +176,17 @@ TEST(StateMachine, CodegenExecution) {
   ASSERT_NE(counter, nullptr);
   EXPECT_EQ(*counter, 0);
 
+  // onEntry sets 1
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(*counter, 1);
 
+  // onProcess adds 1
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(*counter, 2);
+
+  // onProcess adds 1
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(*counter, 3);
 }
 
 TEST(StateMachine, TransitionLoading) {
@@ -160,6 +194,12 @@ TEST(StateMachine, TransitionLoading) {
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
                               "statemachines_transitions.stride");
   EXPECT_NE(tree, nullptr);
+
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+
+  strd::CodeValidator validator(tree);
+  EXPECT_TRUE(validator.isValid());
 
   strd::ScopeStack scope;
   auto domainDecl =
@@ -212,14 +252,14 @@ TEST(StateMachine, TransitionExecution) {
   EXPECT_TRUE(success);
 
   struct RootDomainState {
-      int32_t active_state_id;
-      int32_t transition_request_id;
+    int32_t active_state_id;
+    int32_t transition_request_id;
   };
   auto statePtr = strenv.allocateSharedState("RootDomain");
   ASSERT_NE(statePtr, nullptr);
-  RootDomainState* ds = reinterpret_cast<RootDomainState*>(statePtr.get());
+  RootDomainState *ds = reinterpret_cast<RootDomainState *>(statePtr.get());
   void *args[] = {statePtr.get()};
-  
+
   auto *counter = strenv.getGlobal<int32_t>("Counter");
   ASSERT_NE(counter, nullptr);
 
@@ -252,8 +292,8 @@ TEST(StateMachine, TransitionExecution) {
 
 TEST(StateMachine, AdvancedFormalizations) {
   strd::ASTNode tree;
-  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
-                              "statemachines.stride");
+  tree =
+      strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "statemachines.stride");
   EXPECT_NE(tree, nullptr);
 
   strd::ScopeStack scope;
@@ -272,4 +312,122 @@ TEST(StateMachine, AdvancedFormalizations) {
     EXPECT_FALSE(fs.resumeLastState);
     EXPECT_FALSE(fs.isFinal);
   }
+}
+
+TEST(StateMachine, AdvancedFormalizationsExecution) {
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                              "statemachines_advanced.stride");
+  EXPECT_NE(tree, nullptr);
+
+  strd::ScopeStack scope;
+  auto domainDecl =
+      strd::ASTQuery::findDeclarationByName("RootDomain", scope, tree);
+  EXPECT_NE(domainDecl, nullptr);
+
+  auto smContexts =
+      strd::StateMachine::collectStateMachines(domainDecl, scope, tree);
+  EXPECT_EQ(smContexts.size(), 1);
+  auto &sm = smContexts[0];
+
+  bool foundResumeLast = false;
+  bool foundFinal = false;
+  for (const auto &fs : sm.flattenedStates) {
+    if (fs.stateDecl->getName() == "CompositeState") {
+      EXPECT_TRUE(fs.resumeLastState);
+      EXPECT_EQ(fs.historyStateVarName,
+                "__MyStateMachine_CompositeState_history_state_id");
+      foundResumeLast = true;
+    }
+    if (fs.stateDecl->getName() == "FinalState") {
+      EXPECT_TRUE(fs.isFinal);
+      foundFinal = true;
+    }
+  }
+  EXPECT_TRUE(foundResumeLast);
+  EXPECT_TRUE(foundFinal);
+
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+  bool success = strenv.generateIr(tree);
+  EXPECT_TRUE(success);
+  success = strenv.compileInMemory();
+  EXPECT_TRUE(success);
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr, nullptr);
+  void *args[] = {statePtr.get()};
+
+  auto *counter = strenv.getGlobal<int32_t>("Counter");
+  auto *entryCounter = strenv.getGlobal<int32_t>("EntryCounter");
+  auto *exitCounter = strenv.getGlobal<int32_t>("ExitCounter");
+  ASSERT_NE(counter, nullptr);
+  ASSERT_NE(entryCounter, nullptr);
+  ASSERT_NE(exitCounter, nullptr);
+
+  strenv.invoke("RootDomain_init", args);
+
+  // Tick domain while Child1 is active: onProcessCode runs (10 >> Counter)
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(*counter, 10);
+
+  // Fire transition to FinalState: onExitCode of Child1 runs (1 >> ExitCounter)
+  struct RootDomainState {
+    int32_t active_state_id;
+    int32_t transition_request_id;
+  };
+  RootDomainState *ds = reinterpret_cast<RootDomainState *>(statePtr.get());
+  ds->transition_request_id = 1;
+
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(ds->transition_request_id, 0);
+  EXPECT_EQ(*exitCounter, 1);
+}
+
+TEST(StateMachine, TransitionGuardBlocking) {
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                              "statemachines_guard.stride");
+  EXPECT_NE(tree, nullptr);
+
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+  bool success = strenv.generateIr(tree);
+  EXPECT_TRUE(success);
+  success = strenv.compileInMemory();
+  EXPECT_TRUE(success);
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr, nullptr);
+  void *args[] = {statePtr.get()};
+
+  struct RootDomainState {
+    int32_t active_state_id;
+    int32_t transition_request_id;
+  };
+  RootDomainState *ds = reinterpret_cast<RootDomainState *>(statePtr.get());
+
+  auto *guardSignal = strenv.getGlobal<int32_t>("GuardSignal");
+  auto *counter = strenv.getGlobal<int32_t>("Counter");
+  ASSERT_NE(guardSignal, nullptr);
+  ASSERT_NE(counter, nullptr);
+
+  strenv.invoke("RootDomain_init", args);
+  EXPECT_EQ(ds->active_state_id, 2); // State1 is 2
+  EXPECT_EQ(*guardSignal, 0);
+  EXPECT_EQ(*counter, 0);
+
+  // Tick domain while GuardSignal == 0. Transition is guarded by GuardSignal
+  // and should NOT fire!
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(ds->active_state_id, 2); // Still in State1
+  EXPECT_EQ(*counter, 0);
+
+  // Now set GuardSignal to 1 (true)
+  *guardSignal = 1;
+
+  // Tick domain while GuardSignal == 1. Transition should fire!
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(ds->active_state_id, 3); // State2 is 3
+  EXPECT_EQ(*counter, 1);            // onTransition stream executed
 }
