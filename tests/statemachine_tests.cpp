@@ -165,7 +165,7 @@ TEST(StateMachine, CodegenExecution) {
   void *args[] = {statePtr.get()};
   strenv.invoke("RootDomain_init", args);
 
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), 2);
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), 2);
 
   auto *counter = strenv.getGlobal<int32_t>("Counter");
   ASSERT_NE(counter, nullptr);
@@ -408,7 +408,7 @@ TEST(StateMachine, TransitionGuardBlocking) {
   // Tick domain while GuardSignal == 1. Transition should fire!
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(strenv.getActiveStateId(statePtr), 3); // State2 is 3
-  EXPECT_EQ(*counter, 1);            // onTransition stream executed
+  EXPECT_EQ(*counter, 1); // onTransition stream executed
 }
 
 TEST(StateMachine, UpdateGuardParentBeforeChild) {
@@ -485,7 +485,8 @@ TEST(StateMachine, ParallelStateExecution) {
   EXPECT_EQ(*region1Counter, 0);
   EXPECT_EQ(*region2Counter, 0);
 
-  // Tick 1: Parallel parent process runs (+1), and child region process streams run (+10, +20)
+  // Tick 1: Parallel parent process runs (+1), and child region process streams
+  // run (+10, +20)
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(*parentCounter, 1);
   EXPECT_EQ(*region1Counter, 10);
@@ -533,10 +534,12 @@ TEST(StateMachine, ResumeLastStateExecution) {
   strenv.requestTransition(statePtr, 1); // ToOtherState is transition 1
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(strenv.getActiveStateId(statePtr), 5); // OtherState
-  EXPECT_EQ(strenv.getHistoryStateId(statePtr, "CompositeState"), 4); // Saved SubState2 in history
+  EXPECT_EQ(strenv.getHistoryStateId(statePtr, "CompositeState"),
+            4); // Saved SubState2 in history
 
   // Transition back to CompositeState (id 2). Because resumeLastState: on,
-  // it restores active_state_id to 4 (SubState2) instead of defaulting to 3 (SubState1)
+  // it restores active_state_id to 4 (SubState2) instead of defaulting to 3
+  // (SubState1)
   strenv.requestTransition(statePtr, 3); // ToComposite is transition 3
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(strenv.getActiveStateId(statePtr), 4); // Restored SubState2!

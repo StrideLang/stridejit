@@ -98,41 +98,43 @@ public:
   size_t getStateSize(const std::string &funcName) const;
 
   // Dynamic state variable access by name or pattern
-  std::optional<int32_t> getStateVar(const void *statePtr, const std::string &varName,
+  std::optional<int32_t> getStateVar(const void *statePtr,
+                                     const std::string &varName,
                                      const std::string &domainName = "") const;
   bool setStateVar(void *statePtr, const std::string &varName, int32_t value,
                    const std::string &domainName = "");
 
   // Functional state machine accessors (no hardcoded string mangling required)
-  std::optional<int32_t> getActiveStateId(const void *statePtr,
-                                          const std::string &smName = "",
-                                          const std::string &domainName = "") const;
-  std::optional<int32_t> getActiveStateId(const std::shared_ptr<void> &statePtr,
-                                          const std::string &smName = "",
-                                          const std::string &domainName = "") const;
+  std::optional<int32_t>
+  getActiveStateId(const void *statePtr, const std::string &smName = "",
+                   const std::string &domainName = "") const;
+  std::optional<int32_t>
+  getActiveStateId(const std::shared_ptr<void> &statePtr,
+                   const std::string &smName = "",
+                   const std::string &domainName = "") const;
 
   bool requestTransition(void *statePtr, int32_t transitionId,
                          const std::string &smName = "",
                          const std::string &domainName = "");
-  bool requestTransition(const std::shared_ptr<void> &statePtr, int32_t transitionId,
-                         const std::string &smName = "",
+  bool requestTransition(const std::shared_ptr<void> &statePtr,
+                         int32_t transitionId, const std::string &smName = "",
                          const std::string &domainName = "");
 
-  std::optional<int32_t> getTransitionRequestId(const void *statePtr,
-                                                 const std::string &smName = "",
-                                                 const std::string &domainName = "") const;
-  std::optional<int32_t> getTransitionRequestId(const std::shared_ptr<void> &statePtr,
-                                                 const std::string &smName = "",
-                                                 const std::string &domainName = "") const;
+  std::optional<int32_t>
+  getTransitionRequestId(const void *statePtr, const std::string &smName = "",
+                         const std::string &domainName = "") const;
+  std::optional<int32_t>
+  getTransitionRequestId(const std::shared_ptr<void> &statePtr,
+                         const std::string &smName = "",
+                         const std::string &domainName = "") const;
 
-  std::optional<int32_t> getHistoryStateId(const void *statePtr,
-                                            const std::string &stateName = "",
-                                            const std::string &smName = "",
-                                            const std::string &domainName = "") const;
-  std::optional<int32_t> getHistoryStateId(const std::shared_ptr<void> &statePtr,
-                                            const std::string &stateName = "",
-                                            const std::string &smName = "",
-                                            const std::string &domainName = "") const;
+  std::optional<int32_t>
+  getHistoryStateId(const void *statePtr, const std::string &stateName = "",
+                    const std::string &smName = "",
+                    const std::string &domainName = "") const;
+  std::optional<int32_t> getHistoryStateId(
+      const std::shared_ptr<void> &statePtr, const std::string &stateName = "",
+      const std::string &smName = "", const std::string &domainName = "") const;
 
   // Programmatic function inspection and dynamic invocation
   std::vector<FunctionArgInfo>

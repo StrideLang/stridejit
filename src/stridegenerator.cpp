@@ -536,8 +536,8 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
   for (const auto &node : tree->getChildren()) {
     if (node->getNodeType() == AST::Declaration) {
       auto decl = std::static_pointer_cast<DeclarationNode>(node);
-      if (decl->getObjectType() == "_domainDefinition") {
-
+      if (ASTQuery::isDomainDefinition(
+              ASTQuery::findTypeDeclaration(decl, scope, tree), scope, tree)) {
         auto smContexts = StateMachine::collectStateMachines(decl, scope, tree);
         for (const auto &smCtx : smContexts) {
           std::cout << "DEBUG: PRE-PASS adding dynamicDomainField to node: "
@@ -567,7 +567,7 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
     }
   }
 
-  state.buildStateStructTypes(state.m_intanceTree);
+  state.buildStateStructTypes(state.m_intanceTree, scope, tree);
   StrideGenerator::GeneratedIRCode generatedIRCode;
   for (const auto &node : tree->getChildren()) {
     if (node->getNodeType() == AST::Stream) {
@@ -593,7 +593,8 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
     } else if (node->getNodeType() == AST::Declaration ||
                node->getNodeType() == AST::BundleDeclaration) {
       auto decl = std::static_pointer_cast<DeclarationNode>(node);
-      if (decl->getObjectType() == "_domainDefinition") {
+      if (decl->getObjectType() == "_domainDefinition" ||
+          decl->getObjectType() == "gameDefinition") {
         generatedIRCode.domainGeneratedCode[decl->getName()];
       }
       if (decl->getObjectType() == "signal" ||
@@ -1774,7 +1775,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::generateStandaloneFunction(
   }
   state.m_intanceTree = CodeAnalysis::getStateStructInformationForDeclaration(
       funcDecl, scope, tree);
-  state.buildStateStructTypes(state.m_intanceTree);
+  state.buildStateStructTypes(state.m_intanceTree, scope, tree);
   auto func = createFunctionDeclaration(funcDecl, nullptr, tree, &scope, state);
   if (func) {
     auto *llvmFunc = func->codegen(state);

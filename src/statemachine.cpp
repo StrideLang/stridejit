@@ -7,7 +7,6 @@
 #include <llvm/IR/Instructions.h>
 
 #include "stride/parser/ast.h"
-#include "stride/parser/blocknode.h"
 #include "stride/parser/declarationnode.h"
 #include "stride/parser/propertynode.h"
 #include "stride/parser/valuenode.h"
@@ -21,7 +20,8 @@ static int resolveLeafInitialState(int stateId, const StateMachine &sm) {
     if (fs.id == stateId) {
       auto initProp = fs.stateDecl->getPropertyValue("initialState");
       if (initProp && initProp->getNodeType() == AST::Block) {
-        auto initName = std::static_pointer_cast<BlockNode>(initProp)->getName();
+        auto initName =
+            std::static_pointer_cast<BlockNode>(initProp)->getName();
         for (const auto &childFs : sm.flattenedStates) {
           if (childFs.stateDecl->getName() == initName) {
             return resolveLeafInitialState(childFs.id, sm);
@@ -35,13 +35,15 @@ static int resolveLeafInitialState(int stateId, const StateMachine &sm) {
 }
 
 static bool isTrueProp(ASTNode prop) {
-  if (!prop) return false;
+  if (!prop)
+    return false;
   if (prop->getNodeType() == AST::Switch) {
     return std::static_pointer_cast<ValueNode>(prop)->getSwitchValue();
   }
   if (prop->getNodeType() == AST::Block) {
     auto name = std::static_pointer_cast<BlockNode>(prop)->getName();
-    return (name == "true" || name == "on" || name == "1" || name == "ON" || name == "TRUE");
+    return (name == "true" || name == "on" || name == "1" || name == "ON" ||
+            name == "TRUE");
   }
   if (prop->getNodeType() == AST::Int) {
     return std::static_pointer_cast<ValueNode>(prop)->getIntValue() != 0;
@@ -55,7 +57,7 @@ static bool isTrueProp(ASTNode prop) {
 
 void StateMachine::flattenStateMachine(
     std::shared_ptr<DeclarationNode> stateNode, int &idCounter,
-    StateMachine &sm, ScopeStack &scope, ASTNode tree, int parentId) {
+    StateMachine &sm, const ScopeStack &scope, ASTNode tree, int parentId) {
   if (!stateNode)
     return;
 
@@ -66,26 +68,31 @@ void StateMachine::flattenStateMachine(
 
   auto isParProp = stateNode->getPropertyValue("isParallel");
   if (isParProp && isParProp->getNodeType() == AST::Switch) {
-    fs.isParallel = std::static_pointer_cast<ValueNode>(isParProp)->getSwitchValue();
+    fs.isParallel =
+        std::static_pointer_cast<ValueNode>(isParProp)->getSwitchValue();
   }
 
   auto resProp = stateNode->getPropertyValue("resumeLastState");
   if (resProp && resProp->getNodeType() == AST::Switch) {
-    fs.resumeLastState = std::static_pointer_cast<ValueNode>(resProp)->getSwitchValue();
+    fs.resumeLastState =
+        std::static_pointer_cast<ValueNode>(resProp)->getSwitchValue();
   }
 
   auto isFinProp = stateNode->getPropertyValue("isFinal");
   if (isFinProp && isFinProp->getNodeType() == AST::Switch) {
-    fs.isFinal = std::static_pointer_cast<ValueNode>(isFinProp)->getSwitchValue();
+    fs.isFinal =
+        std::static_pointer_cast<ValueNode>(isFinProp)->getSwitchValue();
   }
 
   auto updGuardDomProp = stateNode->getPropertyValue("updateGuardOnDomain");
   if (updGuardDomProp && updGuardDomProp->getNodeType() == AST::Switch) {
-    fs.updateGuardOnDomain = std::static_pointer_cast<ValueNode>(updGuardDomProp)->getSwitchValue();
+    fs.updateGuardOnDomain =
+        std::static_pointer_cast<ValueNode>(updGuardDomProp)->getSwitchValue();
   }
 
   if (fs.resumeLastState) {
-    fs.historyStateVarName = "__" + sm.name + "_" + stateNode->getName() + "_history_state_id";
+    fs.historyStateVarName =
+        "__" + sm.name + "_" + stateNode->getName() + "_history_state_id";
   }
 
   int currentId = fs.id;
@@ -106,6 +113,93 @@ void StateMachine::flattenStateMachine(
   }
 }
 
+std::optional<StateMachine>
+StateMachine::processStateMachine(std::shared_ptr<BlockNode> child,
+                                  std::string prefix, const ScopeStack &scope,
+                                  ASTNode tree) {
+  auto smName = child->getName();
+  auto smDecl = ASTQuery::findDeclarationByName(smName, scope, tree);
+  if (smDecl && ASTQuery::isStateNode(smDecl, scope, tree)) {
+    StateMachine sm;
+    sm.name = smName;
+    sm.smDecl = smDecl;
+    // TODO encapsulate this name generation
+    sm.activeStateVarName = "__" + prefix + "_" + smName + "_active_state_id";
+    sm.transitionRequestVarName =
+        "__" + prefix + "_" + smName + "_transition_request_id";
+
+    int idCounter = 1; // 0 usually means uninitialized or inactive
+    flattenStateMachine(smDecl, idCounter, sm, scope, tree);
+
+    // Second pass: Load transitions
+    int transitionIdCounter = 1;
+    for (auto &fs : sm.flattenedStates) {
+      auto transProp = fs.stateDecl->getPropertyValue("transitions");
+      if (transProp && transProp->getNodeType() == AST::List) {
+        for (const auto &child : transProp->getChildren()) {
+          std::shared_ptr<DeclarationNode> tDecl = nullptr;
+
+          if (child->getNodeType() == AST::Block) {
+            auto refName =
+                std::static_pointer_cast<BlockNode>(child)->getName();
+            tDecl = ASTQuery::findDeclarationByName(refName, scope, tree);
+          } else if (child->getNodeType() == AST::Declaration) {
+            tDecl = std::static_pointer_cast<DeclarationNode>(child);
+          }
+
+          if (tDecl) {
+            auto targetProp = tDecl->getPropertyValue("targetState");
+            if (targetProp && targetProp->getNodeType() == AST::Block) {
+              auto targetName =
+                  std::static_pointer_cast<BlockNode>(targetProp)->getName();
+              int targetId = -1;
+              for (const auto &targetFs : sm.flattenedStates) {
+                if (targetFs.stateDecl->getName() == targetName) {
+                  targetId = targetFs.id;
+                  break;
+                }
+              }
+
+              if (targetId != -1) {
+                Transition t;
+                t.id = transitionIdCounter++;
+                t.transitionDecl = tDecl;
+                t.targetStateId = targetId;
+
+                auto trigProp = tDecl->getPropertyValue("triggerOnGuard");
+                if (trigProp && trigProp->getNodeType() == AST::Switch) {
+                  auto valNode = std::static_pointer_cast<ValueNode>(trigProp);
+                  if (valNode->getSwitchValue()) {
+                    t.triggerOnGuard = true;
+                  }
+                }
+
+                fs.transitions.push_back(std::move(t));
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Determine initial state
+    sm.initialStateId = 1; // Default to the root state ID itself
+    auto initProp = smDecl->getPropertyValue("initialState");
+    if (initProp && initProp->getNodeType() == AST::Block) {
+      auto initName = std::static_pointer_cast<BlockNode>(initProp)->getName();
+      for (const auto &fs : sm.flattenedStates) {
+        if (fs.stateDecl->getName() == initName) {
+          sm.initialStateId = fs.id;
+          break;
+        }
+      }
+    }
+    sm.initialStateId = resolveLeafInitialState(sm.initialStateId, sm);
+    return sm;
+  }
+  return std::nullopt;
+}
+
 std::vector<StateMachine>
 StateMachine::collectStateMachines(std::shared_ptr<DeclarationNode> domainDecl,
                                    ScopeStack &scope, ASTNode tree) {
@@ -117,89 +211,18 @@ StateMachine::collectStateMachines(std::shared_ptr<DeclarationNode> domainDecl,
   if (smProperty && smProperty->getNodeType() == AST::List) {
     for (const auto &child : smProperty->getChildren()) {
       if (child->getNodeType() == AST::Block) {
-        auto smName = std::static_pointer_cast<BlockNode>(child)->getName();
-        auto smDecl = ASTQuery::findDeclarationByName(smName, scope, tree);
-        if (smDecl && ASTQuery::isStateNode(smDecl, scope, tree)) {
-          StateMachine sm;
-          sm.name = smName;
-          sm.smDecl = smDecl;
-          sm.activeStateVarName =
-              "__" + domainDecl->getName() + "_" + smName + "_active_state_id";
-          sm.transitionRequestVarName = "__" + domainDecl->getName() + "_" +
-                                        smName + "_transition_request_id";
-
-          int idCounter = 1; // 0 usually means uninitialized or inactive
-          flattenStateMachine(smDecl, idCounter, sm, scope, tree);
-
-          // Second pass: Load transitions
-          int transitionIdCounter = 1;
-          for (auto &fs : sm.flattenedStates) {
-            auto transProp = fs.stateDecl->getPropertyValue("transitions");
-            if (transProp && transProp->getNodeType() == AST::List) {
-              for (const auto &child : transProp->getChildren()) {
-                std::shared_ptr<DeclarationNode> tDecl = nullptr;
-
-                if (child->getNodeType() == AST::Block) {
-                  auto refName =
-                      std::static_pointer_cast<BlockNode>(child)->getName();
-                  tDecl = ASTQuery::findDeclarationByName(refName, scope, tree);
-                } else if (child->getNodeType() == AST::Declaration) {
-                  tDecl = std::static_pointer_cast<DeclarationNode>(child);
-                }
-
-                if (tDecl) {
-                  auto targetProp = tDecl->getPropertyValue("targetState");
-                  if (targetProp && targetProp->getNodeType() == AST::Block) {
-                    auto targetName =
-                        std::static_pointer_cast<BlockNode>(targetProp)
-                            ->getName();
-                    int targetId = -1;
-                    for (const auto &targetFs : sm.flattenedStates) {
-                      if (targetFs.stateDecl->getName() == targetName) {
-                        targetId = targetFs.id;
-                        break;
-                      }
-                    }
-
-                    if (targetId != -1) {
-                      Transition t;
-                      t.id = transitionIdCounter++;
-                      t.transitionDecl = tDecl;
-                      t.targetStateId = targetId;
-
-                      auto trigProp = tDecl->getPropertyValue("triggerOnGuard");
-                      if (trigProp && trigProp->getNodeType() == AST::Switch) {
-                        auto valNode =
-                            std::static_pointer_cast<ValueNode>(trigProp);
-                        if (valNode->getSwitchValue()) {
-                          t.triggerOnGuard = true;
-                        }
-                      }
-
-                      fs.transitions.push_back(std::move(t));
-                    }
-                  }
-                }
-              }
-            }
-          }
-
-          // Determine initial state
-          sm.initialStateId = 1; // Default to the root state ID itself
-          auto initProp = smDecl->getPropertyValue("initialState");
-          if (initProp && initProp->getNodeType() == AST::Block) {
-            auto initName =
-                std::static_pointer_cast<BlockNode>(initProp)->getName();
-            for (const auto &fs : sm.flattenedStates) {
-              if (fs.stateDecl->getName() == initName) {
-                sm.initialStateId = fs.id;
-                break;
-              }
-            }
-          }
-          sm.initialStateId = resolveLeafInitialState(sm.initialStateId, sm);
-          machines.push_back(std::move(sm));
+        auto stateMachine =
+            processStateMachine(std::static_pointer_cast<BlockNode>(child),
+                                domainDecl->getName(), scope, tree);
+        if (stateMachine.has_value()) {
+          machines.push_back(std::move(stateMachine.value()));
+        } else {
+          LOG_ERROR() << "Could not process state machine: " << child->toText()
+                      << std::endl;
         }
+      } else {
+        LOG_ERROR() << "Could not process state machine: " << child->toText()
+                    << std::endl;
       }
     }
   }
@@ -215,13 +238,15 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
   // 1. Load activeStateVar
 
   llvm::Value *activeStatePtr = nullptr;
-  std::cout << "DEBUG: Looking for " << smContext.activeStateVarName << " in NamedValues...\n";
+  std::cout << "DEBUG: Looking for " << smContext.activeStateVarName
+            << " in NamedValues...\n";
   auto activeStateIt = state.NamedValues.find(smContext.activeStateVarName);
 
   if (activeStateIt != state.NamedValues.end()) {
     activeStatePtr = activeStateIt->second.first;
   } else {
-    activeStatePtr = state.TheModule->getNamedGlobal(smContext.activeStateVarName);
+    activeStatePtr =
+        state.TheModule->getNamedGlobal(smContext.activeStateVarName);
   }
   assert(activeStatePtr && "Active state variable global not found!");
   auto *activeStateVal =
@@ -240,7 +265,8 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
 
     state.Builder->SetInsertPoint(stateBB);
 
-    // Execute updateGuard streams top-down (parent state first, then child state)
+    // Execute updateGuard streams top-down (parent state first, then child
+    // state)
     std::vector<const FlattenedState *> topDownAncestry;
     int ancId = fs.id;
     while (ancId != -1) {
@@ -251,7 +277,8 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
           break;
         }
       }
-      if (!aFs) break;
+      if (!aFs)
+        break;
       topDownAncestry.push_back(aFs);
       ancId = aFs->parentId;
     }
@@ -269,9 +296,10 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
     if (reqVarIt != state.NamedValues.end()) {
       reqVarPtr = reqVarIt->second.first;
     } else {
-      reqVarPtr = state.TheModule->getNamedGlobal(smContext.transitionRequestVarName);
+      reqVarPtr =
+          state.TheModule->getNamedGlobal(smContext.transitionRequestVarName);
     }
-    
+
     llvm::Value *reqVal = nullptr;
     if (reqVarPtr) {
       reqVal =
@@ -296,7 +324,8 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
           break;
         }
       }
-      if (!currFs) break;
+      if (!currFs)
+        break;
       for (const auto &t : currFs->transitions) {
         applicableTransitions.push_back({&t, currFs});
       }
@@ -326,7 +355,8 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
         llvm::Value *CondV = result.first;
         if (CondV) {
           if (CondV->getType()->isPointerTy()) {
-            CondV = state.Builder->CreateLoad(state.Builder->getInt32Ty(), CondV);
+            CondV =
+                state.Builder->CreateLoad(state.Builder->getInt32Ty(), CondV);
           }
           if (CondV->getType()->isIntegerTy(1)) {
             // Already i1 boolean
@@ -350,7 +380,8 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
 
       state.Builder->SetInsertPoint(transFireBB);
 
-      // Collect states being exited from active state fs up to appTrans.ownerState
+      // Collect states being exited from active state fs up to
+      // appTrans.ownerState
       std::vector<const FlattenedState *> exitedStates;
       int walkId = fs.id;
       while (walkId != -1) {
@@ -361,7 +392,8 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
             break;
           }
         }
-        if (!wFs) break;
+        if (!wFs)
+          break;
         exitedStates.push_back(wFs);
         if (wFs->id == appTrans.ownerState->id) {
           break;
@@ -377,10 +409,12 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
         // Update parent history state if parent state has resumeLastState
         if (eFs->parentId != -1) {
           for (auto &pFs : smContext.flattenedStates) {
-            if (pFs.id == eFs->parentId && pFs.resumeLastState && !pFs.historyStateVarName.empty()) {
+            if (pFs.id == eFs->parentId && pFs.resumeLastState &&
+                !pFs.historyStateVarName.empty()) {
               auto histIt = state.NamedValues.find(pFs.historyStateVarName);
               if (histIt != state.NamedValues.end()) {
-                state.Builder->CreateStore(state.Builder->getInt32(fs.id), histIt->second.first);
+                state.Builder->CreateStore(state.Builder->getInt32(fs.id),
+                                           histIt->second.first);
               }
             }
           }
@@ -388,7 +422,8 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
         if (eFs->resumeLastState && !eFs->historyStateVarName.empty()) {
           auto histIt = state.NamedValues.find(eFs->historyStateVarName);
           if (histIt != state.NamedValues.end()) {
-            state.Builder->CreateStore(state.Builder->getInt32(fs.id), histIt->second.first);
+            state.Builder->CreateStore(state.Builder->getInt32(fs.id),
+                                       histIt->second.first);
           }
         }
       }
@@ -398,7 +433,8 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
       }
 
       // Handle transition to target state (checking resumeLastState history)
-      int resolvedTargetId = resolveLeafInitialState(t.targetStateId, smContext);
+      int resolvedTargetId =
+          resolveLeafInitialState(t.targetStateId, smContext);
       const FlattenedState *targetFs = nullptr;
       for (const auto &s : smContext.flattenedStates) {
         if (s.id == t.targetStateId) {
@@ -408,12 +444,16 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
       }
 
       llvm::Value *finalTargetIdVal = state.Builder->getInt32(resolvedTargetId);
-      if (targetFs && targetFs->resumeLastState && !targetFs->historyStateVarName.empty()) {
+      if (targetFs && targetFs->resumeLastState &&
+          !targetFs->historyStateVarName.empty()) {
         auto histIt = state.NamedValues.find(targetFs->historyStateVarName);
         if (histIt != state.NamedValues.end()) {
-          auto *histVal = state.Builder->CreateLoad(state.Builder->getInt32Ty(), histIt->second.first);
-          auto *hasHist = state.Builder->CreateICmpNE(histVal, state.Builder->getInt32(0));
-          finalTargetIdVal = state.Builder->CreateSelect(hasHist, histVal, finalTargetIdVal);
+          auto *histVal = state.Builder->CreateLoad(state.Builder->getInt32Ty(),
+                                                    histIt->second.first);
+          auto *hasHist =
+              state.Builder->CreateICmpNE(histVal, state.Builder->getInt32(0));
+          finalTargetIdVal =
+              state.Builder->CreateSelect(hasHist, histVal, finalTargetIdVal);
         }
       }
 

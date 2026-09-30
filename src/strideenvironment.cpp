@@ -295,7 +295,8 @@ void *StrideEnvironment::allocateState(const std::string &funcName) {
   return mem;
 }
 
-std::shared_ptr<void> StrideEnvironment::allocateSharedState(const std::string &funcName) {
+std::shared_ptr<void>
+StrideEnvironment::allocateSharedState(const std::string &funcName) {
   void *ptr = allocateState(funcName);
   if (!ptr) {
     return nullptr;
@@ -327,7 +328,8 @@ size_t StrideEnvironment::getStateSize(const std::string &funcName) const {
 }
 
 static const StrideCompiler::StateStructInfo *
-findStructInfo(const StrideCompiler &compilerState, const std::string &domainName) {
+findStructInfo(const StrideCompiler &compilerState,
+               const std::string &domainName) {
   if (!domainName.empty()) {
     return compilerState.getStateStructInfo(domainName);
   }
@@ -337,14 +339,13 @@ findStructInfo(const StrideCompiler &compilerState, const std::string &domainNam
   return nullptr;
 }
 
-static std::optional<unsigned>
-findFieldByFunctionality(const StrideCompiler::StateStructInfo &info,
-                         const std::string &suffix,
-                         const std::string &filter1 = "",
-                         const std::string &filter2 = "") {
+static std::optional<unsigned> findFieldByFunctionality(
+    const StrideCompiler::StateStructInfo &info, const std::string &suffix,
+    const std::string &filter1 = "", const std::string &filter2 = "") {
   for (const auto &[key, idx] : info.varIndices) {
     if (key.length() >= suffix.length() &&
-        key.compare(key.length() - suffix.length(), suffix.length(), suffix) == 0) {
+        key.compare(key.length() - suffix.length(), suffix.length(), suffix) ==
+            0) {
       bool match1 = filter1.empty() || (key.find(filter1) != std::string::npos);
       bool match2 = filter2.empty() || (key.find(filter2) != std::string::npos);
       if (match1 && match2) {
@@ -355,11 +356,14 @@ findFieldByFunctionality(const StrideCompiler::StateStructInfo &info,
   return std::nullopt;
 }
 
-std::optional<int32_t> StrideEnvironment::getStateVar(const void *statePtr, const std::string &varName,
-                                                      const std::string &domainName) const {
-  if (!statePtr) return std::nullopt;
+std::optional<int32_t>
+StrideEnvironment::getStateVar(const void *statePtr, const std::string &varName,
+                               const std::string &domainName) const {
+  if (!statePtr)
+    return std::nullopt;
   const auto *info = findStructInfo(state, domainName);
-  if (!info || !info->structType) return std::nullopt;
+  if (!info || !info->structType)
+    return std::nullopt;
 
   unsigned fieldIdx = 0;
   auto it = info->varIndices.find(varName);
@@ -374,11 +378,13 @@ std::optional<int32_t> StrideEnvironment::getStateVar(const void *statePtr, cons
         break;
       }
     }
-    if (!found) return std::nullopt;
+    if (!found)
+      return std::nullopt;
   }
 
   const auto *DL = getDataLayout();
-  if (!DL) return std::nullopt;
+  if (!DL)
+    return std::nullopt;
 
   const auto *structLayout = DL->getStructLayout(info->structType);
   uint64_t offset = structLayout->getElementOffset(fieldIdx);
@@ -387,11 +393,14 @@ std::optional<int32_t> StrideEnvironment::getStateVar(const void *statePtr, cons
   return *reinterpret_cast<const int32_t *>(bytePtr);
 }
 
-bool StrideEnvironment::setStateVar(void *statePtr, const std::string &varName, int32_t value,
+bool StrideEnvironment::setStateVar(void *statePtr, const std::string &varName,
+                                    int32_t value,
                                     const std::string &domainName) {
-  if (!statePtr) return false;
+  if (!statePtr)
+    return false;
   const auto *info = findStructInfo(state, domainName);
-  if (!info || !info->structType) return false;
+  if (!info || !info->structType)
+    return false;
 
   unsigned fieldIdx = 0;
   auto it = info->varIndices.find(varName);
@@ -406,11 +415,13 @@ bool StrideEnvironment::setStateVar(void *statePtr, const std::string &varName, 
         break;
       }
     }
-    if (!found) return false;
+    if (!found)
+      return false;
   }
 
   const auto *DL = getDataLayout();
-  if (!DL) return false;
+  if (!DL)
+    return false;
 
   const auto *structLayout = DL->getStructLayout(info->structType);
   uint64_t offset = structLayout->getElementOffset(fieldIdx);
@@ -420,18 +431,24 @@ bool StrideEnvironment::setStateVar(void *statePtr, const std::string &varName, 
   return true;
 }
 
-std::optional<int32_t> StrideEnvironment::getActiveStateId(const void *statePtr,
-                                                           const std::string &smName,
-                                                           const std::string &domainName) const {
-  if (!statePtr) return std::nullopt;
+std::optional<int32_t>
+StrideEnvironment::getActiveStateId(const void *statePtr,
+                                    const std::string &smName,
+                                    const std::string &domainName) const {
+  if (!statePtr)
+    return std::nullopt;
   const auto *info = findStructInfo(state, domainName);
-  if (!info || !info->structType) return std::nullopt;
+  if (!info || !info->structType)
+    return std::nullopt;
 
-  auto fieldIdxOpt = findFieldByFunctionality(*info, "_active_state_id", smName);
-  if (!fieldIdxOpt) return std::nullopt;
+  auto fieldIdxOpt =
+      findFieldByFunctionality(*info, "_active_state_id", smName);
+  if (!fieldIdxOpt)
+    return std::nullopt;
 
   const auto *DL = getDataLayout();
-  if (!DL) return std::nullopt;
+  if (!DL)
+    return std::nullopt;
 
   const auto *structLayout = DL->getStructLayout(info->structType);
   uint64_t offset = structLayout->getElementOffset(*fieldIdxOpt);
@@ -440,24 +457,30 @@ std::optional<int32_t> StrideEnvironment::getActiveStateId(const void *statePtr,
   return *reinterpret_cast<const int32_t *>(bytePtr);
 }
 
-std::optional<int32_t> StrideEnvironment::getActiveStateId(const std::shared_ptr<void> &statePtr,
-                                                           const std::string &smName,
-                                                           const std::string &domainName) const {
+std::optional<int32_t>
+StrideEnvironment::getActiveStateId(const std::shared_ptr<void> &statePtr,
+                                    const std::string &smName,
+                                    const std::string &domainName) const {
   return getActiveStateId(statePtr.get(), smName, domainName);
 }
 
 bool StrideEnvironment::requestTransition(void *statePtr, int32_t transitionId,
                                           const std::string &smName,
                                           const std::string &domainName) {
-  if (!statePtr) return false;
+  if (!statePtr)
+    return false;
   const auto *info = findStructInfo(state, domainName);
-  if (!info || !info->structType) return false;
+  if (!info || !info->structType)
+    return false;
 
-  auto fieldIdxOpt = findFieldByFunctionality(*info, "_transition_request_id", smName);
-  if (!fieldIdxOpt) return false;
+  auto fieldIdxOpt =
+      findFieldByFunctionality(*info, "_transition_request_id", smName);
+  if (!fieldIdxOpt)
+    return false;
 
   const auto *DL = getDataLayout();
-  if (!DL) return false;
+  if (!DL)
+    return false;
 
   const auto *structLayout = DL->getStructLayout(info->structType);
   uint64_t offset = structLayout->getElementOffset(*fieldIdxOpt);
@@ -467,24 +490,31 @@ bool StrideEnvironment::requestTransition(void *statePtr, int32_t transitionId,
   return true;
 }
 
-bool StrideEnvironment::requestTransition(const std::shared_ptr<void> &statePtr, int32_t transitionId,
+bool StrideEnvironment::requestTransition(const std::shared_ptr<void> &statePtr,
+                                          int32_t transitionId,
                                           const std::string &smName,
                                           const std::string &domainName) {
   return requestTransition(statePtr.get(), transitionId, smName, domainName);
 }
 
-std::optional<int32_t> StrideEnvironment::getTransitionRequestId(const void *statePtr,
-                                                                  const std::string &smName,
-                                                                  const std::string &domainName) const {
-  if (!statePtr) return std::nullopt;
+std::optional<int32_t>
+StrideEnvironment::getTransitionRequestId(const void *statePtr,
+                                          const std::string &smName,
+                                          const std::string &domainName) const {
+  if (!statePtr)
+    return std::nullopt;
   const auto *info = findStructInfo(state, domainName);
-  if (!info || !info->structType) return std::nullopt;
+  if (!info || !info->structType)
+    return std::nullopt;
 
-  auto fieldIdxOpt = findFieldByFunctionality(*info, "_transition_request_id", smName);
-  if (!fieldIdxOpt) return std::nullopt;
+  auto fieldIdxOpt =
+      findFieldByFunctionality(*info, "_transition_request_id", smName);
+  if (!fieldIdxOpt)
+    return std::nullopt;
 
   const auto *DL = getDataLayout();
-  if (!DL) return std::nullopt;
+  if (!DL)
+    return std::nullopt;
 
   const auto *structLayout = DL->getStructLayout(info->structType);
   uint64_t offset = structLayout->getElementOffset(*fieldIdxOpt);
@@ -493,25 +523,30 @@ std::optional<int32_t> StrideEnvironment::getTransitionRequestId(const void *sta
   return *reinterpret_cast<const int32_t *>(bytePtr);
 }
 
-std::optional<int32_t> StrideEnvironment::getTransitionRequestId(const std::shared_ptr<void> &statePtr,
-                                                                  const std::string &smName,
-                                                                  const std::string &domainName) const {
+std::optional<int32_t>
+StrideEnvironment::getTransitionRequestId(const std::shared_ptr<void> &statePtr,
+                                          const std::string &smName,
+                                          const std::string &domainName) const {
   return getTransitionRequestId(statePtr.get(), smName, domainName);
 }
 
-std::optional<int32_t> StrideEnvironment::getHistoryStateId(const void *statePtr,
-                                                             const std::string &stateName,
-                                                             const std::string &smName,
-                                                             const std::string &domainName) const {
-  if (!statePtr) return std::nullopt;
+std::optional<int32_t> StrideEnvironment::getHistoryStateId(
+    const void *statePtr, const std::string &stateName,
+    const std::string &smName, const std::string &domainName) const {
+  if (!statePtr)
+    return std::nullopt;
   const auto *info = findStructInfo(state, domainName);
-  if (!info || !info->structType) return std::nullopt;
+  if (!info || !info->structType)
+    return std::nullopt;
 
-  auto fieldIdxOpt = findFieldByFunctionality(*info, "_history_state_id", stateName, smName);
-  if (!fieldIdxOpt) return std::nullopt;
+  auto fieldIdxOpt =
+      findFieldByFunctionality(*info, "_history_state_id", stateName, smName);
+  if (!fieldIdxOpt)
+    return std::nullopt;
 
   const auto *DL = getDataLayout();
-  if (!DL) return std::nullopt;
+  if (!DL)
+    return std::nullopt;
 
   const auto *structLayout = DL->getStructLayout(info->structType);
   uint64_t offset = structLayout->getElementOffset(*fieldIdxOpt);
@@ -520,10 +555,9 @@ std::optional<int32_t> StrideEnvironment::getHistoryStateId(const void *statePtr
   return *reinterpret_cast<const int32_t *>(bytePtr);
 }
 
-std::optional<int32_t> StrideEnvironment::getHistoryStateId(const std::shared_ptr<void> &statePtr,
-                                                             const std::string &stateName,
-                                                             const std::string &smName,
-                                                             const std::string &domainName) const {
+std::optional<int32_t> StrideEnvironment::getHistoryStateId(
+    const std::shared_ptr<void> &statePtr, const std::string &stateName,
+    const std::string &smName, const std::string &domainName) const {
   return getHistoryStateId(statePtr.get(), stateName, smName, domainName);
 }
 

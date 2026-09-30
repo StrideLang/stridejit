@@ -153,7 +153,8 @@ public:
     llvm::Constant *defaultVal;
   };
   std::map<ASTNode, std::vector<DynamicDomainField>> dynamicDomainFields;
-  void addDynamicDomainField(ASTNode domainNode, const std::string &name, llvm::Type *type, llvm::Constant *defaultVal);
+  void addDynamicDomainField(ASTNode domainNode, const std::string &name,
+                             llvm::Type *type, llvm::Constant *defaultVal);
 
   std::map<ASTNode, StateStructInfo> stateStructMap;
   llvm::Value *currentFunctionStatePtr{nullptr};
@@ -162,7 +163,9 @@ public:
 
   bool isModuleNode(ASTNode node) const;
   bool doesNodeNeedState(const CodeAnalysis::TypeTree *node);
-  void buildStateStructTypes(const CodeAnalysis::TypeTree &tree);
+  void buildNodeState(const CodeAnalysis::TypeTree &nodeTree);
+  void buildStateStructTypes(const CodeAnalysis::TypeTree &tree,
+                             ScopeStack &scope, ASTNode root);
   const StateStructInfo *getStateStructInfo(ASTNode instance) const;
   const StateStructInfo *getStateStructInfo(const std::string &name) const;
   const CodeAnalysis::TypeTree *

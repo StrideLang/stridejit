@@ -454,136 +454,131 @@ llvm::Constant *StrideCompiler::StateStructInfo::getChildDefaultConstant(
   return nullptr;
 }
 
-void StrideCompiler::buildStateStructTypes(const CodeAnalysis::TypeTree &tree) {
-  stateStructMap.clear();
+void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
+  if (!doesNodeNeedState(&nodeTree)) {
+    return;
+  }
 
-  std::function<void(const CodeAnalysis::TypeTree &)> buildNodeState =
-      [&](const CodeAnalysis::TypeTree &nodeTree) {
-        if (!doesNodeNeedState(&nodeTree)) {
-          return;
-        }
+  // First recursively build child state structs
+  for (const auto &child : nodeTree.nodes) {
+    buildNodeState(child);
+  }
 
-        // First recursively build child state structs
-        for (const auto &child : nodeTree.nodes) {
-          buildNodeState(child);
-        }
+  StateStructInfo info;
+  std::vector<llvm::Type *> fieldTypes;
+  std::vector<llvm::Constant *> defaultFieldValues;
 
-        StateStructInfo info;
-        std::vector<llvm::Type *> fieldTypes;
-        std::vector<llvm::Constant *> defaultFieldValues;
+  // 1. Persistent fields for this node's own state (only modules have
+  // state of their own)
+  if (isModuleNode(nodeTree.instance)) {
+    for (const auto &var : nodeTree.persistent) {
+      std::string varName = ASTQuery::getNodeName(var.first);
+      llvm::Type *varType = nullptr;
+      if (typesMap.find(var.second) != typesMap.end()) {
+        varType = typesMap[var.second];
+      } else if (var.first->getNodeType() == AST::Declaration) {
+        varType = getLLVMType(
+            std::static_pointer_cast<DeclarationNode>(var.first));
+      }
+      if (!varType) {
+        varType = llvm::Type::getDoubleTy(*TheContext);
+      }
+      info.varIndices[varName] = static_cast<unsigned>(fieldTypes.size());
+      fieldTypes.push_back(varType);
 
-        // 1. Persistent fields for this node's own state (only modules have
-        // state of their own)
-        if (isModuleNode(nodeTree.instance)) {
-          for (const auto &var : nodeTree.persistent) {
-            std::string varName = ASTQuery::getNodeName(var.first);
-            llvm::Type *varType = nullptr;
-            if (typesMap.find(var.second) != typesMap.end()) {
-              varType = typesMap[var.second];
-            } else if (var.first->getNodeType() == AST::Declaration) {
-              varType = getLLVMType(
-                  std::static_pointer_cast<DeclarationNode>(var.first));
+      llvm::Constant *defaultVal = nullptr;
+      if (var.first->getNodeType() == AST::Declaration) {
+        auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
+        auto defaultNode = decl->getPropertyValue("default");
+        if (defaultNode) {
+          if (defaultNode->getNodeType() == AST::Int) {
+            int64_t val = std::static_pointer_cast<ValueNode>(defaultNode)
+                              ->getIntValue();
+            if (varType->isIntegerTy(64)) {
+              defaultVal = llvm::ConstantInt::get(varType, val);
+            } else {
+              defaultVal = llvm::ConstantInt::get(
+                  varType, static_cast<int32_t>(val));
             }
-            if (!varType) {
-              varType = llvm::Type::getDoubleTy(*TheContext);
-            }
-            info.varIndices[varName] = static_cast<unsigned>(fieldTypes.size());
-            fieldTypes.push_back(varType);
-
-            llvm::Constant *defaultVal = nullptr;
-            if (var.first->getNodeType() == AST::Declaration) {
-              auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
-              auto defaultNode = decl->getPropertyValue("default");
-              if (defaultNode) {
-                if (defaultNode->getNodeType() == AST::Int) {
-                  int64_t val = std::static_pointer_cast<ValueNode>(defaultNode)
-                                    ->getIntValue();
-                  if (varType->isIntegerTy(64)) {
-                    defaultVal = llvm::ConstantInt::get(varType, val);
-                  } else {
-                    defaultVal = llvm::ConstantInt::get(
-                        varType, static_cast<int32_t>(val));
-                  }
-                } else if (defaultNode->getNodeType() == AST::Real) {
-                  double val = std::static_pointer_cast<ValueNode>(defaultNode)
-                                   ->getRealValue();
-                  defaultVal = llvm::ConstantFP::get(varType, val);
-                } else if (defaultNode->getNodeType() == AST::Switch) {
-                  bool val = std::static_pointer_cast<ValueNode>(defaultNode)
-                                 ->getSwitchValue();
-                  defaultVal = llvm::ConstantInt::get(varType, val ? 1 : 0);
-                }
-              }
-            }
-            if (!defaultVal) {
-              defaultVal = llvm::Constant::getNullValue(varType);
-            }
-            defaultFieldValues.push_back(defaultVal);
+          } else if (defaultNode->getNodeType() == AST::Real) {
+            double val = std::static_pointer_cast<ValueNode>(defaultNode)
+                             ->getRealValue();
+            defaultVal = llvm::ConstantFP::get(varType, val);
+          } else if (defaultNode->getNodeType() == AST::Switch) {
+            bool val = std::static_pointer_cast<ValueNode>(defaultNode)
+                           ->getSwitchValue();
+            defaultVal = llvm::ConstantInt::get(varType, val ? 1 : 0);
           }
         }
+      }
+      if (!defaultVal) {
+        defaultVal = llvm::Constant::getNullValue(varType);
+      }
+      defaultFieldValues.push_back(defaultVal);
+    }
+  }
 
-        // 1.5 Dynamic Domain Fields
-        std::cout << "DEBUG: Checking dynamicDomainFields for instance: "
-                  << nodeTree.instance.get() << "\n";
-        auto dynIt = dynamicDomainFields.find(nodeTree.instance);
-        if (dynIt != dynamicDomainFields.end()) {
-          std::cout << "DEBUG: Found dynamicDomainFields for instance! Count: "
-                    << dynIt->second.size() << "\n";
+  // 1.5 Dynamic Domain Fields
+  auto dynIt = dynamicDomainFields.find(nodeTree.instance);
+  if (dynIt != dynamicDomainFields.end()) {
+    for (const auto &field : dynIt->second) {
+      info.varIndices[field.name] =
+          static_cast<unsigned>(fieldTypes.size());
+      fieldTypes.push_back(field.type);
+      defaultFieldValues.push_back(field.defaultVal);
+    }
+  }
 
-          for (const auto &field : dynIt->second) {
-            info.varIndices[field.name] =
-                static_cast<unsigned>(fieldTypes.size());
-            fieldTypes.push_back(field.type);
-            defaultFieldValues.push_back(field.defaultVal);
+  // 2. Sub-struct fields for each child node requiring state
+  for (const auto &child : nodeTree.nodes) {
+    if (doesNodeNeedState(&child)) {
+      auto childIt = stateStructMap.find(child.instance);
+      if (childIt == stateStructMap.end()) {
+        // Fallback by name
+        std::string childName =
+            child.instance ? ASTQuery::getNodeName(child.instance) : "";
+        for (auto it = stateStructMap.begin(); it != stateStructMap.end();
+             ++it) {
+          if (it->first &&
+              ASTQuery::getNodeName(it->first) == childName) {
+            childIt = it;
+            break;
           }
         }
+      }
+      if (childIt != stateStructMap.end() && childIt->second.structType) {
+        info.childIndices[child.instance] =
+            static_cast<unsigned>(fieldTypes.size());
+        fieldTypes.push_back(childIt->second.structType);
+        defaultFieldValues.push_back(
+            childIt->second.defaultConstant
+                ? childIt->second.defaultConstant
+                : llvm::Constant::getNullValue(
+                      childIt->second.structType));
+      }
+    }
+  }
 
-        // 2. Sub-struct fields for each child node requiring state
-        for (const auto &child : nodeTree.nodes) {
-          if (doesNodeNeedState(&child)) {
-            auto childIt = stateStructMap.find(child.instance);
-            if (childIt == stateStructMap.end()) {
-              // Fallback by name
-              std::string childName =
-                  child.instance ? ASTQuery::getNodeName(child.instance) : "";
-              for (auto it = stateStructMap.begin(); it != stateStructMap.end();
-                   ++it) {
-                if (it->first &&
-                    ASTQuery::getNodeName(it->first) == childName) {
-                  childIt = it;
-                  break;
-                }
-              }
-            }
-            if (childIt != stateStructMap.end() && childIt->second.structType) {
-              info.childIndices[child.instance] =
-                  static_cast<unsigned>(fieldTypes.size());
-              fieldTypes.push_back(childIt->second.structType);
-              defaultFieldValues.push_back(
-                  childIt->second.defaultConstant
-                      ? childIt->second.defaultConstant
-                      : llvm::Constant::getNullValue(
-                            childIt->second.structType));
-            }
-          }
-        }
+  if (!fieldTypes.empty()) {
+    std::string name = nodeTree.instance
+                           ? ASTQuery::getNodeName(nodeTree.instance)
+                           : "anon";
+    info.structType = llvm::StructType::create(
+        *TheContext, "struct." + name + "_state");
+    info.structType->setBody(fieldTypes);
+    info.defaultConstant =
+        llvm::ConstantStruct::get(info.structType, defaultFieldValues);
+    stateStructMap[nodeTree.instance] = info;
+  }
+}
 
-        if (!fieldTypes.empty()) {
-          std::string name = nodeTree.instance
-                                 ? ASTQuery::getNodeName(nodeTree.instance)
-                                 : "anon";
-          info.structType = llvm::StructType::create(
-              *TheContext, "struct." + name + "_state");
-          info.structType->setBody(fieldTypes);
-          info.defaultConstant =
-              llvm::ConstantStruct::get(info.structType, defaultFieldValues);
-          stateStructMap[nodeTree.instance] = info;
-        }
-      };
-
+void StrideCompiler::buildStateStructTypes(const CodeAnalysis::TypeTree &tree,
+                                           ScopeStack &scope, ASTNode root) {
   if (tree.instance && tree.instance->getNodeType() == AST::Declaration) {
     auto decl = std::static_pointer_cast<DeclarationNode>(tree.instance);
-    if (decl->getObjectType() != "_domainDefinition") {
+    if (!ASTQuery::isDomainDefinition(
+            ASTQuery::findTypeDeclaration(decl, ScopeStack(), root), scope,
+            root)) {
       buildNodeState(tree);
       return;
     }
@@ -595,7 +590,9 @@ void StrideCompiler::buildStateStructTypes(const CodeAnalysis::TypeTree &tree) {
   for (const auto &node : tree.nodes) {
     if (node.instance && node.instance->getNodeType() == AST::Declaration) {
       auto decl = std::static_pointer_cast<DeclarationNode>(node.instance);
-      if (decl->getObjectType() == "_domainDefinition") {
+      if (ASTQuery::isDomainDefinition(
+              ASTQuery::findTypeDeclaration(decl, ScopeStack(), root), scope,
+              root)) {
         if (doesNodeNeedState(&node)) {
           buildNodeState(node);
         } else {

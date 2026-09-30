@@ -2,9 +2,11 @@
 #define STRIDE_STATEMACHINE_HPP
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "stride/parser/blocknode.h"
 #include "stride/stridejit/exprast.hpp"
 
 namespace strd {
@@ -71,9 +73,13 @@ public:
 
   static void flattenStateMachine(std::shared_ptr<DeclarationNode> stateNode,
                                   int &idCounter, StateMachine &sm,
-                                  ScopeStack &scope, ASTNode tree,
+                                  const ScopeStack &scope, ASTNode tree,
                                   int parentId = -1);
 
+  static std::optional<StateMachine>
+  processStateMachine(std::shared_ptr<strd::BlockNode> child,
+                      std::string prefix, const ScopeStack &scope,
+                      ASTNode tree);
   static std::vector<StateMachine>
   collectStateMachines(std::shared_ptr<DeclarationNode> domainDecl,
                        ScopeStack &scope, ASTNode tree);
