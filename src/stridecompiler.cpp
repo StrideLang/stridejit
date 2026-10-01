@@ -357,35 +357,28 @@ bool StrideCompiler::isModuleNode(ASTNode node) const {
 
 bool StrideCompiler::doesNodeNeedState(const CodeAnalysis::TypeTree *node) {
   if (!node) {
-    std::cout << "DEBUG: doesNodeNeedState: node is NULL!";
     return false;
   }
-  std::cout << "DEBUG: doesNodeNeedState called for instance: "
-            << node->instance.get() << "";
   // If it has dynamically added domain fields, it needs state!
-  if (dynamicDomainFields.find(node->instance) != dynamicDomainFields.end()) {
-    std::cout << "DEBUG: doesNodeNeedState returning true because found in "
-                 "dynamicDomainFields!";
-    return true;
+  for (const auto &pair : dynamicDomainFields) {
+    if (pair.first == node->instance ||
+        (pair.first && node->instance &&
+         ASTQuery::getNodeName(pair.first) ==
+             ASTQuery::getNodeName(node->instance))) {
+      return true;
+    }
   }
   // Only modules can have persistent state of their own, and only if they have
   // persistent variables. Reactions and loops do not have state of their own.
   if (isModuleNode(node->instance) && !node->persistent.empty()) {
-    std::cout
-        << "DEBUG: doesNodeNeedState returning true because isModuleNode!";
     return true;
   }
   // Any callable needs state if any nested child needs state
   for (const auto &child : node->nodes) {
     if (doesNodeNeedState(&child)) {
-      std::cout << "DEBUG: doesNodeNeedState returning true because child "
-                   "needs state! instance: "
-                << node->instance.get() << "";
       return true;
     }
   }
-  std::cout << "DEBUG: doesNodeNeedState returning FALSE for instance: "
-            << node->instance.get() << "";
   return false;
 }
 
@@ -410,6 +403,13 @@ StrideCompiler::getStateStructInfo(const std::string &name) const {
   for (const auto &pair : stateStructMap) {
     if (pair.first && ASTQuery::getNodeName(pair.first) == name) {
       return &pair.second;
+    }
+    if (pair.second.structType) {
+      std::string stName = pair.second.structType->getName().str();
+      if (stName == "struct." + name + "_state" || stName == name ||
+          stName.find(name) != std::string::npos) {
+        return &pair.second;
+      }
     }
   }
   return nullptr;

@@ -100,8 +100,10 @@ public:
   // Dynamic state variable access by name or pattern
   std::optional<int32_t> getStateVar(const void *statePtr,
                                      const std::string &varName,
+                                     std::optional<int> index = std::nullopt,
                                      const std::string &domainName = "") const;
   bool setStateVar(void *statePtr, const std::string &varName, int32_t value,
+                   std::optional<int> index = std::nullopt,
                    const std::string &domainName = "");
 
   // Functional state machine accessors (no hardcoded string mangling required)

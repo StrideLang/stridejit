@@ -6,98 +6,73 @@
 TEST(LogicalComparisonsTest, LogicalOperationsJIT) {
   strd::StrideEnvironment strenv;
 
-  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "logical_comparisons.stride");
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                               "logical_comparisons.stride");
   ASSERT_TRUE(ret);
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
 
-  auto EntrySym = strenv.getFunction("RootDomain_process");
-  ASSERT_TRUE(!!EntrySym);
-
-  // Function signature: void RootDomain_process(bool* InA, bool* InB, bool* OutAnd, bool* OutOr, bool* OutNot, bool* OutXor, bool* OutNand, bool* OutNor)
-  auto *Entry = EntrySym->toPtr<void (*)(bool*, bool*, bool*, bool*, bool*, bool*, bool*, bool*)>();
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr, nullptr);
+  void *args[] = {statePtr.get()};
 
   // Test case 1: InA = true, InB = false
   {
-    bool inA = true;
-    bool inB = false;
-    bool outAnd = false;
-    bool outOr = false;
-    bool outNot = false;
-    bool outXor = false;
-    bool outNand = false;
-    bool outNor = false;
+    strenv.setStateVar(statePtr.get(), "InA", 1);
+    strenv.setStateVar(statePtr.get(), "InB", 0);
 
-    Entry(&inA, &inB, &outAnd, &outOr, &outNot, &outXor, &outNand, &outNor);
+    strenv.invoke("RootDomain_process", args);
 
-    EXPECT_FALSE(outAnd);
-    EXPECT_TRUE(outOr);
-    EXPECT_FALSE(outNot);
-    EXPECT_TRUE(outXor);
-    EXPECT_TRUE(outNand);
-    EXPECT_FALSE(outNor);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutAnd").value_or(1), 0);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutOr").value_or(0), 1);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutNot").value_or(1), 0);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutXor").value_or(0), 1);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutNand").value_or(0), 1);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutNor").value_or(1), 0);
   }
 
   // Test case 2: InA = true, InB = true
   {
-    bool inA = true;
-    bool inB = true;
-    bool outAnd = false;
-    bool outOr = false;
-    bool outNot = false;
-    bool outXor = false;
-    bool outNand = false;
-    bool outNor = false;
+    strenv.setStateVar(statePtr.get(), "InA", 1);
+    strenv.setStateVar(statePtr.get(), "InB", 1);
 
-    Entry(&inA, &inB, &outAnd, &outOr, &outNot, &outXor, &outNand, &outNor);
+    strenv.invoke("RootDomain_process", args);
 
-    EXPECT_TRUE(outAnd);
-    EXPECT_TRUE(outOr);
-    EXPECT_FALSE(outNot);
-    EXPECT_FALSE(outXor);
-    EXPECT_FALSE(outNand);
-    EXPECT_FALSE(outNor);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutAnd").value_or(0), 1);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutOr").value_or(0), 1);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutNot").value_or(1), 0);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutXor").value_or(1), 0);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutNand").value_or(1), 0);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutNor").value_or(1), 0);
   }
 
   // Test case 3: InA = false, InB = false
   {
-    bool inA = false;
-    bool inB = false;
-    bool outAnd = false;
-    bool outOr = false;
-    bool outNot = false;
-    bool outXor = false;
-    bool outNand = false;
-    bool outNor = false;
+    strenv.setStateVar(statePtr.get(), "InA", 0);
+    strenv.setStateVar(statePtr.get(), "InB", 0);
 
-    Entry(&inA, &inB, &outAnd, &outOr, &outNot, &outXor, &outNand, &outNor);
+    strenv.invoke("RootDomain_process", args);
 
-    EXPECT_FALSE(outAnd);
-    EXPECT_FALSE(outOr);
-    EXPECT_TRUE(outNot);
-    EXPECT_FALSE(outXor);
-    EXPECT_TRUE(outNand);
-    EXPECT_TRUE(outNor);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutAnd").value_or(1), 0);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutOr").value_or(1), 0);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutNot").value_or(0), 1);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutXor").value_or(1), 0);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutNand").value_or(0), 1);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutNor").value_or(0), 1);
   }
 
   // Test case 4: InA = false, InB = true
   {
-    bool inA = false;
-    bool inB = true;
-    bool outAnd = false;
-    bool outOr = false;
-    bool outNot = false;
-    bool outXor = false;
-    bool outNand = false;
-    bool outNor = false;
+    strenv.setStateVar(statePtr.get(), "InA", 0);
+    strenv.setStateVar(statePtr.get(), "InB", 1);
 
-    Entry(&inA, &inB, &outAnd, &outOr, &outNot, &outXor, &outNand, &outNor);
+    strenv.invoke("RootDomain_process", args);
 
-    EXPECT_FALSE(outAnd);
-    EXPECT_TRUE(outOr);
-    EXPECT_TRUE(outNot);
-    EXPECT_TRUE(outXor);
-    EXPECT_TRUE(outNand);
-    EXPECT_FALSE(outNor);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutAnd").value_or(1), 0);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutOr").value_or(0), 1);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutNot").value_or(0), 1);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutXor").value_or(0), 1);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutNand").value_or(0), 1);
+    EXPECT_EQ(strenv.getStateVar(statePtr.get(), "OutNor").value_or(1), 0);
   }
 }

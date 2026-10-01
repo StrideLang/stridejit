@@ -161,27 +161,25 @@ TEST(StateMachine, CodegenExecution) {
   EXPECT_TRUE(success);
 
   auto statePtr = strenv.allocateSharedState("RootDomain");
-  ASSERT_NE(statePtr, nullptr);
-  void *args[] = {statePtr.get()};
+    void *args[] = {statePtr.get()};
   strenv.invoke("RootDomain_init", args);
 
   EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), 2);
 
-  auto *counter = strenv.getGlobal<int32_t>("Counter");
-  ASSERT_NE(counter, nullptr);
-  EXPECT_EQ(*counter, 0);
+  auto counter = [&]() { return strenv.getStateVar(statePtr.get(), "Counter").value_or(0); };
+  EXPECT_EQ(counter(), 0);
 
   // onEntry sets 1
   strenv.invoke("RootDomain_process", args);
-  EXPECT_EQ(*counter, 1);
+  EXPECT_EQ(counter(), 1);
 
   // onProcess adds 1
   strenv.invoke("RootDomain_process", args);
-  EXPECT_EQ(*counter, 2);
+  EXPECT_EQ(counter(), 2);
 
   // onProcess adds 1
   strenv.invoke("RootDomain_process", args);
-  EXPECT_EQ(*counter, 3);
+  EXPECT_EQ(counter(), 3);
 }
 
 TEST(StateMachine, TransitionLoading) {
@@ -247,21 +245,19 @@ TEST(StateMachine, TransitionExecution) {
   EXPECT_TRUE(success);
 
   auto statePtr = strenv.allocateSharedState("RootDomain");
-  ASSERT_NE(statePtr, nullptr);
-  void *args[] = {statePtr.get()};
+    void *args[] = {statePtr.get()};
 
-  auto *counter = strenv.getGlobal<int32_t>("Counter");
-  ASSERT_NE(counter, nullptr);
+  auto counter = [&]() { return strenv.getStateVar(statePtr.get(), "Counter").value_or(0); };
 
   strenv.invoke("RootDomain_init", args);
 
   EXPECT_EQ(strenv.getActiveStateId(statePtr), 2); // State1 is 2
-  EXPECT_EQ(*counter, 0);
+  EXPECT_EQ(counter(), 0);
 
   // Tick the domain without a request, nothing should happen
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(strenv.getActiveStateId(statePtr), 2);
-  EXPECT_EQ(*counter, 0);
+  EXPECT_EQ(counter(), 0);
 
   // Request transition 1 (ToState2)
   strenv.requestTransition(statePtr, 1);
@@ -269,7 +265,7 @@ TEST(StateMachine, TransitionExecution) {
 
   // activeState should be 3 (State2)
   EXPECT_EQ(strenv.getActiveStateId(statePtr), 3);
-  EXPECT_EQ(*counter, 1);
+  EXPECT_EQ(counter(), 1);
   EXPECT_EQ(strenv.getTransitionRequestId(statePtr), 0);
 
   // Request transition 2 (ToState3)
@@ -277,7 +273,7 @@ TEST(StateMachine, TransitionExecution) {
   strenv.invoke("RootDomain_process", args);
 
   EXPECT_EQ(strenv.getActiveStateId(statePtr), 4); // State3
-  EXPECT_EQ(*counter, 2);
+  EXPECT_EQ(counter(), 2);
 }
 
 TEST(StateMachine, AdvancedFormalizations) {
@@ -345,28 +341,24 @@ TEST(StateMachine, AdvancedFormalizationsExecution) {
   EXPECT_TRUE(success);
 
   auto statePtr = strenv.allocateSharedState("RootDomain");
-  ASSERT_NE(statePtr, nullptr);
-  void *args[] = {statePtr.get()};
+    void *args[] = {statePtr.get()};
 
-  auto *counter = strenv.getGlobal<int32_t>("Counter");
-  auto *entryCounter = strenv.getGlobal<int32_t>("EntryCounter");
-  auto *exitCounter = strenv.getGlobal<int32_t>("ExitCounter");
-  ASSERT_NE(counter, nullptr);
-  ASSERT_NE(entryCounter, nullptr);
-  ASSERT_NE(exitCounter, nullptr);
-
+  auto counter = [&]() { return strenv.getStateVar(statePtr.get(), "Counter").value_or(0); };
+  auto entryCounter = [&]() { return strenv.getStateVar(statePtr.get(), "EntryCounter").value_or(0); };
+  auto exitCounter = [&]() { return strenv.getStateVar(statePtr.get(), "ExitCounter").value_or(0); };
+      
   strenv.invoke("RootDomain_init", args);
 
   // Tick domain while Child1 is active: onProcessCode runs (10 >> Counter)
   strenv.invoke("RootDomain_process", args);
-  EXPECT_EQ(*counter, 10);
+  EXPECT_EQ(counter(), 10);
 
   // Fire transition to FinalState: onExitCode of Child1 runs (1 >> ExitCounter)
   strenv.requestTransition(statePtr, 1);
 
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(strenv.getTransitionRequestId(statePtr), 0);
-  EXPECT_EQ(*exitCounter, 1);
+  EXPECT_EQ(exitCounter(), 1);
 }
 
 TEST(StateMachine, TransitionGuardBlocking) {
@@ -383,32 +375,29 @@ TEST(StateMachine, TransitionGuardBlocking) {
   EXPECT_TRUE(success);
 
   auto statePtr = strenv.allocateSharedState("RootDomain");
-  ASSERT_NE(statePtr, nullptr);
-  void *args[] = {statePtr.get()};
+    void *args[] = {statePtr.get()};
 
-  auto *guardSignal = strenv.getGlobal<int32_t>("GuardSignal");
-  auto *counter = strenv.getGlobal<int32_t>("Counter");
-  ASSERT_NE(guardSignal, nullptr);
-  ASSERT_NE(counter, nullptr);
-
+  auto guardSignal = [&]() { return strenv.getStateVar(statePtr.get(), "GuardSignal").value_or(0); };
+  auto counter = [&]() { return strenv.getStateVar(statePtr.get(), "Counter").value_or(0); };
+    
   strenv.invoke("RootDomain_init", args);
   EXPECT_EQ(strenv.getActiveStateId(statePtr), 2); // State1 is 2
-  EXPECT_EQ(*guardSignal, 0);
-  EXPECT_EQ(*counter, 0);
+  EXPECT_EQ(guardSignal(), 0);
+  EXPECT_EQ(counter(), 0);
 
   // Tick domain while GuardSignal == 0. Transition is guarded by GuardSignal
   // and should NOT fire!
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(strenv.getActiveStateId(statePtr), 2); // Still in State1
-  EXPECT_EQ(*counter, 0);
+  EXPECT_EQ(counter(), 0);
 
   // Now set GuardSignal to 1 (true)
-  *guardSignal = 1;
+  strenv.setStateVar(statePtr.get(), "GuardSignal", 1);
 
   // Tick domain while GuardSignal == 1. Transition should fire!
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(strenv.getActiveStateId(statePtr), 3); // State2 is 3
-  EXPECT_EQ(*counter, 1); // onTransition stream executed
+  EXPECT_EQ(counter(), 1); // onTransition stream executed
 }
 
 TEST(StateMachine, UpdateGuardParentBeforeChild) {
@@ -429,27 +418,23 @@ TEST(StateMachine, UpdateGuardParentBeforeChild) {
   EXPECT_TRUE(success);
 
   auto statePtr = strenv.allocateSharedState("RootDomain");
-  ASSERT_NE(statePtr, nullptr);
-  void *args[] = {statePtr.get()};
+    void *args[] = {statePtr.get()};
 
-  auto *counter = strenv.getGlobal<int32_t>("Counter");
-  auto *parentOrder = strenv.getGlobal<int32_t>("ParentOrder");
-  auto *childOrder = strenv.getGlobal<int32_t>("ChildOrder");
-  ASSERT_NE(counter, nullptr);
-  ASSERT_NE(parentOrder, nullptr);
-  ASSERT_NE(childOrder, nullptr);
-
+  auto counter = [&]() { return strenv.getStateVar(statePtr.get(), "Counter").value_or(0); };
+  auto parentOrder = [&]() { return strenv.getStateVar(statePtr.get(), "ParentOrder").value_or(0); };
+  auto childOrder = [&]() { return strenv.getStateVar(statePtr.get(), "ChildOrder").value_or(0); };
+      
   strenv.invoke("RootDomain_init", args);
-  EXPECT_EQ(*counter, 0);
-  EXPECT_EQ(*parentOrder, 0);
-  EXPECT_EQ(*childOrder, 0);
+  EXPECT_EQ(counter(), 0);
+  EXPECT_EQ(parentOrder(), 0);
+  EXPECT_EQ(childOrder(), 0);
 
   // Tick domain. Parent updateGuard runs first (Counter=1 -> ParentOrder=1),
   // then Child updateGuard runs second (Counter=2 -> ChildOrder=2).
   strenv.invoke("RootDomain_process", args);
-  EXPECT_EQ(*parentOrder, 1);
-  EXPECT_EQ(*childOrder, 2);
-  EXPECT_EQ(*counter, 2);
+  EXPECT_EQ(parentOrder(), 1);
+  EXPECT_EQ(childOrder(), 2);
+  EXPECT_EQ(counter(), 2);
 }
 
 TEST(StateMachine, ParallelStateExecution) {
@@ -470,33 +455,29 @@ TEST(StateMachine, ParallelStateExecution) {
   EXPECT_TRUE(success);
 
   auto statePtr = strenv.allocateSharedState("RootDomain");
-  ASSERT_NE(statePtr, nullptr);
-  void *args[] = {statePtr.get()};
+    void *args[] = {statePtr.get()};
 
-  auto *parentCounter = strenv.getGlobal<int32_t>("ParentCounter");
-  auto *region1Counter = strenv.getGlobal<int32_t>("Region1Counter");
-  auto *region2Counter = strenv.getGlobal<int32_t>("Region2Counter");
-  ASSERT_NE(parentCounter, nullptr);
-  ASSERT_NE(region1Counter, nullptr);
-  ASSERT_NE(region2Counter, nullptr);
-
+  auto parentCounter = [&]() { return strenv.getStateVar(statePtr.get(), "ParentCounter").value_or(0); };
+  auto region1Counter = [&]() { return strenv.getStateVar(statePtr.get(), "Region1Counter").value_or(0); };
+  auto region2Counter = [&]() { return strenv.getStateVar(statePtr.get(), "Region2Counter").value_or(0); };
+      
   strenv.invoke("RootDomain_init", args);
-  EXPECT_EQ(*parentCounter, 0);
-  EXPECT_EQ(*region1Counter, 0);
-  EXPECT_EQ(*region2Counter, 0);
+  EXPECT_EQ(parentCounter(), 0);
+  EXPECT_EQ(region1Counter(), 0);
+  EXPECT_EQ(region2Counter(), 0);
 
   // Tick 1: Parallel parent process runs (+1), and child region process streams
   // run (+10, +20)
   strenv.invoke("RootDomain_process", args);
-  EXPECT_EQ(*parentCounter, 1);
-  EXPECT_EQ(*region1Counter, 10);
-  EXPECT_EQ(*region2Counter, 20);
+  EXPECT_EQ(parentCounter(), 1);
+  EXPECT_EQ(region1Counter(), 10);
+  EXPECT_EQ(region2Counter(), 20);
 
   // Tick 2: All process streams execute again concurrently
   strenv.invoke("RootDomain_process", args);
-  EXPECT_EQ(*parentCounter, 2);
-  EXPECT_EQ(*region1Counter, 20);
-  EXPECT_EQ(*region2Counter, 40);
+  EXPECT_EQ(parentCounter(), 2);
+  EXPECT_EQ(region1Counter(), 20);
+  EXPECT_EQ(region2Counter(), 40);
 }
 
 TEST(StateMachine, ResumeLastStateExecution) {
@@ -517,8 +498,7 @@ TEST(StateMachine, ResumeLastStateExecution) {
   EXPECT_TRUE(success);
 
   auto statePtr = strenv.allocateSharedState("RootDomain");
-  ASSERT_NE(statePtr, nullptr);
-  void *args[] = {statePtr.get()};
+    void *args[] = {statePtr.get()};
 
   strenv.invoke("RootDomain_init", args);
   // Initial state resolves to SubState1 (id 3)

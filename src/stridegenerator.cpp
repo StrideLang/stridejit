@@ -489,12 +489,12 @@ void StrideGenerator::processStateStreams(
         if (t.transitionDecl) {
           auto guardProp = t.transitionDecl->getPropertyValue("guard");
           if (guardProp) {
-            if (guardProp->getNodeType() == AST::Block) {
-              auto name =
-                  std::static_pointer_cast<BlockNode>(guardProp)->getName();
-              if (name != "none" && name != "None") {
-                t.guardCode.push_back(std::make_unique<VariableExprAST>(name));
-              }
+            if (guardProp->getNodeType() == AST::Block ||
+                guardProp->getNodeType() == AST::Bundle) {
+              t.guardCode.push_back(createExpr(guardProp));
+            } else if (guardProp->getNodeType() == AST::None) {
+              std::cerr << "Unsupported guard: " << guardProp->toText()
+                        << std::endl;
             }
           }
           auto onTransProp = t.transitionDecl->getPropertyValue("onTransition");
@@ -531,19 +531,19 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
   state.m_tree = tree;
   state.m_intanceTree = CodeAnalysis::getStateStructInformation({}, tree);
 
-  // PRE-PASS: Find all globals and state machine variables, and inject them
-  // into dynamic fields
+  // PRE-PASS: Find all domain variables, signals, switches, and state machine
+  // variables, and inject them into dynamic fields for each domain.
   for (const auto &node : tree->getChildren()) {
     if (node->getNodeType() == AST::Declaration) {
       auto decl = std::static_pointer_cast<DeclarationNode>(node);
       if (ASTQuery::isDomainDefinition(
               ASTQuery::findTypeDeclaration(decl, scope, tree), scope, tree)) {
+        std::string domainName = decl->getName();
+
+        // 1. Add state machine internal variables
         auto smContexts = StateMachine::collectStateMachines(decl, scope, tree);
         for (const auto &smCtx : smContexts) {
-          std::cout << "DEBUG: PRE-PASS adding dynamicDomainField to node: "
-                    << node.get() << " decl: " << decl.get() << "\n";
           state.addDynamicDomainField(
-
               node, smCtx.activeStateVarName,
               llvm::Type::getInt32Ty(*state.TheContext),
               llvm::ConstantInt::get(llvm::Type::getInt32Ty(*state.TheContext),
@@ -560,6 +560,82 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
                   llvm::Type::getInt32Ty(*state.TheContext),
                   llvm::ConstantInt::get(
                       llvm::Type::getInt32Ty(*state.TheContext), 0));
+            }
+          }
+        }
+
+        // 2. Add domain-level signals, switches, triggers, and guards
+        for (const auto &childNode : tree->getChildren()) {
+          if (childNode->getNodeType() == AST::Declaration ||
+              childNode->getNodeType() == AST::BundleDeclaration) {
+            auto varDecl = std::static_pointer_cast<DeclarationNode>(childNode);
+            std::string objType = varDecl->getObjectType();
+            if (objType == "switch" || objType == "signal" ||
+                objType == "trigger" || objType == "constant") {
+              auto domainProp = varDecl->getPropertyValue("domain");
+              bool belongsToDomain = false;
+              if (domainProp && domainProp->getNodeType() == AST::Block) {
+                belongsToDomain =
+                    (ASTQuery::getNodeName(domainProp) == domainName);
+              } else if (!domainProp) {
+                belongsToDomain = false;
+              }
+
+              if (belongsToDomain) {
+                llvm::Type *varType = state.getLLVMType(varDecl);
+                if (varDecl->getNodeType() == AST::BundleDeclaration) {
+                  int size =
+                      ASTQuery::getBlockDeclaredSize(varDecl, scope, tree);
+                  if (size > 0) {
+                    varType = llvm::ArrayType::get(varType, size);
+                  }
+                }
+                llvm::Constant *defaultVal =
+                    llvm::Constant::getNullValue(varType);
+                auto defaultNode = varDecl->getPropertyValue("default");
+                if (defaultNode) {
+                  if (defaultNode->getNodeType() == AST::Int) {
+                    int64_t val =
+                        std::static_pointer_cast<ValueNode>(defaultNode)
+                            ->getIntValue();
+                    if (varType->isIntegerTy(64)) {
+                      defaultVal = llvm::ConstantInt::get(varType, val);
+                    } else if (varType->isIntegerTy(32)) {
+                      defaultVal = llvm::ConstantInt::get(
+                          varType, static_cast<int32_t>(val));
+                    } else if (varType->isIntegerTy(1) ||
+                               varType->isIntegerTy(8)) {
+                      defaultVal =
+                          llvm::ConstantInt::get(varType, val != 0 ? 1 : 0);
+                    }
+                  } else if (defaultNode->getNodeType() == AST::Real) {
+                    double val =
+                        std::static_pointer_cast<ValueNode>(defaultNode)
+                            ->getRealValue();
+                    defaultVal = llvm::ConstantFP::get(varType, val);
+                  } else if (defaultNode->getNodeType() == AST::Switch) {
+                    bool val = std::static_pointer_cast<ValueNode>(defaultNode)
+                                   ->getSwitchValue();
+                    defaultVal = llvm::ConstantInt::get(varType, val ? 1 : 0);
+                  }
+                }
+
+                // Check if already added to avoid duplicates
+                bool alreadyAdded = false;
+                auto dynIt = state.dynamicDomainFields.find(node);
+                if (dynIt != state.dynamicDomainFields.end()) {
+                  for (const auto &field : dynIt->second) {
+                    if (field.name == varDecl->getName()) {
+                      alreadyAdded = true;
+                      break;
+                    }
+                  }
+                }
+                if (!alreadyAdded) {
+                  state.addDynamicDomainField(node, varDecl->getName(), varType,
+                                              defaultVal);
+                }
+              }
             }
           }
         }
@@ -600,9 +676,22 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
       if (decl->getObjectType() == "signal" ||
           ASTQuery::isConstant(decl, scope, tree)) {
         auto *type = state.getLLVMType(decl);
-        // TODO identify globals by domain better and ensure we are catching all
-        // globals in the domain.
-        generatedIRCode.GlobalSignals.push_back(decl);
+
+        bool inDynamicDomain = false;
+        for (const auto &pair : state.dynamicDomainFields) {
+          for (const auto &field : pair.second) {
+            if (field.name == decl->getName()) {
+              inDynamicDomain = true;
+              break;
+            }
+          }
+          if (inDynamicDomain)
+            break;
+        }
+        if (!inDynamicDomain) {
+          generatedIRCode.GlobalSignals.push_back(decl);
+        }
+
         // TODO remove domain args?
         if (type->isDoubleTy()) {
           generatedIRCode.domainArgs.push_back(
@@ -622,7 +711,20 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
         }
       } else if (decl->getObjectType() == "switch" ||
                  decl->getObjectType() == "trigger") {
-        generatedIRCode.GlobalSignals.push_back(decl);
+        bool inDynamicDomain = false;
+        for (const auto &pair : state.dynamicDomainFields) {
+          for (const auto &field : pair.second) {
+            if (field.name == decl->getName()) {
+              inDynamicDomain = true;
+              break;
+            }
+          }
+          if (inDynamicDomain)
+            break;
+        }
+        if (!inDynamicDomain) {
+          generatedIRCode.GlobalSignals.push_back(decl);
+        }
         generatedIRCode.domainArgs.push_back({decl->getName(), DataType::BOOL});
       } else {
         continue;

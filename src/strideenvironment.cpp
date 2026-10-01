@@ -358,28 +358,53 @@ static std::optional<unsigned> findFieldByFunctionality(
 
 std::optional<int32_t>
 StrideEnvironment::getStateVar(const void *statePtr, const std::string &varName,
+                               std::optional<int> index,
                                const std::string &domainName) const {
   if (!statePtr)
     return std::nullopt;
+
+  std::string baseName = varName;
+  size_t arrayIdx = index.has_value() ? static_cast<size_t>(index.value()) : 0;
+  // auto bracketPos = varName.find('[');
+  // if (bracketPos != std::string::npos) {
+  //   baseName = varName.substr(0, bracketPos);
+  //   if (!index.has_value()) {
+  //     auto closeBracketPos = varName.find(']', bracketPos);
+  //     if (closeBracketPos != std::string::npos) {
+  //       std::string idxStr =
+  //           varName.substr(bracketPos + 1, closeBracketPos - bracketPos - 1);
+  //       try {
+  //         arrayIdx = std::stoul(idxStr);
+  //       } catch (...) {
+  //       }
+  //     }
+  //   }
+  // }
+
   const auto *info = findStructInfo(state, domainName);
   if (!info || !info->structType)
     return std::nullopt;
 
   unsigned fieldIdx = 0;
-  auto it = info->varIndices.find(varName);
+  auto it = info->varIndices.find(baseName);
   if (it != info->varIndices.end()) {
     fieldIdx = it->second;
   } else {
-    bool found = false;
-    for (const auto &[key, idx] : info->varIndices) {
-      if (key.find(varName) != std::string::npos) {
-        fieldIdx = idx;
-        found = true;
-        break;
+    it = info->varIndices.find(varName);
+    if (it != info->varIndices.end()) {
+      fieldIdx = it->second;
+    } else {
+      bool found = false;
+      for (const auto &[key, idx] : info->varIndices) {
+        if (key.find(baseName) != std::string::npos) {
+          fieldIdx = idx;
+          found = true;
+          break;
+        }
       }
+      if (!found)
+        return std::nullopt;
     }
-    if (!found)
-      return std::nullopt;
   }
 
   const auto *DL = getDataLayout();
@@ -388,35 +413,84 @@ StrideEnvironment::getStateVar(const void *statePtr, const std::string &varName,
 
   const auto *structLayout = DL->getStructLayout(info->structType);
   uint64_t offset = structLayout->getElementOffset(fieldIdx);
+  llvm::Type *fieldType = info->structType->getElementType(fieldIdx);
 
   const char *bytePtr = static_cast<const char *>(statePtr) + offset;
+  if (fieldType->isArrayTy()) {
+    llvm::Type *elemTy = fieldType->getArrayElementType();
+    size_t elemSz = DL->getTypeAllocSize(elemTy);
+    const char *elemPtr = bytePtr + (arrayIdx * elemSz);
+    if (elemTy->isIntegerTy(1) || elemTy->isIntegerTy(8)) {
+      return static_cast<int32_t>(*reinterpret_cast<const uint8_t *>(elemPtr));
+    } else if (elemTy->isIntegerTy(32)) {
+      return *reinterpret_cast<const int32_t *>(elemPtr);
+    } else if (elemTy->isIntegerTy(64)) {
+      return static_cast<int32_t>(*reinterpret_cast<const int64_t *>(elemPtr));
+    } else if (elemTy->isDoubleTy() || elemTy->isFloatTy()) {
+      return static_cast<int32_t>(*reinterpret_cast<const double *>(elemPtr));
+    }
+    return *reinterpret_cast<const int32_t *>(elemPtr);
+  }
+
+  if (fieldType->isIntegerTy(1) || fieldType->isIntegerTy(8)) {
+    return static_cast<int32_t>(*reinterpret_cast<const uint8_t *>(bytePtr));
+  } else if (fieldType->isIntegerTy(64)) {
+    return static_cast<int32_t>(*reinterpret_cast<const int64_t *>(bytePtr));
+  } else if (fieldType->isDoubleTy() || fieldType->isFloatTy()) {
+    return static_cast<int32_t>(*reinterpret_cast<const double *>(bytePtr));
+  }
+
   return *reinterpret_cast<const int32_t *>(bytePtr);
 }
 
 bool StrideEnvironment::setStateVar(void *statePtr, const std::string &varName,
-                                    int32_t value,
+                                    int32_t value, std::optional<int> index,
                                     const std::string &domainName) {
   if (!statePtr)
     return false;
+
+  std::string baseName = varName;
+  size_t arrayIdx = index.has_value() ? static_cast<size_t>(index.value()) : 0;
+  auto bracketPos = varName.find('[');
+  if (bracketPos != std::string::npos) {
+    baseName = varName.substr(0, bracketPos);
+    if (!index.has_value()) {
+      auto closeBracketPos = varName.find(']', bracketPos);
+      if (closeBracketPos != std::string::npos) {
+        std::string idxStr =
+            varName.substr(bracketPos + 1, closeBracketPos - bracketPos - 1);
+        try {
+          arrayIdx = std::stoul(idxStr);
+        } catch (...) {
+        }
+      }
+    }
+  }
+
   const auto *info = findStructInfo(state, domainName);
   if (!info || !info->structType)
     return false;
 
   unsigned fieldIdx = 0;
-  auto it = info->varIndices.find(varName);
+  auto it = info->varIndices.find(baseName);
   if (it != info->varIndices.end()) {
     fieldIdx = it->second;
   } else {
-    bool found = false;
-    for (const auto &[key, idx] : info->varIndices) {
-      if (key.find(varName) != std::string::npos) {
-        fieldIdx = idx;
-        found = true;
-        break;
+    it = info->varIndices.find(varName);
+    if (it != info->varIndices.end()) {
+      fieldIdx = it->second;
+    } else {
+      bool found = false;
+      for (const auto &[key, idx] : info->varIndices) {
+        if (key.find(baseName) != std::string::npos) {
+          fieldIdx = idx;
+          found = true;
+          break;
+        }
       }
+      if (!found)
+        return false;
     }
-    if (!found)
-      return false;
   }
 
   const auto *DL = getDataLayout();
@@ -425,9 +499,40 @@ bool StrideEnvironment::setStateVar(void *statePtr, const std::string &varName,
 
   const auto *structLayout = DL->getStructLayout(info->structType);
   uint64_t offset = structLayout->getElementOffset(fieldIdx);
+  llvm::Type *fieldType = info->structType->getElementType(fieldIdx);
 
   char *bytePtr = static_cast<char *>(statePtr) + offset;
-  *reinterpret_cast<int32_t *>(bytePtr) = value;
+  if (fieldType->isArrayTy()) {
+    llvm::Type *elemTy = fieldType->getArrayElementType();
+    size_t elemSz = DL->getTypeAllocSize(elemTy);
+    char *elemPtr = bytePtr + (arrayIdx * elemSz);
+    if (elemTy->isIntegerTy(1) || elemTy->isIntegerTy(8)) {
+      *reinterpret_cast<int8_t *>(elemPtr) = static_cast<int8_t>(value);
+    } else if (elemTy->isIntegerTy(32)) {
+      *reinterpret_cast<int32_t *>(elemPtr) = value;
+    } else if (elemTy->isIntegerTy(64)) {
+      *reinterpret_cast<int64_t *>(elemPtr) = static_cast<int64_t>(value);
+    } else if (elemTy->isDoubleTy()) {
+      *reinterpret_cast<double *>(elemPtr) = static_cast<double>(value);
+    } else if (elemTy->isFloatTy()) {
+      *reinterpret_cast<float *>(elemPtr) = static_cast<float>(value);
+    } else {
+      *reinterpret_cast<int32_t *>(elemPtr) = value;
+    }
+    return true;
+  }
+
+  if (fieldType->isIntegerTy(1) || fieldType->isIntegerTy(8)) {
+    *reinterpret_cast<int8_t *>(bytePtr) = static_cast<int8_t>(value);
+  } else if (fieldType->isIntegerTy(64)) {
+    *reinterpret_cast<int64_t *>(bytePtr) = static_cast<int64_t>(value);
+  } else if (fieldType->isDoubleTy()) {
+    *reinterpret_cast<double *>(bytePtr) = static_cast<double>(value);
+  } else if (fieldType->isFloatTy()) {
+    *reinterpret_cast<float *>(bytePtr) = static_cast<float>(value);
+  } else {
+    *reinterpret_cast<int32_t *>(bytePtr) = value;
+  }
   return true;
 }
 
