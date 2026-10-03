@@ -889,7 +889,11 @@ void processArgGroup(
           }
           type.value()->print(llvm::outs());
           llvm::outs() << "\n";
-          auto *GEP = state.Builder->CreateGEP(type.value(), value, idxList);
+          llvm::Type *gepElemType = type.value();
+          if (gepElemType->isArrayTy()) {
+            gepElemType = static_cast<llvm::ArrayType *>(gepElemType)->getElementType();
+          }
+          auto *GEP = state.Builder->CreateGEP(gepElemType, value, idxList);
           value = GEP;
         }
         newArgVal = value;

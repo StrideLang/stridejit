@@ -46,6 +46,7 @@ public:
     std::vector<std::shared_ptr<DeclarationNode>> GlobalSignals;
     struct StateMachineInitInfo {
       std::string activeStateVarName;
+      std::string isEnteredVarName;
       int initialStateId;
     };
     std::map<std::string, std::vector<StateMachineInitInfo>>

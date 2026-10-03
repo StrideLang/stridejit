@@ -9,9 +9,12 @@ _domainDefinition RootDomain {
 	domainFunctionCode: ''
 }
 
-signal Counter { domain: RootDomain type: _IntType default: 0 }
-signal EntryCounter { domain: RootDomain type: _IntType default: 0 }
-signal ExitCounter { domain: RootDomain type: _IntType default: 0 }
+signal Counter { domain: RootDomain type: _IntType default: 100 }
+signal EntryCounter { domain: RootDomain type: _IntType default: 200 }
+signal ExitCounter { domain: RootDomain type: _IntType default: 300 }
+signal Parallel1Counter { domain: RootDomain type: _IntType default: 400 }
+signal Parallel2Counter { domain: RootDomain type: _IntType default: 500 }
+signal Child2Counter { domain: RootDomain type: _IntType default: 600 }
 
 state Child1 {
     onEntry: [
@@ -23,8 +26,25 @@ state Child1 {
     onExit: [
         1 >> ExitCounter;
     ]
+    transitions: [
+        transition ToChild2 {
+            targetState: Child2
+            guard: [ 1 ]
+        }
+    ]
 }
-state Child2 {}
+
+state Child2 {
+    onProcess: [
+        20 >> Child2Counter;
+    ]
+    transitions: [
+        transition ToParallel {
+            targetState: ParallelState
+            guard: [ 1 ]
+        }
+    ]
+}
 
 state CompositeState {
     resumeLastState: on
@@ -42,7 +62,32 @@ state FinalState {
     isFinal: on
 }
 
+state ParallelSub1 {
+    isParallel: on
+    onProcess: [
+        100 >> Parallel1Counter;
+    ]
+}
+
+state ParallelSub2 {
+    isParallel: on
+    onProcess: [
+        200 >> Parallel2Counter;
+    ]
+}
+
+state ParallelState {
+    isParallel: on
+    states: [ParallelSub1, ParallelSub2]
+    transitions: [
+        transition ToComposite {
+            targetState: CompositeState
+            guard: [ 1 ]
+        }
+    ]
+}
+
 state MyStateMachine {
     initialState: CompositeState
-    states: [CompositeState, FinalState]
+    states: [CompositeState, ParallelState, FinalState]
 }

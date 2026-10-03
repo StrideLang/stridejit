@@ -27,8 +27,8 @@ TEST(JIT, Create) {
 
   strenv.prepareTree(tree);
 
-  strd::StrideGenerator::generateCodeForTree(tree, scope, strenv.state);
-  strenv.state.TheModule->print(llvm::outs(), nullptr);
+  strd::StrideGenerator::generateCodeForTree(tree, scope, strenv.mStrideEnv);
+  strenv.mStrideEnv.TheModule->print(llvm::outs(), nullptr);
   llvm::outs() << "\n";
 
   InitializeNativeTarget();
@@ -59,8 +59,8 @@ TEST(JIT, Create) {
     return; // JIT.takeError();
 
   if (auto Err = (*JIT)->addIRModule(
-          llvm::orc::ThreadSafeModule(std::move(strenv.state.TheModule),
-                                      std::move(strenv.state.TheContext)))) {
+          llvm::orc::ThreadSafeModule(std::move(strenv.mStrideEnv.TheModule),
+                                      std::move(strenv.mStrideEnv.TheContext)))) {
   }
   auto EntrySym = (*JIT)->lookup("AddTwo");
   if (!EntrySym) {

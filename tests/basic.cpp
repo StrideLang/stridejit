@@ -24,8 +24,8 @@ TEST(Basic, Assignment) {
 
   strd::StrideEnvironment strenv;
 
-  strenv.state.NamedValues[decl->getName()] =
-      strd::RealExprAST(0.0).codegen(strenv.state);
+  strenv.mStrideEnv.NamedValues[decl->getName()] =
+      strd::RealExprAST(0.0).codegen(strenv.mStrideEnv);
 
   auto left = str->getLeft();
   auto right = str->getRight();
@@ -35,14 +35,14 @@ TEST(Basic, Assignment) {
         std::static_pointer_cast<strd::ValueNode>(left)->getRealValue());
   }
   if (right->getNodeType() == strd::AST::Block) {
-    strenv.state.NamedValues[std::static_pointer_cast<strd::BlockNode>(right)
-                                 ->getName()] = n1->codegen(strenv.state);
+    strenv.mStrideEnv.NamedValues[std::static_pointer_cast<strd::BlockNode>(right)
+                                 ->getName()] = n1->codegen(strenv.mStrideEnv);
   }
   // llvm::Type *type =strenv.state.NamedValues["G"].second;
 
-  EXPECT_TRUE(strenv.state.NamedValues["G"].second.value()->isDoubleTy());
+  EXPECT_TRUE(strenv.mStrideEnv.NamedValues["G"].second.value()->isDoubleTy());
   llvm::ConstantFP *CFP =
-      llvm::dyn_cast<llvm::ConstantFP>(strenv.state.NamedValues["G"].first);
+      llvm::dyn_cast<llvm::ConstantFP>(strenv.mStrideEnv.NamedValues["G"].first);
   EXPECT_NE(CFP, nullptr);
   EXPECT_EQ(CFP->getValue().convertToDouble(), 3.3);
 }
@@ -76,7 +76,7 @@ TEST(Basic, ExpressionFloatLiterals) {
         std::static_pointer_cast<strd::BlockNode>(right)->getName());
   }
   auto binExpr = strd::BinaryExprAST('+', std::move(n1), std::move(n2));
-  auto v = binExpr.codegen(strenv.state);
+  auto v = binExpr.codegen(strenv.mStrideEnv);
   EXPECT_TRUE(v.second.value()->isDoubleTy());
   llvm::ConstantFP *CFP = llvm::dyn_cast<llvm::ConstantFP>(v.first);
   EXPECT_NE(CFP, nullptr);
@@ -111,8 +111,8 @@ TEST(Basic, FunctionSimple) {
       strd::ASTQuery::findDeclarationByName(addFunc->getName(), scope, tree);
   EXPECT_NE(funcDecl, nullptr);
   auto func = strd::StrideGenerator::createFunctionDeclaration(
-      funcDecl, addFunc, tree, &scope, strenv.state);
-  auto *v = func->codegen(strenv.state);
+      funcDecl, addFunc, tree, &scope, strenv.mStrideEnv);
+  auto *v = func->codegen(strenv.mStrideEnv);
   EXPECT_NE(v, nullptr);
 
   EXPECT_TRUE(v->getType()->isPointerTy());
@@ -121,7 +121,7 @@ TEST(Basic, FunctionSimple) {
   // Although function is emmitted, it will be empty as the streams in it
   // have
   // not been processed
-  strenv.state.TheModule->print(llvm::outs(), nullptr);
+  strenv.mStrideEnv.TheModule->print(llvm::outs(), nullptr);
   llvm::outs() << "\n";
 }
 
@@ -134,18 +134,15 @@ TEST(Basic, PassThru) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("TestDomain_process");
+  auto statePtr = strenv.allocateSharedState("TestDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-  double in = 1.0;
-  double out = 0;
-
-  Entry(&in, &out);
+  strenv.setStateVar(statePtr.get(), "In", 1, std::nullopt, "TestDomain");
+  strenv.invoke("TestDomain_process", args);
+  double out =
+      strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "TestDomain")
+          .value_or(0);
 
   EXPECT_FLOAT_EQ(out, 1.0);
 }
@@ -160,26 +157,15 @@ TEST(Basic, DomainVariable) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("TestDomain_process");
+  auto statePtr = strenv.allocateSharedState("TestDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
+  strenv.setStateVar(statePtr.get(), "In", 6, std::nullopt, "TestDomain");
+  strenv.invoke("TestDomain_process", args);
 
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-  auto *A = strenv.getGlobal<int32_t>("A");
-
-  EXPECT_NE(A, nullptr);
-
-  int32_t In = 0;
-  Entry(&In);
-
-  EXPECT_EQ(*A, 0);
-
-  In = 6;
-  Entry(&In);
-
+  auto A = strenv.getStateVar<int32_t>(statePtr.get(), "A", std::nullopt, "TestDomain");
+  EXPECT_TRUE(A.has_value());
   EXPECT_EQ(*A, 6);
 }
 
@@ -194,32 +180,17 @@ TEST(JIT, BlockDefaults) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  int32_t out = true;
-  {
-    llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-        strenv.getFunction("TestDomain_init");
+  auto statePtr = strenv.allocateSharedState("TestDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-    if (!EntrySym) {
-      std::cerr << "No entry" << std::endl;
-    }
+  strenv.invoke("TestDomain_init", args);
+  strenv.invoke("TestDomain_process", args);
 
-    auto *Entry = EntrySym->toPtr<void (*)(...)>();
-    Entry(&out);
-  }
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("TestDomain_process");
-
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-  EXPECT_NE(Entry, nullptr);
-  Entry(&out);
-  EXPECT_EQ(out, 6);
+  auto out = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "TestDomain");
+  EXPECT_TRUE(out.has_value());
+  EXPECT_EQ(out.value_or(0), 6);
 }
-
 TEST(JIT, DomainInit) {
 
   strd::StrideEnvironment strenv;
@@ -229,33 +200,27 @@ TEST(JIT, DomainInit) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.JIT->lookup("RootDomain_process");
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  llvm::Expected<llvm::orc::ExecutorAddr> InitSym =
-      strenv.JIT->lookup("RootDomain_init");
-  if (!InitSym) {
-    std::cerr << "No init entry" << std::endl;
-  }
+  strenv.invoke("RootDomain_init", args);
+  auto In = strenv.getStateVar<int32_t>(statePtr.get(), "In", std::nullopt, "RootDomain");
+  auto In2 = strenv.getStateVar<int32_t>(statePtr.get(), "In2", std::nullopt, "RootDomain");
+  EXPECT_EQ(In.value_or(0), 3);
+  EXPECT_EQ(In2.value_or(0), 10);
 
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-  auto *InitEntry = InitSym->toPtr<void (*)(...)>();
+  strenv.invoke("RootDomain_process", args);
+  In = strenv.getStateVar<int32_t>(statePtr.get(), "In", std::nullopt, "RootDomain");
+  In2 = strenv.getStateVar<int32_t>(statePtr.get(), "In2", std::nullopt, "RootDomain");
+  EXPECT_EQ(In.value_or(0), 5);
+  EXPECT_EQ(In2.value_or(0), 11);
 
-  EXPECT_NE(Entry, nullptr);
-  double In;
-  int32_t In2;
-  InitEntry(&In, &In2);
-  EXPECT_EQ(In, 3.0);
-  EXPECT_EQ(In2, 10);
-  Entry(&In, &In2);
-  EXPECT_EQ(In, 5.0);
-  EXPECT_EQ(In2, 11);
-  InitEntry(&In, &In2);
-  EXPECT_EQ(In, 3.0);
-  EXPECT_EQ(In2, 10);
+  strenv.invoke("RootDomain_init", args);
+  In = strenv.getStateVar<int32_t>(statePtr.get(), "In", std::nullopt, "RootDomain");
+  In2 = strenv.getStateVar<int32_t>(statePtr.get(), "In2", std::nullopt, "RootDomain");
+  EXPECT_EQ(In.value_or(0), 3);
+  EXPECT_EQ(In2.value_or(0), 10);
 }
 
 TEST(JIT, ExternalFunctions) {
@@ -268,32 +233,21 @@ TEST(JIT, ExternalFunctions) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  bool out = true;
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+
   {
-    llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-        strenv.getFunction("RootDomain_init");
-
-    if (!EntrySym) {
-      std::cerr << "No entry" << std::endl;
-    }
-
-    auto *Entry = EntrySym->toPtr<void (*)(...)>();
-    Entry(&out);
+    strenv.setStateVar(statePtr.get(), "Out", true, std::nullopt, "RootDomain");
+    strenv.invoke("RootDomain_init", args);
     // out should get initialized to false
+    auto out = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(true);
     EXPECT_EQ(out, false);
   }
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-  EXPECT_NE(Entry, nullptr);
-  // double in = 1;
-  Entry(&out);
+  strenv.setStateVar(statePtr.get(), "Out", false, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  auto out = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(false);
   EXPECT_EQ(out, true);
 }
 
@@ -306,10 +260,10 @@ TEST(JIT, DomainFunctions) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  EXPECT_EQ(strenv.state.domainArgs.size(), 1);
-  EXPECT_EQ(strenv.state.domainArgs["RootDomain"].size(), 1);
-  EXPECT_EQ(strenv.state.domainArgs["RootDomain"][0].name, "Out");
-  EXPECT_EQ(strenv.state.domainArgs["RootDomain"][0].type,
+  EXPECT_EQ(strenv.mStrideEnv.domainArgs.size(), 1);
+  EXPECT_EQ(strenv.mStrideEnv.domainArgs["RootDomain"].size(), 1);
+  EXPECT_EQ(strenv.mStrideEnv.domainArgs["RootDomain"][0].name, "Out");
+  EXPECT_EQ(strenv.mStrideEnv.domainArgs["RootDomain"][0].type,
             strd::DataType::DOUBLE);
 }
 
@@ -322,27 +276,29 @@ TEST(JIT, Bundles) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
+  strenv.setStateVar(statePtr.get(), "In", 0.3, 1, "RootDomain");
+  strenv.setStateVar(statePtr.get(), "In", 0.4, 2, "RootDomain");
 
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+  strenv.invoke("RootDomain_process", args);
 
-  double In[16] = {0};
-  double Out[16] = {0};
-  In[1] = 0.3;
-  In[2] = 0.4;
+  auto In1 = strenv.getStateVar<double>(statePtr.get(), "In", 1, "RootDomain").value_or(0.0);
+  auto In2 = strenv.getStateVar<double>(statePtr.get(), "In", 2, "RootDomain").value_or(0.0);
+  auto In3 = strenv.getStateVar<double>(statePtr.get(), "In", 3, "RootDomain").value_or(0.0);
 
-  Entry(In, Out);
+  auto Out2 = strenv.getStateVar<double>(statePtr.get(), "Out", 2, "RootDomain").value_or(0.0);
+  auto Out3 = strenv.getStateVar<double>(statePtr.get(), "Out", 3, "RootDomain").value_or(0.0);
+  auto Out4 = strenv.getStateVar<double>(statePtr.get(), "Out", 4, "RootDomain").value_or(0.0);
+
   // Stride code: In[1] >> Out[2];
-  EXPECT_DOUBLE_EQ(In[1], Out[2]);
+  EXPECT_DOUBLE_EQ(In1, Out2);
   // Stride code: In[2] + 1.2 >> Out[3];
-  EXPECT_DOUBLE_EQ(Out[3], 0.4 + 1.2);
+  EXPECT_DOUBLE_EQ(Out3, 0.4 + 1.2);
   //  Stride code : In[3] >> Cos() >> Out[4];
-  EXPECT_DOUBLE_EQ(Out[4], cos(In[3]));
+  EXPECT_DOUBLE_EQ(Out4, cos(In3));
 }
 
 TEST(JIT, BundleDynamicIndex) {
@@ -355,41 +311,46 @@ TEST(JIT, BundleDynamicIndex) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  EXPECT_TRUE(static_cast<bool>(EntrySym));
+  strenv.setStateVar(statePtr.get(), "In", 7.7, 1, "RootDomain");
+  strenv.setStateVar(statePtr.get(), "In", 4.2, 2, "RootDomain");
+  strenv.setStateVar(statePtr.get(), "Index", 2, std::nullopt, "RootDomain");
 
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+  strenv.invoke("RootDomain_process", args);
 
-  double In[16] = {0};
-  int32_t Index = 2;
-  double Out[16] = {0};
-  In[1] = 7.7;
-  In[2] = 4.2;
+  auto Out2 = strenv.getStateVar<double>(statePtr.get(), "Out", 2, "RootDomain").value_or(0.0);
+  auto Out3 = strenv.getStateVar<double>(statePtr.get(), "Out", 3, "RootDomain").value_or(0.0);
+  auto Out4 = strenv.getStateVar<double>(statePtr.get(), "Out", 4, "RootDomain").value_or(0.0);
 
-  Entry(In, &Index, Out);
   // Stride code: In[Index] >> Out[3];
-  EXPECT_DOUBLE_EQ(Out[3], 4.2);
+  EXPECT_DOUBLE_EQ(Out3, 4.2);
   // Stride code: In[Index] + 1.5 >> Out[4];
-  EXPECT_DOUBLE_EQ(Out[4], 4.2 + 1.5);
+  EXPECT_DOUBLE_EQ(Out4, 4.2 + 1.5);
   // Stride code: In[1] >> Out[Index];
-  EXPECT_DOUBLE_EQ(Out[2], 7.7);
+  EXPECT_DOUBLE_EQ(Out2, 7.7);
 
   // Test with another value for Index
-  Index = 5;
-  In[5] = 9.1;
-  for (double &x : Out) {
-    x = 0.0;
+  strenv.setStateVar(statePtr.get(), "Index", 5, std::nullopt, "RootDomain");
+  strenv.setStateVar(statePtr.get(), "In", 9.1, 5, "RootDomain");
+  for (int i = 0; i < 16; ++i) {
+    strenv.setStateVar(statePtr.get(), "Out", 0.0, i, "RootDomain");
   }
 
-  Entry(In, &Index, Out);
+  strenv.invoke("RootDomain_process", args);
+
+  Out3 = strenv.getStateVar<double>(statePtr.get(), "Out", 3, "RootDomain").value_or(0.0);
+  Out4 = strenv.getStateVar<double>(statePtr.get(), "Out", 4, "RootDomain").value_or(0.0);
+  auto Out5 = strenv.getStateVar<double>(statePtr.get(), "Out", 5, "RootDomain").value_or(0.0);
+
   // Stride code: In[Index] >> Out[3];
-  EXPECT_DOUBLE_EQ(Out[3], 9.1);
+  EXPECT_DOUBLE_EQ(Out3, 9.1);
   // Stride code: In[Index] + 1.5 >> Out[4];
-  EXPECT_DOUBLE_EQ(Out[4], 9.1 + 1.5);
+  EXPECT_DOUBLE_EQ(Out4, 9.1 + 1.5);
   // Stride code: In[1] >> Out[Index];
-  EXPECT_DOUBLE_EQ(Out[5], 7.7);
+  EXPECT_DOUBLE_EQ(Out5, 7.7);
 }
 
 TEST(JIT, Stream) {
@@ -401,14 +362,11 @@ TEST(JIT, Stream) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("TestDomain_process");
-
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-  //
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+  auto statePtr = strenv.allocateSharedState("TestDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  
+  strenv.invoke("TestDomain_process", args);
 }
 
 TEST(JIT, IO) {
@@ -420,27 +378,23 @@ TEST(JIT, IO) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-  double in = 0;
-  double out = 0;
-
-  Entry(&in, &out);
+  strenv.setStateVar(statePtr.get(), "In", 0.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  auto out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_EQ(out, 1.0);
 
-  in = 3.14159;
-  Entry(&in, &out);
+  strenv.setStateVar(statePtr.get(), "In", 3.14159, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_FLOAT_EQ(out, cos(3.14159));
 
-  in = 1.0;
-  Entry(&in, &out);
+  strenv.setStateVar(statePtr.get(), "In", 1.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_FLOAT_EQ(out, cos(1.0));
 }
 
@@ -453,18 +407,12 @@ TEST(JIT, MathFunction) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-  double out = 0;
-
-  Entry(&out);
+  strenv.invoke("RootDomain_process", args);
+  auto out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_EQ(out, 1.0);
 }
 
@@ -477,28 +425,24 @@ TEST(JIT, TwoStreams) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
+  strenv.setStateVar(statePtr.get(), "In", 0.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  auto out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  EXPECT_EQ(out, cos(cos(0.0)));
 
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+  strenv.setStateVar(statePtr.get(), "In", 3.14159, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  EXPECT_FLOAT_EQ(out, cos(cos(3.14159)));
 
-  double in = 0;
-  double out = 0;
-
-  Entry(&in, &out);
-  EXPECT_EQ(out, cos(cos(in)));
-
-  in = 3.14159;
-  Entry(&in, &out);
-  EXPECT_FLOAT_EQ(out, cos(cos(in)));
-
-  in = 1.0;
-  Entry(&in, &out);
-  EXPECT_FLOAT_EQ(out, cos(cos(in)));
+  strenv.setStateVar(statePtr.get(), "In", 1.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  EXPECT_FLOAT_EQ(out, cos(cos(1.0)));
 }
 
 TEST(JIT, List) {
@@ -509,23 +453,18 @@ TEST(JIT, List) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-  double in = 0;
-  double out = 0;
-
-  Entry(&in, &out);
+  strenv.setStateVar(statePtr.get(), "In", 0.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  auto out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_EQ(out, 0.0);
 
-  in = 10;
-  Entry(&in, &out);
+  strenv.setStateVar(statePtr.get(), "In", 10.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_EQ(out, 1.0);
 }
 
@@ -537,27 +476,23 @@ TEST(JIT, SwitchOut) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-  double in = 0;
-  bool out = false;
-
-  Entry(&in, &out);
+  strenv.setStateVar(statePtr.get(), "In", 0.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  auto out = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(false);
   EXPECT_FALSE(out);
 
-  in = 10;
-  Entry(&in, &out);
+  strenv.setStateVar(statePtr.get(), "In", 10.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  out = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(false);
   EXPECT_TRUE(out);
 
-  in = 1;
-  Entry(&in, &out);
+  strenv.setStateVar(statePtr.get(), "In", 1.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  out = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(false);
   EXPECT_FALSE(out);
 }
 
@@ -570,18 +505,12 @@ TEST(JIT, Module) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-  double out;
-
-  Entry(&out);
+  strenv.invoke("RootDomain_process", args);
+  auto out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_EQ(out, 5);
 }
 
@@ -594,19 +523,13 @@ TEST(JIT, Domains) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("TestDomain_process");
+  auto statePtr = strenv.allocateSharedState("TestDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-  EXPECT_NE(Entry, nullptr);
-  double in = 1;
-  double out = 0;
-  Entry(&in, &out);
+  strenv.setStateVar(statePtr.get(), "In", 1.0, std::nullopt, "TestDomain");
+  strenv.invoke("TestDomain_process", args);
+  auto out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "TestDomain").value_or(0.0);
   EXPECT_EQ(out, 1);
 }
 
@@ -636,18 +559,12 @@ TEST(JIT, ModuleInternal) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("TestDomain_process");
+  auto statePtr = strenv.allocateSharedState("TestDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-  double out;
-
-  Entry(&out);
+  strenv.invoke("TestDomain_process", args);
+  auto out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "TestDomain").value_or(0.0);
   EXPECT_EQ(out, 5);
 }
 
@@ -660,29 +577,13 @@ TEST(JIT, Reaction) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("TestDomain_process");
+  auto statePtr = strenv.allocateSharedState("TestDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-  EXPECT_NE(Entry, nullptr);
-  //  double in = 0;
-  //  double out = 0;
-  double S = 0;
-  Entry(&S);
-
-  EXPECT_EQ(S, 3);
-
-  //  EntrySym = strenv.JIT->lookup("S");
-  //  if (!EntrySym) {
-  //    std::cerr << "No entry" << std::endl;
-  //  }
-  //  double v = *((double *)EntrySym->getAddress());
-  //  EXPECT_EQ(Entry, nullptr);
+  strenv.invoke("TestDomain_process", args);
+  auto Out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "TestDomain").value_or(0.0);
+  EXPECT_EQ(Out, 3);
 }
 
 TEST(JIT, IntegerType) {
@@ -696,25 +597,16 @@ TEST(JIT, IntegerType) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-  //    EXPECT_NE(Entry, nullptr);
-  //    //  double in = 0;
-  //    //  double out = 0;
-  double S = 0;
-  int32_t Val = 0;
-  Entry(&S, &Val);
-
+  strenv.invoke("RootDomain_process", args);
+  auto S = strenv.getStateVar<double>(statePtr.get(), "S", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_EQ(S, 0);
 
-  Entry(&S, &Val);
+  strenv.invoke("RootDomain_process", args);
+  S = strenv.getStateVar<double>(statePtr.get(), "S", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_EQ(S, 3);
 }
 
@@ -728,33 +620,17 @@ TEST(JIT, ReactionCondition) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("TestDomain_process");
+  auto statePtr = strenv.allocateSharedState("TestDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
+  strenv.invoke("TestDomain_process", args);
+  auto Out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "TestDomain").value_or(0.0);
+  EXPECT_EQ(Out, 0);
 
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-  EXPECT_NE(Entry, nullptr);
-  //  double in = 0;
-  //  double out = 0;
-  double S = 0;
-  double Val = 0;
-  Entry(&S, &Val);
-
-  EXPECT_EQ(S, 0);
-
-  Entry(&S, &Val);
-  EXPECT_EQ(S, 3);
-
-  //  EntrySym = strenv.JIT->lookup("S");
-  //  if (!EntrySym) {
-  //    std::cerr << "No entry" << std::endl;
-  //  }
-  //  double v = *((double *)EntrySym->getAddress());
-  //  EXPECT_EQ(Entry, nullptr);
+  strenv.invoke("TestDomain_process", args);
+  Out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "TestDomain").value_or(0.0);
+  EXPECT_EQ(Out, 3);
 }
 
 TEST(JIT, Reset) {
@@ -766,39 +642,38 @@ TEST(JIT, Reset) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
-  EXPECT_TRUE(static_cast<bool>(EntrySym));
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-  EXPECT_NE(Entry, nullptr);
+  strenv.invoke("RootDomain_init", args);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> InitSym =
-      strenv.getFunction("RootDomain_init");
-  if (!InitSym) {
-    std::cerr << "No init entry" << std::endl;
-  }
-  auto *InitEntry = InitSym->toPtr<void (*)(...)>();
-  EXPECT_NE(InitEntry, nullptr);
-
-  double In;
-  int32_t Count = 0;
-
-  InitEntry(&In, &Count);
-
-  Entry(&In, &Count);
+  strenv.invoke("RootDomain_process", args);
+  auto In = strenv.getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_EQ(In, 5.0);
-  Entry(&In, &Count);
+
+  strenv.invoke("RootDomain_process", args);
+  In = strenv.getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_EQ(In, 7.0);
-  Entry(&In, &Count);
+
+  strenv.invoke("RootDomain_process", args);
+  In = strenv.getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_EQ(In, 9.0);
-  Entry(&In, &Count);
+
+  strenv.invoke("RootDomain_process", args);
+  In = strenv.getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_EQ(In, 11.0);
-  Entry(&In, &Count);
+
+  strenv.invoke("RootDomain_process", args);
+  In = strenv.getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_EQ(In, 13.0);
-  Entry(&In, &Count);
+
+  strenv.invoke("RootDomain_process", args);
+  In = strenv.getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_EQ(In, 5.0);
-  Entry(&In, &Count);
+
+  strenv.invoke("RootDomain_process", args);
+  In = strenv.getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_EQ(In, 7.0);
 }
 
@@ -812,20 +687,15 @@ TEST(JIT, LiteralModuleInput) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("TestDomain_process");
+  auto statePtr = strenv.allocateSharedState("TestDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-  EXPECT_NE(Entry, nullptr);
-  int32_t out[2] = {0, 0};
-  Entry(out);
-  EXPECT_EQ(out[0], 5);
-  EXPECT_EQ(out[1], 8);
+  strenv.invoke("TestDomain_process", args);
+  auto out0 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", 0, "TestDomain").value_or(0);
+  auto out1 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", 1, "TestDomain").value_or(0);
+  EXPECT_EQ(out0, 5);
+  EXPECT_EQ(out1, 8);
 }
 
 TEST(JIT, TypecastStream) {
@@ -838,27 +708,21 @@ TEST(JIT, TypecastStream) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
+  strenv.invoke("RootDomain_process", args);
 
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+  auto Int0 = strenv.getStateVar<double>(statePtr.get(), "Int", 0, "RootDomain").value_or(0.0);
+  auto Int1 = strenv.getStateVar<double>(statePtr.get(), "Int", 1, "RootDomain").value_or(0.0);
+  EXPECT_EQ(Int0, 1);
+  EXPECT_EQ(Int1, 4);
 
-  //    EXPECT_NE(Entry, nullptr);
-  //    //  double in = 0;
-  //    //  double out = 0;
-  int32_t Int[2] = {0};
-  double Real[2] = {0};
-  Entry(Int, Real);
-
-  EXPECT_EQ(Int[0], 1);
-  EXPECT_EQ(Int[1], 4);
-
-  EXPECT_DOUBLE_EQ(Real[0], 3.0);
-  EXPECT_DOUBLE_EQ(Real[1], 5.0);
+  auto Real0 = strenv.getStateVar<double>(statePtr.get(), "Real", 0, "RootDomain").value_or(0.0);
+  auto Real1 = strenv.getStateVar<double>(statePtr.get(), "Real", 1, "RootDomain").value_or(0.0);
+  EXPECT_DOUBLE_EQ(Real0, 3.0);
+  EXPECT_DOUBLE_EQ(Real1, 5.0);
 }
 
 TEST(JIT, TypecastList) {
@@ -871,27 +735,20 @@ TEST(JIT, TypecastList) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("TestDomain_process");
+  auto statePtr = strenv.allocateSharedState("TestDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
+  strenv.setStateVar(statePtr.get(), "InReal", 5.0, std::nullopt, "TestDomain");
+  strenv.invoke("TestDomain_process", args);
 
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+  auto compReal = strenv.getStateVar<double>(statePtr.get(), "CompReal", std::nullopt, "TestDomain").value_or(0.0);
+  EXPECT_FALSE(compReal != 0.0);
 
-  double inReal = 5.0;
-  bool out = false;
-  Entry(&inReal, &out);
-
-  bool *compReal = strenv.getGlobal<bool>("CompReal");
-
-  EXPECT_TRUE(compReal);
-  EXPECT_FALSE(*compReal);
-
-  inReal = 0.0;
-  Entry(&inReal, &out);
-  EXPECT_TRUE(*compReal);
+  strenv.setStateVar(statePtr.get(), "InReal", 0.0, std::nullopt, "TestDomain");
+  strenv.invoke("TestDomain_process", args);
+  compReal = strenv.getStateVar<double>(statePtr.get(), "CompReal", std::nullopt, "TestDomain").value_or(0.0);
+  EXPECT_TRUE(compReal != 0.0);
 }
 
 TEST(JIT, BundleDefaults) {
@@ -904,38 +761,24 @@ TEST(JIT, BundleDefaults) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  int32_t out[3];
-  {
-    llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-        strenv.getFunction("RootDomain_init");
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-    if (!EntrySym) {
-      std::cerr << "No entry" << std::endl;
-    }
+  strenv.invoke("RootDomain_init", args);
 
-    auto *Entry = EntrySym->toPtr<void (*)(...)>();
-    Entry(&out);
-  }
+  auto A0 = strenv.getStateVar<double>(statePtr.get(), "A", 0, "RootDomain").value_or(0.0);
+  auto A1 = strenv.getStateVar<double>(statePtr.get(), "A", 1, "RootDomain").value_or(0.0);
 
-  int32_t *globalA = strenv.getGlobal<int32_t>("A");
+  EXPECT_EQ(A0, 5);
+  EXPECT_EQ(A1, 2);
 
-  EXPECT_TRUE(globalA);
-  EXPECT_EQ(globalA[0], 5);
-  EXPECT_EQ(globalA[1], 2);
+  strenv.invoke("RootDomain_process", args);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
-
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
-
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-  EXPECT_NE(Entry, nullptr);
-  Entry(&out);
-  EXPECT_EQ(out[0], 10);
-  EXPECT_EQ(out[1], 13);
+  auto out0 = strenv.getStateVar<double>(statePtr.get(), "Out", 0, "RootDomain").value_or(0.0);
+  auto out1 = strenv.getStateVar<double>(statePtr.get(), "Out", 1, "RootDomain").value_or(0.0);
+  EXPECT_EQ(out0, 10);
+  EXPECT_EQ(out1, 13);
 }
 
 TEST(JIT, Polymorphism) {
@@ -948,33 +791,28 @@ TEST(JIT, Polymorphism) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  int32_t inInt = 5;
-  double inReal = 5.0;
+  auto statePtr = strenv.allocateSharedState("TestDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("TestDomain_process");
+  strenv.setStateVar(statePtr.get(), "InInt", 5, std::nullopt, "TestDomain");
+  strenv.setStateVar(statePtr.get(), "InReal", 5.0, std::nullopt, "TestDomain");
+  strenv.invoke("TestDomain_process", args);
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
+  auto compInt = strenv.getStateVar<double>(statePtr.get(), "CompInt", std::nullopt, "TestDomain").value_or(0.0);
+  auto compReal = strenv.getStateVar<double>(statePtr.get(), "CompReal", std::nullopt, "TestDomain").value_or(0.0);
 
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-  bool out = false;
-  Entry(&inInt, &inReal, &out);
+  EXPECT_FALSE(compInt != 0.0);
+  EXPECT_FALSE(compReal != 0.0);
 
-  bool *compInt = strenv.getGlobal<bool>("CompInt");
-  bool *compReal = strenv.getGlobal<bool>("CompReal");
-
-  EXPECT_TRUE(compInt);
-  EXPECT_TRUE(compReal);
-  EXPECT_FALSE(*compInt);
-  EXPECT_FALSE(*compReal);
-
-  inInt = 0;
-  inReal = 0.0;
-  Entry(&inInt, &inReal, &out);
-  EXPECT_TRUE(*compInt);
-  EXPECT_TRUE(*compReal);
+  strenv.setStateVar(statePtr.get(), "InInt", 0, std::nullopt, "TestDomain");
+  strenv.setStateVar(statePtr.get(), "InReal", 0.0, std::nullopt, "TestDomain");
+  strenv.invoke("TestDomain_process", args);
+  
+  compInt = strenv.getStateVar<double>(statePtr.get(), "CompInt", std::nullopt, "TestDomain").value_or(0.0);
+  compReal = strenv.getStateVar<double>(statePtr.get(), "CompReal", std::nullopt, "TestDomain").value_or(0.0);
+  EXPECT_TRUE(compInt != 0.0);
+  EXPECT_TRUE(compReal != 0.0);
 }
 
 TEST(JIT, Loop) {
@@ -986,20 +824,18 @@ TEST(JIT, Loop) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.JIT->lookup("RootDomain_process");
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-  EXPECT_NE(Entry, nullptr);
   int32_t List[20] = {1000, 1, 1, 1, 1, 1, 1, 1, 1, 1,
                       1,    1, 1, 1, 1, 1, 1, 1, 1, 100};
-  int32_t Out = 0;
-  Entry(List, &Out);
+  for (int i = 0; i < 20; ++i) {
+      strenv.setStateVar(statePtr.get(), "List", List[i], i, "RootDomain");
+  }
 
+  strenv.invoke("RootDomain_process", args);
+  auto Out = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0);
   EXPECT_EQ(Out, 1118);
 }
 
@@ -1013,22 +849,16 @@ TEST(JIT, PortPropertySize) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
+  strenv.invoke("RootDomain_process", args);
+  auto Out0 = strenv.getStateVar<double>(statePtr.get(), "Out", 0, "RootDomain").value_or(0.0);
+  auto Out1 = strenv.getStateVar<double>(statePtr.get(), "Out", 1, "RootDomain").value_or(0.0);
 
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-  EXPECT_NE(Entry, nullptr);
-  int32_t In[16] = {0};
-  int32_t Out[2] = {0};
-  Entry(In, Out);
-
-  EXPECT_EQ(Out[0], 32);
-  EXPECT_EQ(Out[1], 8);
+  EXPECT_EQ(Out0, 32);
+  EXPECT_EQ(Out1, 8);
 }
 
 TEST(JIT, PlatformFunction) {
@@ -1041,24 +871,18 @@ TEST(JIT, PlatformFunction) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("TestDomain_process");
+  auto statePtr = strenv.allocateSharedState("TestDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
+  strenv.setStateVar(statePtr.get(), "InReal", 3.0, std::nullopt, "TestDomain");
+  strenv.setStateVar(statePtr.get(), "InInt", 2, std::nullopt, "TestDomain");
 
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
+  strenv.invoke("TestDomain_process", args);
 
-  ASSERT_NE(Entry, nullptr);
-  double InReal = 3.0;
-  int32_t InInt = 2;
-  bool Out = false;
-  int32_t OutInt = 0;
-  double OutReal = 0.0;
-  double OutWrapped = 0.0;
-
-  Entry(&InReal, &InInt, &Out, &OutInt, &OutReal, &OutWrapped);
+  auto OutInt = strenv.getStateVar<double>(statePtr.get(), "OutInt", std::nullopt, "TestDomain").value_or(0.0);
+  auto OutReal = strenv.getStateVar<double>(statePtr.get(), "OutReal", std::nullopt, "TestDomain").value_or(0.0);
+  auto OutWrapped = strenv.getStateVar<double>(statePtr.get(), "OutWrapped", std::nullopt, "TestDomain").value_or(0.0);
 
   EXPECT_EQ(OutInt, 2);
   EXPECT_DOUBLE_EQ(OutReal, 5.5);
@@ -1075,21 +899,18 @@ TEST(JIT, ModuleProperties) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
+  strenv.setStateVar(statePtr.get(), "In", 2.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  
+  auto out0 = strenv.getStateVar<double>(statePtr.get(), "Out", 0, "RootDomain").value_or(0.0);
+  auto out1 = strenv.getStateVar<double>(statePtr.get(), "Out", 1, "RootDomain").value_or(0.0);
 
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-
-  EXPECT_NE(Entry, nullptr);
-  double in = 2.0f;
-  double out[2] = {0, 0};
-  Entry(&in, out);
-  EXPECT_EQ(out[0], 6);
-  EXPECT_EQ(out[1], 8);
+  EXPECT_EQ(out0, 6);
+  EXPECT_EQ(out1, 8);
 }
 
 // Function Standalone ------------------------------------
@@ -1102,7 +923,7 @@ TEST(JIT, FunctionStandaloneModuleSimple) {
 
   strd::StrideEnvironment strenv;
   strenv.prepareTree(tree);
-  strenv.state.m_intanceTree =
+  strenv.mStrideEnv.m_intanceTree =
       strd::CodeAnalysis::getStateStructInformation({}, tree);
 
   strd::ScopeStack scope;
@@ -1111,10 +932,10 @@ TEST(JIT, FunctionStandaloneModuleSimple) {
   EXPECT_NE(funcDecl, nullptr);
 
   auto func = strd::StrideGenerator::createFunctionDeclaration(
-      funcDecl, nullptr, tree, &scope, strenv.state);
+      funcDecl, nullptr, tree, &scope, strenv.mStrideEnv);
   EXPECT_NE(func, nullptr);
 
-  auto *v = func->codegen(strenv.state);
+  auto *v = func->codegen(strenv.mStrideEnv);
   EXPECT_NE(v, nullptr);
 
   auto *llvmFunc = llvm::dyn_cast<llvm::Function>(v);
@@ -1146,7 +967,7 @@ TEST(JIT, FunctionStandaloneReactionSimple) {
 
   strd::StrideEnvironment strenv;
   strenv.prepareTree(tree);
-  strenv.state.m_intanceTree =
+  strenv.mStrideEnv.m_intanceTree =
       strd::CodeAnalysis::getStateStructInformation({}, tree);
 
   strd::ScopeStack scope;
@@ -1155,10 +976,10 @@ TEST(JIT, FunctionStandaloneReactionSimple) {
   EXPECT_NE(funcDecl, nullptr);
 
   auto func = strd::StrideGenerator::createFunctionDeclaration(
-      funcDecl, nullptr, tree, &scope, strenv.state);
+      funcDecl, nullptr, tree, &scope, strenv.mStrideEnv);
   EXPECT_NE(func, nullptr);
 
-  auto *v = func->codegen(strenv.state);
+  auto *v = func->codegen(strenv.mStrideEnv);
   EXPECT_NE(v, nullptr);
 
   auto *llvmFunc = llvm::dyn_cast<llvm::Function>(v);
@@ -1186,7 +1007,7 @@ TEST(JIT, FunctionStandaloneLoopSimple) {
 
   strd::StrideEnvironment strenv;
   strenv.prepareTree(tree);
-  strenv.state.m_intanceTree =
+  strenv.mStrideEnv.m_intanceTree =
       strd::CodeAnalysis::getStateStructInformation({}, tree);
 
   strd::ScopeStack scope;
@@ -1197,7 +1018,7 @@ TEST(JIT, FunctionStandaloneLoopSimple) {
       auto decl = std::static_pointer_cast<strd::DeclarationNode>(node);
       if (decl->getObjectType() == "platformModule") {
         strd::StrideGenerator::generatePlatformFunctionSignature(
-            decl, scope.back().second, strenv.state);
+            decl, scope.back().second, strenv.mStrideEnv);
       }
     }
   }
@@ -1207,10 +1028,10 @@ TEST(JIT, FunctionStandaloneLoopSimple) {
   EXPECT_NE(funcDecl, nullptr);
 
   auto func = strd::StrideGenerator::createFunctionDeclaration(
-      funcDecl, nullptr, tree, &scope, strenv.state);
+      funcDecl, nullptr, tree, &scope, strenv.mStrideEnv);
   EXPECT_NE(func, nullptr);
 
-  auto *v = func->codegen(strenv.state);
+  auto *v = func->codegen(strenv.mStrideEnv);
   EXPECT_NE(v, nullptr);
 
   auto *llvmFunc = llvm::dyn_cast<llvm::Function>(v);
@@ -1239,7 +1060,7 @@ TEST(JIT, FunctionStandaloneModule) {
 
   strd::StrideEnvironment strenv;
   strenv.prepareTree(tree);
-  strenv.state.m_intanceTree =
+  strenv.mStrideEnv.m_intanceTree =
       strd::CodeAnalysis::getStateStructInformation({}, tree);
 
   strd::ScopeStack scope;
@@ -1247,10 +1068,10 @@ TEST(JIT, FunctionStandaloneModule) {
   EXPECT_NE(funcDecl, nullptr);
 
   auto func = strd::StrideGenerator::createFunctionDeclaration(
-      funcDecl, nullptr, tree, &scope, strenv.state);
+      funcDecl, nullptr, tree, &scope, strenv.mStrideEnv);
   EXPECT_NE(func, nullptr);
 
-  auto *v = func->codegen(strenv.state);
+  auto *v = func->codegen(strenv.mStrideEnv);
   EXPECT_NE(v, nullptr);
 
   // Ensure it generated an actual function with a body
@@ -1283,7 +1104,7 @@ TEST(JIT, FunctionStandaloneReaction) {
 
   strd::StrideEnvironment strenv;
   strenv.prepareTree(tree);
-  strenv.state.m_intanceTree =
+  strenv.mStrideEnv.m_intanceTree =
       strd::CodeAnalysis::getStateStructInformation({}, tree);
 
   strd::ScopeStack scope;
@@ -1292,10 +1113,10 @@ TEST(JIT, FunctionStandaloneReaction) {
   EXPECT_NE(funcDecl, nullptr);
 
   auto func = strd::StrideGenerator::createFunctionDeclaration(
-      funcDecl, nullptr, tree, &scope, strenv.state);
+      funcDecl, nullptr, tree, &scope, strenv.mStrideEnv);
   EXPECT_NE(func, nullptr);
 
-  auto *v = func->codegen(strenv.state);
+  auto *v = func->codegen(strenv.mStrideEnv);
   EXPECT_NE(v, nullptr);
 
   // Ensure it generated an actual function with a body
@@ -1324,7 +1145,7 @@ TEST(JIT, FunctionStandaloneLoop) {
 
   strd::StrideEnvironment strenv;
   strenv.prepareTree(tree);
-  strenv.state.m_intanceTree =
+  strenv.mStrideEnv.m_intanceTree =
       strd::CodeAnalysis::getStateStructInformation({}, tree);
 
   strd::ScopeStack scope;
@@ -1335,7 +1156,7 @@ TEST(JIT, FunctionStandaloneLoop) {
       auto decl = std::static_pointer_cast<strd::DeclarationNode>(node);
       if (decl->getObjectType() == "platformModule") {
         strd::StrideGenerator::generatePlatformFunctionSignature(
-            decl, scope.back().second, strenv.state);
+            decl, scope.back().second, strenv.mStrideEnv);
       }
     }
   }
@@ -1344,10 +1165,10 @@ TEST(JIT, FunctionStandaloneLoop) {
   EXPECT_NE(funcDecl, nullptr);
 
   auto func = strd::StrideGenerator::createFunctionDeclaration(
-      funcDecl, nullptr, tree, &scope, strenv.state);
+      funcDecl, nullptr, tree, &scope, strenv.mStrideEnv);
   EXPECT_NE(func, nullptr);
 
-  auto *v = func->codegen(strenv.state);
+  auto *v = func->codegen(strenv.mStrideEnv);
   EXPECT_NE(v, nullptr);
 
   // Ensure it generated an actual function with a body
@@ -1385,31 +1206,34 @@ TEST(JIT, ReactionInModule) {
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  auto *Entry = EntrySym->toPtr<void (*)(...)>();
-  EXPECT_NE(Entry, nullptr);
+  strenv.setStateVar(statePtr.get(), "In", 3.0, std::nullopt, "RootDomain");
+  strenv.setStateVar(statePtr.get(), "Out", 1.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  auto Out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  EXPECT_EQ(Out, 1.0);
 
-  double In = 3.0;
-  double Out = 1.0;
+  strenv.setStateVar(statePtr.get(), "In", 4.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  Out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  EXPECT_EQ(Out, 1.0);
 
-  Entry(&In, &Out);
+  strenv.setStateVar(statePtr.get(), "In", 5.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  Out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_EQ(Out, 1.0);
-  In = 4.0;
-  Entry(&In, &Out);
-  EXPECT_EQ(Out, 1.0);
-  In = 5.0;
-  Entry(&In, &Out);
-  EXPECT_EQ(Out, 1.0);
-  In = 6.0;
-  Entry(&In, &Out);
+
+  strenv.setStateVar(statePtr.get(), "In", 6.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  Out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_EQ(Out, 6.0);
-  In = 10.0;
-  Entry(&In, &Out);
+
+  strenv.setStateVar(statePtr.get(), "In", 10.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  Out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
   EXPECT_EQ(Out, 10.0);
 }
 

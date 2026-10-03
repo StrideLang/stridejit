@@ -143,6 +143,10 @@ public:
     std::map<std::string, unsigned> varIndices;
     std::map<ASTNode, unsigned> childIndices;
 
+    size_t allocSize{0};
+    std::vector<uint64_t> fieldOffsets;
+    std::vector<size_t> fieldAllocSizes;
+
     llvm::Constant *getDefaultValue(const std::string &varName) const;
     llvm::Constant *getChildDefaultConstant(ASTNode childInstance) const;
   };
@@ -155,6 +159,14 @@ public:
   std::map<ASTNode, std::vector<DynamicDomainField>> dynamicDomainFields;
   void addDynamicDomainField(ASTNode domainNode, const std::string &name,
                              llvm::Type *type, llvm::Constant *defaultVal);
+
+  struct StateMachineInfo {
+    std::string domainName;
+    std::string smName;
+    std::map<std::string, int32_t> stateIdsByName;
+    std::map<std::string, int32_t> transitionIdsByName;
+  };
+  std::vector<StateMachineInfo> stateMachineInfos;
 
   std::map<ASTNode, StateStructInfo> stateStructMap;
   llvm::Value *currentFunctionStatePtr{nullptr};

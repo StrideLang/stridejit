@@ -491,24 +491,52 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
         auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
         auto defaultNode = decl->getPropertyValue("default");
         if (defaultNode) {
-          if (defaultNode->getNodeType() == AST::Int) {
-            int64_t val = std::static_pointer_cast<ValueNode>(defaultNode)
-                              ->getIntValue();
-            if (varType->isIntegerTy(64)) {
-              defaultVal = llvm::ConstantInt::get(varType, val);
-            } else {
-              defaultVal = llvm::ConstantInt::get(
-                  varType, static_cast<int32_t>(val));
-            }
-          } else if (defaultNode->getNodeType() == AST::Real) {
-            double val = std::static_pointer_cast<ValueNode>(defaultNode)
-                             ->getRealValue();
-            defaultVal = llvm::ConstantFP::get(varType, val);
-          } else if (defaultNode->getNodeType() == AST::Switch) {
-            bool val = std::static_pointer_cast<ValueNode>(defaultNode)
-                           ->getSwitchValue();
-            defaultVal = llvm::ConstantInt::get(varType, val ? 1 : 0);
-          }
+          llvm::Type* scalarType = varType->isArrayTy() ? varType->getArrayElementType() : varType;
+                  llvm::Constant *scalarDefaultVal = nullptr;
+
+                  if (defaultNode->getNodeType() == AST::Int) {
+                    int64_t val = std::static_pointer_cast<ValueNode>(defaultNode)->getIntValue();
+                    if (scalarType->isFloatingPointTy()) {
+                      scalarDefaultVal = llvm::ConstantFP::get(scalarType, static_cast<double>(val));
+                    } else if (scalarType->isIntegerTy(64)) {
+                      scalarDefaultVal = llvm::ConstantInt::get(scalarType, val);
+                    } else if (scalarType->isIntegerTy(32)) {
+                      scalarDefaultVal = llvm::ConstantInt::get(scalarType, static_cast<int32_t>(val));
+                    } else if (scalarType->isIntegerTy(1) || scalarType->isIntegerTy(8)) {
+                      scalarDefaultVal = llvm::ConstantInt::get(scalarType, val != 0 ? 1 : 0);
+                    } else if (scalarType->isIntegerTy()) {
+                      scalarDefaultVal = llvm::ConstantInt::get(scalarType, val);
+                    }
+                  } else if (defaultNode->getNodeType() == AST::Real) {
+                    double val = std::static_pointer_cast<ValueNode>(defaultNode)->getRealValue();
+                    if (scalarType->isFloatingPointTy()) {
+                      scalarDefaultVal = llvm::ConstantFP::get(scalarType, val);
+                    } else if (scalarType->isIntegerTy(1) || scalarType->isIntegerTy(8)) {
+                      scalarDefaultVal = llvm::ConstantInt::get(scalarType, val != 0.0 ? 1 : 0);
+                    } else if (scalarType->isIntegerTy(32)) {
+                      scalarDefaultVal = llvm::ConstantInt::get(scalarType, static_cast<int32_t>(val));
+                    } else if (scalarType->isIntegerTy(64)) {
+                      scalarDefaultVal = llvm::ConstantInt::get(scalarType, static_cast<int64_t>(val));
+                    } else if (scalarType->isIntegerTy()) {
+                      scalarDefaultVal = llvm::ConstantInt::get(scalarType, static_cast<int64_t>(val));
+                    }
+                  } else if (defaultNode->getNodeType() == AST::Switch) {
+                    bool val = std::static_pointer_cast<ValueNode>(defaultNode)->getSwitchValue();
+                    if (scalarType->isFloatingPointTy()) {
+                      scalarDefaultVal = llvm::ConstantFP::get(scalarType, val ? 1.0 : 0.0);
+                    } else {
+                      scalarDefaultVal = llvm::ConstantInt::get(scalarType, val ? 1 : 0);
+                    }
+                  }
+                  
+                  if (scalarDefaultVal) {
+                    if (varType->isArrayTy()) {
+                      std::vector<llvm::Constant*> initVals(varType->getArrayNumElements(), scalarDefaultVal);
+                      defaultVal = llvm::ConstantArray::get(llvm::cast<llvm::ArrayType>(varType), initVals);
+                    } else {
+                      defaultVal = scalarDefaultVal;
+                    }
+                  }
         }
       }
       if (!defaultVal) {
@@ -568,6 +596,18 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
     info.structType->setBody(fieldTypes);
     info.defaultConstant =
         llvm::ConstantStruct::get(info.structType, defaultFieldValues);
+
+    const auto &DL = TheModule->getDataLayout();
+    const auto *structLayout = DL.getStructLayout(info.structType);
+    info.allocSize = DL.getTypeAllocSize(info.structType);
+    info.fieldOffsets.resize(fieldTypes.size());
+    info.fieldAllocSizes.resize(fieldTypes.size());
+    for (size_t i = 0; i < fieldTypes.size(); ++i) {
+      info.fieldOffsets[i] =
+          structLayout->getElementOffset(static_cast<unsigned>(i));
+      info.fieldAllocSizes[i] = DL.getTypeAllocSize(fieldTypes[i]);
+    }
+
     stateStructMap[nodeTree.instance] = info;
   }
 }

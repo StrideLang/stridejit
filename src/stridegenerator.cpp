@@ -31,6 +31,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
     }
   }
 
+  state.stateMachineInfos.clear();
   GeneratedIRCode generatedIRCode = generateCodeForTree(tree, scope, state);
 
   // Domain member variables (globals)
@@ -51,12 +52,28 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
           StateMachine::collectStateMachines(domainDecl, scope, tree);
 
       for (auto &smCtx : smContexts) {
+        StrideCompiler::StateMachineInfo smInfo;
+        smInfo.domainName = domainName;
+        smInfo.smName = smCtx.name;
+        for (const auto &fs : smCtx.flattenedStates) {
+          if (fs.stateDecl) {
+            smInfo.stateIdsByName[fs.stateDecl->getName()] = fs.id;
+          }
+          for (const auto &t : fs.transitions) {
+            if (t.transitionDecl) {
+              smInfo.transitionIdsByName[t.transitionDecl->getName()] = t.id;
+            }
+          }
+        }
+        state.stateMachineInfos.push_back(std::move(smInfo));
+
         processStateStreams(smCtx, smCtx.smDecl, scope, tree, state,
                             domainName);
 
         // Save init info before moving smCtx
         generatedIRCode.stateMachinesByDomain[domainName].push_back(
-            {smCtx.activeStateVarName, smCtx.initialStateId});
+            {smCtx.activeStateVarName, smCtx.isEnteredVarName,
+             smCtx.initialStateId});
 
         // Inject the master switch block into the domain's process execution
         // stream
@@ -176,6 +193,92 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
           '=', std::make_unique<VariableExprAST>(smCtx.activeStateVarName),
           std::make_unique<IntExprAST>(smCtx.initialStateId));
       resetBody.push_back(std::move(varInit));
+      if (!smCtx.isEnteredVarName.empty()) {
+        auto enteredInit = std::make_unique<BinaryExprAST>(
+            '=', std::make_unique<VariableExprAST>(smCtx.isEnteredVarName),
+            std::make_unique<BoolExprAST>(false));
+        resetBody.push_back(std::move(enteredInit));
+      }
+    }
+
+    auto addDeclToResetBody =
+        [&](const std::shared_ptr<DeclarationNode> &decl) {
+          auto defaultValueNode = decl->getPropertyValue("default");
+          if (!defaultValueNode)
+            return;
+          if (decl->getObjectType() == "switch" ||
+              decl->getObjectType() == "trigger") {
+            if (defaultValueNode->getNodeType() == AST::Switch) {
+              auto varInit = std::make_unique<BinaryExprAST>(
+                  '=', std::make_unique<VariableExprAST>(decl->getName()),
+                  std::make_unique<BoolExprAST>(
+                      std::static_pointer_cast<ValueNode>(defaultValueNode)
+                          ->getSwitchValue()));
+              resetBody.push_back(std::move(varInit));
+            } else {
+              LOG_ERROR() << "Unsupported type for switch default: "
+                          << defaultValueNode->toText() << std::endl;
+            }
+          } else if (decl->getObjectType() == "signal") {
+            llvm::Type *llvmType = state.getLLVMType(decl);
+            std::unique_ptr<ExprAST> valExpr;
+            if (defaultValueNode->getNodeType() == AST::Real) {
+              double val = std::static_pointer_cast<ValueNode>(defaultValueNode)
+                               ->getRealValue();
+              if (llvmType->isDoubleTy())
+                valExpr = std::make_unique<RealExprAST>(val);
+              else if (llvmType->isIntegerTy(32))
+                valExpr =
+                    std::make_unique<IntExprAST>(static_cast<int32_t>(val));
+              else
+                valExpr = std::make_unique<BoolExprAST>(val != 0.0);
+            } else if (defaultValueNode->getNodeType() == AST::Int) {
+              int64_t val =
+                  std::static_pointer_cast<ValueNode>(defaultValueNode)
+                      ->getIntValue();
+              if (llvmType->isDoubleTy())
+                valExpr =
+                    std::make_unique<RealExprAST>(static_cast<double>(val));
+              else if (llvmType->isIntegerTy(32))
+                valExpr =
+                    std::make_unique<IntExprAST>(static_cast<int32_t>(val));
+              else
+                valExpr = std::make_unique<BoolExprAST>(val != 0);
+            } else if (defaultValueNode->getNodeType() == AST::Switch) {
+              bool val = std::static_pointer_cast<ValueNode>(defaultValueNode)
+                             ->getSwitchValue();
+              if (llvmType->isDoubleTy())
+                valExpr = std::make_unique<RealExprAST>(val ? 1.0 : 0.0);
+              else if (llvmType->isIntegerTy(32))
+                valExpr = std::make_unique<IntExprAST>(val ? 1 : 0);
+              else
+                valExpr = std::make_unique<BoolExprAST>(val);
+            }
+            if (valExpr) {
+              auto varInit = std::make_unique<BinaryExprAST>(
+                  '=', std::make_unique<VariableExprAST>(decl->getName()),
+                  std::move(valExpr));
+              resetBody.push_back(std::move(varInit));
+            }
+          }
+        };
+
+    if (domainDecl) {
+      auto smContexts =
+          StateMachine::collectStateMachines(domainDecl, scope, tree);
+      for (const auto &smCtx : smContexts) {
+        for (const auto &fs : smCtx.flattenedStates) {
+          if (fs.stateDecl) {
+            auto blocks = ASTQuery::getStateMachineBlocks(fs.stateDecl);
+            for (const auto &blockNode : blocks) {
+              if (blockNode->getNodeType() == AST::Declaration) {
+                addDeclToResetBody(
+                    std::static_pointer_cast<DeclarationNode>(blockNode));
+              }
+            }
+          }
+        }
+      }
     }
 
     for (const auto &node : tree->getChildren()) {
@@ -187,64 +290,9 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
         if (defaultValueNode && domainNode &&
             domainNode->getNodeType() == AST::Block) {
           if (ASTQuery::getNodeName(domainNode) == domainName) {
-            if (decl->getObjectType() == "switch" ||
-                decl->getObjectType() == "trigger") {
-              if (defaultValueNode->getNodeType() == AST::Switch) {
-                auto varInit = std::make_unique<BinaryExprAST>(
-                    '=', std::make_unique<VariableExprAST>(decl->getName()),
-                    std::make_unique<BoolExprAST>(
-                        std::static_pointer_cast<ValueNode>(defaultValueNode)
-                            ->getSwitchValue()));
-                resetBody.push_back(std::move(varInit));
-              } else {
-                LOG_ERROR() << "Unsupported type for switch default: "
-                            << defaultValueNode->toText() << std::endl;
-              }
-            } else if (decl->getObjectType() == "signal") {
-              if (node->getNodeType() == AST::Declaration) {
-                llvm::Type *llvmType = state.getLLVMType(decl);
-                std::unique_ptr<ExprAST> valExpr;
-                if (defaultValueNode->getNodeType() == AST::Real) {
-                  double val =
-                      std::static_pointer_cast<ValueNode>(defaultValueNode)
-                          ->getRealValue();
-                  if (llvmType->isDoubleTy())
-                    valExpr = std::make_unique<RealExprAST>(val);
-                  else if (llvmType->isIntegerTy(32))
-                    valExpr =
-                        std::make_unique<IntExprAST>(static_cast<int32_t>(val));
-                  else
-                    valExpr = std::make_unique<BoolExprAST>(val != 0.0);
-                } else if (defaultValueNode->getNodeType() == AST::Int) {
-                  int64_t val =
-                      std::static_pointer_cast<ValueNode>(defaultValueNode)
-                          ->getIntValue();
-                  if (llvmType->isDoubleTy())
-                    valExpr =
-                        std::make_unique<RealExprAST>(static_cast<double>(val));
-                  else if (llvmType->isIntegerTy(32))
-                    valExpr =
-                        std::make_unique<IntExprAST>(static_cast<int32_t>(val));
-                  else
-                    valExpr = std::make_unique<BoolExprAST>(val != 0);
-                } else if (defaultValueNode->getNodeType() == AST::Switch) {
-                  bool val =
-                      std::static_pointer_cast<ValueNode>(defaultValueNode)
-                          ->getSwitchValue();
-                  if (llvmType->isDoubleTy())
-                    valExpr = std::make_unique<RealExprAST>(val ? 1.0 : 0.0);
-                  else if (llvmType->isIntegerTy(32))
-                    valExpr = std::make_unique<IntExprAST>(val ? 1 : 0);
-                  else
-                    valExpr = std::make_unique<BoolExprAST>(val);
-                }
-                if (valExpr) {
-                  auto varInit = std::make_unique<BinaryExprAST>(
-                      '=', std::make_unique<VariableExprAST>(decl->getName()),
-                      std::move(valExpr));
-                  resetBody.push_back(std::move(varInit));
-                }
-              } else if (node->getNodeType() == AST::BundleDeclaration) {
+            if (node->getNodeType() == AST::Declaration) {
+              addDeclToResetBody(decl);
+            } else if (node->getNodeType() == AST::BundleDeclaration) {
                 std::vector<LangError> errors;
                 int size = ASTQuery::getBlockDeclaredSize(
                     std::static_pointer_cast<DeclarationNode>(node), scope,
@@ -318,7 +366,6 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
           }
         }
       }
-    }
 
     auto initFunc = std::make_unique<FunctionAST>(std::move(initProto),
                                                   std::move(resetBody));
@@ -540,6 +587,106 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
               ASTQuery::findTypeDeclaration(decl, scope, tree), scope, tree)) {
         std::string domainName = decl->getName();
 
+        auto registerVarDeclAsDynamicField =
+            [&](const std::shared_ptr<DeclarationNode> &varDecl) {
+              llvm::Type *varType = state.getLLVMType(varDecl);
+              if (varDecl->getNodeType() == AST::BundleDeclaration) {
+                int size =
+                    ASTQuery::getBlockDeclaredSize(varDecl, scope, tree);
+                if (size > 0) {
+                  varType = llvm::ArrayType::get(varType, size);
+                }
+              }
+              llvm::Constant *defaultVal =
+                  llvm::Constant::getNullValue(varType);
+              auto defaultNode = varDecl->getPropertyValue("default");
+              if (defaultNode) {
+                llvm::Type *scalarType = varType->isArrayTy()
+                                             ? varType->getArrayElementType()
+                                             : varType;
+                llvm::Constant *scalarDefaultVal = nullptr;
+
+                if (defaultNode->getNodeType() == AST::Int) {
+                  int64_t val =
+                      std::static_pointer_cast<ValueNode>(defaultNode)
+                          ->getIntValue();
+                  if (scalarType->isFloatingPointTy()) {
+                    scalarDefaultVal = llvm::ConstantFP::get(
+                        scalarType, static_cast<double>(val));
+                  } else if (scalarType->isIntegerTy(64)) {
+                    scalarDefaultVal = llvm::ConstantInt::get(scalarType, val);
+                  } else if (scalarType->isIntegerTy(32)) {
+                    scalarDefaultVal = llvm::ConstantInt::get(
+                        scalarType, static_cast<int32_t>(val));
+                  } else if (scalarType->isIntegerTy(1) ||
+                             scalarType->isIntegerTy(8)) {
+                    scalarDefaultVal =
+                        llvm::ConstantInt::get(scalarType, val != 0 ? 1 : 0);
+                  } else if (scalarType->isIntegerTy()) {
+                    scalarDefaultVal = llvm::ConstantInt::get(scalarType, val);
+                  }
+                } else if (defaultNode->getNodeType() == AST::Real) {
+                  double val =
+                      std::static_pointer_cast<ValueNode>(defaultNode)
+                          ->getRealValue();
+                  if (scalarType->isFloatingPointTy()) {
+                    scalarDefaultVal = llvm::ConstantFP::get(scalarType, val);
+                  } else if (scalarType->isIntegerTy(1) ||
+                             scalarType->isIntegerTy(8)) {
+                    scalarDefaultVal = llvm::ConstantInt::get(
+                        scalarType, val != 0.0 ? 1 : 0);
+                  } else if (scalarType->isIntegerTy(32)) {
+                    scalarDefaultVal = llvm::ConstantInt::get(
+                        scalarType, static_cast<int32_t>(val));
+                  } else if (scalarType->isIntegerTy(64)) {
+                    scalarDefaultVal = llvm::ConstantInt::get(
+                        scalarType, static_cast<int64_t>(val));
+                  } else if (scalarType->isIntegerTy()) {
+                    scalarDefaultVal = llvm::ConstantInt::get(
+                        scalarType, static_cast<int64_t>(val));
+                  }
+                } else if (defaultNode->getNodeType() == AST::Switch) {
+                  bool val =
+                      std::static_pointer_cast<ValueNode>(defaultNode)
+                          ->getSwitchValue();
+                  if (scalarType->isFloatingPointTy()) {
+                    scalarDefaultVal =
+                        llvm::ConstantFP::get(scalarType, val ? 1.0 : 0.0);
+                  } else {
+                    scalarDefaultVal =
+                        llvm::ConstantInt::get(scalarType, val ? 1 : 0);
+                  }
+                }
+
+                if (scalarDefaultVal) {
+                  if (varType->isArrayTy()) {
+                    std::vector<llvm::Constant *> initVals(
+                        varType->getArrayNumElements(), scalarDefaultVal);
+                    defaultVal = llvm::ConstantArray::get(
+                        llvm::cast<llvm::ArrayType>(varType), initVals);
+                  } else {
+                    defaultVal = scalarDefaultVal;
+                  }
+                }
+              }
+
+              // Check if already added to avoid duplicates
+              bool alreadyAdded = false;
+              auto dynIt = state.dynamicDomainFields.find(node);
+              if (dynIt != state.dynamicDomainFields.end()) {
+                for (const auto &field : dynIt->second) {
+                  if (field.name == varDecl->getName()) {
+                    alreadyAdded = true;
+                    break;
+                  }
+                }
+              }
+              if (!alreadyAdded) {
+                state.addDynamicDomainField(node, varDecl->getName(), varType,
+                                            defaultVal);
+              }
+            };
+
         // 1. Add state machine internal variables
         auto smContexts = StateMachine::collectStateMachines(decl, scope, tree);
         for (const auto &smCtx : smContexts) {
@@ -553,6 +700,11 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
               llvm::Type::getInt32Ty(*state.TheContext),
               llvm::ConstantInt::get(llvm::Type::getInt32Ty(*state.TheContext),
                                      0));
+          state.addDynamicDomainField(
+              node, smCtx.isEnteredVarName,
+              llvm::Type::getInt1Ty(*state.TheContext),
+              llvm::ConstantInt::get(llvm::Type::getInt1Ty(*state.TheContext),
+                                     0));
           for (const auto &fs : smCtx.flattenedStates) {
             if (fs.resumeLastState && !fs.historyStateVarName.empty()) {
               state.addDynamicDomainField(
@@ -560,6 +712,21 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
                   llvm::Type::getInt32Ty(*state.TheContext),
                   llvm::ConstantInt::get(
                       llvm::Type::getInt32Ty(*state.TheContext), 0));
+            }
+            if (fs.stateDecl) {
+              auto blocks = ASTQuery::getStateMachineBlocks(fs.stateDecl);
+              for (const auto &blockNode : blocks) {
+                if (blockNode->getNodeType() == AST::Declaration ||
+                    blockNode->getNodeType() == AST::BundleDeclaration) {
+                  auto varDecl =
+                      std::static_pointer_cast<DeclarationNode>(blockNode);
+                  std::string objType = varDecl->getObjectType();
+                  if (objType == "switch" || objType == "signal" ||
+                      objType == "trigger" || objType == "constant") {
+                    registerVarDeclAsDynamicField(varDecl);
+                  }
+                }
+              }
             }
           }
         }
@@ -582,59 +749,7 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
               }
 
               if (belongsToDomain) {
-                llvm::Type *varType = state.getLLVMType(varDecl);
-                if (varDecl->getNodeType() == AST::BundleDeclaration) {
-                  int size =
-                      ASTQuery::getBlockDeclaredSize(varDecl, scope, tree);
-                  if (size > 0) {
-                    varType = llvm::ArrayType::get(varType, size);
-                  }
-                }
-                llvm::Constant *defaultVal =
-                    llvm::Constant::getNullValue(varType);
-                auto defaultNode = varDecl->getPropertyValue("default");
-                if (defaultNode) {
-                  if (defaultNode->getNodeType() == AST::Int) {
-                    int64_t val =
-                        std::static_pointer_cast<ValueNode>(defaultNode)
-                            ->getIntValue();
-                    if (varType->isIntegerTy(64)) {
-                      defaultVal = llvm::ConstantInt::get(varType, val);
-                    } else if (varType->isIntegerTy(32)) {
-                      defaultVal = llvm::ConstantInt::get(
-                          varType, static_cast<int32_t>(val));
-                    } else if (varType->isIntegerTy(1) ||
-                               varType->isIntegerTy(8)) {
-                      defaultVal =
-                          llvm::ConstantInt::get(varType, val != 0 ? 1 : 0);
-                    }
-                  } else if (defaultNode->getNodeType() == AST::Real) {
-                    double val =
-                        std::static_pointer_cast<ValueNode>(defaultNode)
-                            ->getRealValue();
-                    defaultVal = llvm::ConstantFP::get(varType, val);
-                  } else if (defaultNode->getNodeType() == AST::Switch) {
-                    bool val = std::static_pointer_cast<ValueNode>(defaultNode)
-                                   ->getSwitchValue();
-                    defaultVal = llvm::ConstantInt::get(varType, val ? 1 : 0);
-                  }
-                }
-
-                // Check if already added to avoid duplicates
-                bool alreadyAdded = false;
-                auto dynIt = state.dynamicDomainFields.find(node);
-                if (dynIt != state.dynamicDomainFields.end()) {
-                  for (const auto &field : dynIt->second) {
-                    if (field.name == varDecl->getName()) {
-                      alreadyAdded = true;
-                      break;
-                    }
-                  }
-                }
-                if (!alreadyAdded) {
-                  state.addDynamicDomainField(node, varDecl->getName(), varType,
-                                              defaultVal);
-                }
+                registerVarDeclAsDynamicField(varDecl);
               }
             }
           }

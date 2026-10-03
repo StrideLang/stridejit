@@ -13,7 +13,7 @@ TEST(LogicalComparisonsTest, LogicalOperationsJIT) {
   ASSERT_TRUE(ret);
 
   auto statePtr = strenv.allocateSharedState("RootDomain");
-  ASSERT_NE(statePtr, nullptr);
+  ASSERT_NE(statePtr.get(), nullptr);
   void *args[] = {statePtr.get()};
 
   // Test case 1: InA = true, InB = false

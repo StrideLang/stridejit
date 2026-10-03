@@ -16,14 +16,14 @@ namespace {
 TEST(StrideEnvironmentTest, DefaultConstruction) {
   strd::StrideEnvironment env;
 
-  EXPECT_NE(env.state.TheContext, nullptr);
-  EXPECT_NE(env.state.TheModule, nullptr);
+  EXPECT_NE(env.mStrideEnv.TheContext, nullptr);
+  EXPECT_NE(env.mStrideEnv.TheModule, nullptr);
 }
 
 TEST(StrideEnvironmentTest, ConstructionWithStrideRoot) {
   strd::StrideEnvironment env("./test_root");
 
-  EXPECT_NE(env.state.TheContext, nullptr);
+  EXPECT_NE(env.mStrideEnv.TheContext, nullptr);
 }
 
 // ============================================================================
@@ -74,9 +74,9 @@ TEST(StrideEnvironmentTest, JITIsNull) {
 TEST(StrideEnvironmentTest, AccessCompilerState) {
   strd::StrideEnvironment env;
 
-  EXPECT_NE(env.state.TheContext, nullptr);
-  EXPECT_NE(env.state.TheModule, nullptr);
-  EXPECT_NE(env.state.Builder, nullptr);
+  EXPECT_NE(env.mStrideEnv.TheContext, nullptr);
+  EXPECT_NE(env.mStrideEnv.TheModule, nullptr);
+  EXPECT_NE(env.mStrideEnv.Builder, nullptr);
 }
 
 // ============================================================================
@@ -87,8 +87,8 @@ TEST(StrideEnvironmentTest, MultipleInstances) {
   strd::StrideEnvironment env1;
   strd::StrideEnvironment env2;
 
-  EXPECT_NE(env1.state.TheContext.get(), env2.state.TheContext.get());
-  EXPECT_NE(env1.state.TheModule.get(), env2.state.TheModule.get());
+  EXPECT_NE(env1.mStrideEnv.TheContext.get(), env2.mStrideEnv.TheContext.get());
+  EXPECT_NE(env1.mStrideEnv.TheModule.get(), env2.mStrideEnv.TheModule.get());
 }
 
 // ============================================================================

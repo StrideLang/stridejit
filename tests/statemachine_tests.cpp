@@ -43,10 +43,12 @@ TEST(StateMachine, DomainInitialization) {
   bool foundVar = false;
   auto domainDecl =
       strd::ASTQuery::findDeclarationByName("RootDomain", scope, tree);
-  if (domainDecl && strenv.state.dynamicDomainFields.find(domainDecl) !=
-                        strenv.state.dynamicDomainFields.end()) {
-    for (auto &f : strenv.state.dynamicDomainFields[domainDecl]) {
-      if (f.name == "__RootDomain_MyStateMachine_active_state_id")
+  if (domainDecl && strenv.mStrideEnv.dynamicDomainFields.find(domainDecl) !=
+                        strenv.mStrideEnv.dynamicDomainFields.end()) {
+    std::string expectedVarName = strd::StateMachine::getVariableName(
+        strd::StateMachineField::ActiveStateId, "RootDomain", "MyStateMachine");
+    for (auto &f : strenv.mStrideEnv.dynamicDomainFields[domainDecl]) {
+      if (f.name == expectedVarName)
         foundVar = true;
     }
   }
@@ -86,8 +88,9 @@ TEST(StateMachine, Flattening) {
   // State3
   EXPECT_EQ(sm.flattenedStates.size(), 4);
   EXPECT_EQ(sm.initialStateId, 1);
-  EXPECT_EQ(sm.activeStateVarName,
-            "__RootDomain_MyStateMachine_active_state_id");
+  EXPECT_EQ(sm.activeStateVarName, strd::StateMachine::getVariableName(
+                                       strd::StateMachineField::ActiveStateId,
+                                       "RootDomain", "MyStateMachine"));
 
   // Verify flattened states
   EXPECT_EQ(sm.flattenedStates[0].id, 1);
@@ -161,25 +164,27 @@ TEST(StateMachine, CodegenExecution) {
   EXPECT_TRUE(success);
 
   auto statePtr = strenv.allocateSharedState("RootDomain");
-    void *args[] = {statePtr.get()};
+  void *args[] = {statePtr.get()};
   strenv.invoke("RootDomain_init", args);
 
   EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), 2);
 
-  auto counter = [&]() { return strenv.getStateVar(statePtr.get(), "Counter").value_or(0); };
+  auto counter = [&]() {
+    return strenv.getStateVar(statePtr.get(), "Counter").value_or(0);
+  };
   EXPECT_EQ(counter(), 0);
 
-  // onEntry sets 1
-  strenv.invoke("RootDomain_process", args);
-  EXPECT_EQ(counter(), 1);
-
-  // onProcess adds 1
+  // onEntry sets 1, onProcess adds 1
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(counter(), 2);
 
   // onProcess adds 1
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(counter(), 3);
+
+  // onProcess adds 1
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(counter(), 4);
 }
 
 TEST(StateMachine, TransitionLoading) {
@@ -245,62 +250,52 @@ TEST(StateMachine, TransitionExecution) {
   EXPECT_TRUE(success);
 
   auto statePtr = strenv.allocateSharedState("RootDomain");
-    void *args[] = {statePtr.get()};
+  void *args[] = {statePtr.get()};
 
-  auto counter = [&]() { return strenv.getStateVar(statePtr.get(), "Counter").value_or(0); };
+  auto counter = [&]() {
+    return strenv.getStateVar(statePtr.get(), "Counter").value_or(0);
+  };
+
+  auto state1Id = strenv.getStateId("State1").value_or(-1);
+  auto state2Id = strenv.getStateId("State2").value_or(-1);
+  auto state3Id = strenv.getStateId("State3").value_or(-1);
+  auto toState2Id = strenv.getTransitionId("ToState2").value_or(-1);
+  auto toState3Id = strenv.getTransitionId("ToState3").value_or(-1);
+
+  EXPECT_NE(state1Id, -1);
+  EXPECT_NE(state2Id, -1);
+  EXPECT_NE(state3Id, -1);
+  EXPECT_NE(toState2Id, -1);
+  EXPECT_NE(toState3Id, -1);
 
   strenv.invoke("RootDomain_init", args);
 
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), 2); // State1 is 2
+  EXPECT_EQ(strenv.getActiveStateId(statePtr), state1Id);
   EXPECT_EQ(counter(), 0);
 
   // Tick the domain without a request, nothing should happen
   strenv.invoke("RootDomain_process", args);
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), 2);
+  EXPECT_EQ(strenv.getActiveStateId(statePtr), state1Id);
   EXPECT_EQ(counter(), 0);
 
-  // Request transition 1 (ToState2)
-  strenv.requestTransition(statePtr, 1);
+  // Request transition (ToState2)
+  strenv.requestTransition(statePtr, toState2Id);
   strenv.invoke("RootDomain_process", args);
 
-  // activeState should be 3 (State2)
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), 3);
+  // activeState should be State2
+  EXPECT_EQ(strenv.getActiveStateId(statePtr), state2Id);
   EXPECT_EQ(counter(), 1);
   EXPECT_EQ(strenv.getTransitionRequestId(statePtr), 0);
 
-  // Request transition 2 (ToState3)
-  strenv.requestTransition(statePtr, 2);
+  // Request transition (ToState3)
+  strenv.requestTransition(statePtr, toState3Id);
   strenv.invoke("RootDomain_process", args);
 
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), 4); // State3
+  EXPECT_EQ(strenv.getActiveStateId(statePtr), state3Id);
   EXPECT_EQ(counter(), 2);
 }
 
 TEST(StateMachine, AdvancedFormalizations) {
-  strd::ASTNode tree;
-  tree =
-      strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "statemachines.stride");
-  EXPECT_NE(tree, nullptr);
-
-  strd::ScopeStack scope;
-  auto domainDecl =
-      strd::ASTQuery::findDeclarationByName("RootDomain", scope, tree);
-  EXPECT_NE(domainDecl, nullptr);
-
-  auto smContexts =
-      strd::StateMachine::collectStateMachines(domainDecl, scope, tree);
-  EXPECT_EQ(smContexts.size(), 1);
-  auto &sm = smContexts[0];
-
-  // Verify FlattenedState Phase 5 property defaults
-  for (const auto &fs : sm.flattenedStates) {
-    EXPECT_FALSE(fs.isParallel);
-    EXPECT_FALSE(fs.resumeLastState);
-    EXPECT_FALSE(fs.isFinal);
-  }
-}
-
-TEST(StateMachine, AdvancedFormalizationsExecution) {
   strd::ASTNode tree;
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
                               "statemachines_advanced.stride");
@@ -316,22 +311,75 @@ TEST(StateMachine, AdvancedFormalizationsExecution) {
   EXPECT_EQ(smContexts.size(), 1);
   auto &sm = smContexts[0];
 
-  bool foundResumeLast = false;
-  bool foundFinal = false;
-  for (const auto &fs : sm.flattenedStates) {
-    if (fs.stateDecl->getName() == "CompositeState") {
-      EXPECT_TRUE(fs.resumeLastState);
-      EXPECT_EQ(fs.historyStateVarName,
-                "__MyStateMachine_CompositeState_history_state_id");
-      foundResumeLast = true;
-    }
-    if (fs.stateDecl->getName() == "FinalState") {
-      EXPECT_TRUE(fs.isFinal);
-      foundFinal = true;
-    }
-  }
-  EXPECT_TRUE(foundResumeLast);
-  EXPECT_TRUE(foundFinal);
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+  strenv.generateIr(tree);
+
+  // 1. CompositeState with resumeLastState
+  auto compositeState = sm.findState("CompositeState");
+  ASSERT_NE(compositeState, nullptr);
+  EXPECT_TRUE(compositeState->resumeLastState);
+  EXPECT_FALSE(compositeState->isParallel);
+  EXPECT_FALSE(compositeState->isFinal);
+  EXPECT_EQ(compositeState->historyStateVarName,
+            strd::StateMachine::getVariableName(
+                strd::StateMachineField::HistoryStateId, "MyStateMachine",
+                "CompositeState"));
+  EXPECT_EQ(strenv.getStateId("CompositeState"), compositeState->id);
+
+  // 2. ParallelState and its parallel sub-states
+  auto parallelState = sm.findState("ParallelState");
+  ASSERT_NE(parallelState, nullptr);
+  EXPECT_TRUE(parallelState->isParallel);
+  EXPECT_FALSE(parallelState->resumeLastState);
+  EXPECT_FALSE(parallelState->isFinal);
+  EXPECT_EQ(strenv.getStateId("ParallelState"), parallelState->id);
+
+  auto parallelSub1 = sm.findState("ParallelSub1");
+  ASSERT_NE(parallelSub1, nullptr);
+  EXPECT_TRUE(parallelSub1->isParallel);
+  EXPECT_FALSE(parallelSub1->resumeLastState);
+  EXPECT_FALSE(parallelSub1->isFinal);
+  EXPECT_EQ(parallelSub1->parentId, parallelState->id);
+  EXPECT_EQ(strenv.getStateId("ParallelSub1"), parallelSub1->id);
+
+  auto parallelSub2 = sm.findState("ParallelSub2");
+  ASSERT_NE(parallelSub2, nullptr);
+  EXPECT_TRUE(parallelSub2->isParallel);
+  EXPECT_FALSE(parallelSub2->resumeLastState);
+  EXPECT_FALSE(parallelSub2->isFinal);
+  EXPECT_EQ(parallelSub2->parentId, parallelState->id);
+  EXPECT_EQ(strenv.getStateId("ParallelSub2"), parallelSub2->id);
+
+  // 3. FinalState with isFinal
+  auto finalState = sm.findState("FinalState");
+  ASSERT_NE(finalState, nullptr);
+  EXPECT_TRUE(finalState->isFinal);
+  EXPECT_FALSE(finalState->isParallel);
+  EXPECT_FALSE(finalState->resumeLastState);
+  EXPECT_EQ(strenv.getStateId("FinalState"), finalState->id);
+
+  // 4. Default/standard states without advanced properties
+  auto child1 = sm.findState("Child1");
+  ASSERT_NE(child1, nullptr);
+  EXPECT_FALSE(child1->isParallel);
+  EXPECT_FALSE(child1->resumeLastState);
+  EXPECT_FALSE(child1->isFinal);
+  EXPECT_EQ(strenv.getStateId("Child1"), child1->id);
+
+  auto child2 = sm.findState("Child2");
+  ASSERT_NE(child2, nullptr);
+  EXPECT_FALSE(child2->isParallel);
+  EXPECT_FALSE(child2->resumeLastState);
+  EXPECT_FALSE(child2->isFinal);
+  EXPECT_EQ(strenv.getStateId("Child2"), child2->id);
+}
+
+TEST(StateMachine, AdvancedFormalizationsExecution) {
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                              "statemachines_advanced.stride");
+  EXPECT_NE(tree, nullptr);
 
   strd::StrideEnvironment strenv;
   strenv.prepareTree(tree);
@@ -341,24 +389,118 @@ TEST(StateMachine, AdvancedFormalizationsExecution) {
   EXPECT_TRUE(success);
 
   auto statePtr = strenv.allocateSharedState("RootDomain");
-    void *args[] = {statePtr.get()};
+  void *args[] = {statePtr.get()};
 
-  auto counter = [&]() { return strenv.getStateVar(statePtr.get(), "Counter").value_or(0); };
-  auto entryCounter = [&]() { return strenv.getStateVar(statePtr.get(), "EntryCounter").value_or(0); };
-  auto exitCounter = [&]() { return strenv.getStateVar(statePtr.get(), "ExitCounter").value_or(0); };
-      
+  auto counter = [&]() {
+    return strenv.getStateVar(statePtr.get(), "Counter").value_or(0);
+  };
+  auto entryCounter = [&]() {
+    return strenv.getStateVar(statePtr.get(), "EntryCounter").value_or(0);
+  };
+  auto exitCounter = [&]() {
+    return strenv.getStateVar(statePtr.get(), "ExitCounter").value_or(0);
+  };
+  auto parallel1Counter = [&]() {
+    return strenv.getStateVar(statePtr.get(), "Parallel1Counter").value_or(0);
+  };
+  auto parallel2Counter = [&]() {
+    return strenv.getStateVar(statePtr.get(), "Parallel2Counter").value_or(0);
+  };
+  auto child2Counter = [&]() {
+    return strenv.getStateVar(statePtr.get(), "Child2Counter").value_or(0);
+  };
+
+  auto child1Id = strenv.getStateId("Child1").value_or(-1);
+  auto child2Id = strenv.getStateId("Child2").value_or(-1);
+  auto parallelStateId = strenv.getStateId("ParallelState").value_or(-1);
+  auto finalStateId = strenv.getStateId("FinalState").value_or(-1);
+
+  auto toChild2TransId = strenv.getTransitionId("ToChild2").value_or(-1);
+  auto toParallelTransId = strenv.getTransitionId("ToParallel").value_or(-1);
+  auto toCompositeTransId = strenv.getTransitionId("ToComposite").value_or(-1);
+  auto toFinalTransId = strenv.getTransitionId("ToFinal").value_or(-1);
+
+  EXPECT_NE(child1Id, -1);
+  EXPECT_NE(child2Id, -1);
+  EXPECT_NE(parallelStateId, -1);
+  EXPECT_NE(finalStateId, -1);
+  EXPECT_NE(toChild2TransId, -1);
+  EXPECT_NE(toParallelTransId, -1);
+  EXPECT_NE(toCompositeTransId, -1);
+  EXPECT_NE(toFinalTransId, -1);
+
   strenv.invoke("RootDomain_init", args);
 
-  // Tick domain while Child1 is active: onProcessCode runs (10 >> Counter)
+  // 1. Initial state should be Child1 (inside CompositeState)
+  EXPECT_EQ(strenv.getActiveStateId(statePtr), child1Id);
+
+  // Verify default values
+  EXPECT_EQ(counter(), 100);
+  EXPECT_EQ(entryCounter(), 200);
+  EXPECT_EQ(exitCounter(), 300);
+  EXPECT_EQ(parallel1Counter(), 400);
+  EXPECT_EQ(parallel2Counter(), 500);
+  EXPECT_EQ(child2Counter(), 600);
+
+  // Tick domain while Child1 is active: onEntryCode (1 >> EntryCounter) and
+  // onProcessCode (10 >> Counter) run
   strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(entryCounter(), 1);
   EXPECT_EQ(counter(), 10);
+  // Nothing else should change
+  EXPECT_EQ(exitCounter(), 300);
+  EXPECT_EQ(parallel1Counter(), 400);
+  EXPECT_EQ(parallel2Counter(), 500);
+  EXPECT_EQ(child2Counter(), 600);
 
-  // Fire transition to FinalState: onExitCode of Child1 runs (1 >> ExitCounter)
-  strenv.requestTransition(statePtr, 1);
-
+  // 2. Transition from Child1 to Child2 within CompositeState
+  strenv.requestTransition(statePtr, toChild2TransId);
   strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(strenv.getActiveStateId(statePtr), child2Id);
+  EXPECT_EQ(exitCounter(), 1); // Child1 onExitCode fired
+  // Old values should remain
+  EXPECT_EQ(entryCounter(), 1);
+  EXPECT_EQ(counter(), 10);
+  EXPECT_EQ(parallel1Counter(), 400);
+  EXPECT_EQ(parallel2Counter(), 500);
+  EXPECT_EQ(child2Counter(), 600);
+
+  // Tick domain while Child2 is active: Child2 onProcessCode runs (20 >>
+  // Child2Counter)
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(child2Counter(), 20);
+  // parallel counters should be untouched:
+  EXPECT_EQ(parallel1Counter(), 400);
+  EXPECT_EQ(parallel2Counter(), 500);
+
+  // 3. Transition from Child2 to ParallelState (CompositeState saves history
+  // state)
+  strenv.requestTransition(statePtr, toParallelTransId);
+  strenv.invoke("RootDomain_process", args);
+
+  EXPECT_EQ(strenv.getActiveStateId(statePtr), parallelStateId);
+  // Verify history state saved for CompositeState is child2Id
+  EXPECT_EQ(strenv.getHistoryStateId(statePtr, "CompositeState"), child2Id);
+
+  // Tick domain while ParallelState is active: both parallel sub-states execute
+  // their onProcessCode simultaneously
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(parallel1Counter(), 100);
+  EXPECT_EQ(parallel2Counter(), 200);
+
+  // 4. Transition back to CompositeState: should restore to Child2 (not default
+  // Child1)
+  strenv.requestTransition(statePtr, toCompositeTransId);
+  strenv.invoke("RootDomain_process", args);
+
+  EXPECT_EQ(strenv.getActiveStateId(statePtr), child2Id);
+
+  // 5. Fire transition to FinalState
+  strenv.requestTransition(statePtr, toFinalTransId);
+  strenv.invoke("RootDomain_process", args);
+
   EXPECT_EQ(strenv.getTransitionRequestId(statePtr), 0);
-  EXPECT_EQ(exitCounter(), 1);
+  EXPECT_EQ(strenv.getActiveStateId(statePtr), finalStateId);
 }
 
 TEST(StateMachine, TransitionGuardBlocking) {
@@ -375,11 +517,15 @@ TEST(StateMachine, TransitionGuardBlocking) {
   EXPECT_TRUE(success);
 
   auto statePtr = strenv.allocateSharedState("RootDomain");
-    void *args[] = {statePtr.get()};
+  void *args[] = {statePtr.get()};
 
-  auto guardSignal = [&]() { return strenv.getStateVar(statePtr.get(), "GuardSignal").value_or(0); };
-  auto counter = [&]() { return strenv.getStateVar(statePtr.get(), "Counter").value_or(0); };
-    
+  auto guardSignal = [&]() {
+    return strenv.getStateVar(statePtr.get(), "GuardSignal").value_or(0);
+  };
+  auto counter = [&]() {
+    return strenv.getStateVar(statePtr.get(), "Counter").value_or(0);
+  };
+
   strenv.invoke("RootDomain_init", args);
   EXPECT_EQ(strenv.getActiveStateId(statePtr), 2); // State1 is 2
   EXPECT_EQ(guardSignal(), 0);
@@ -418,12 +564,18 @@ TEST(StateMachine, UpdateGuardParentBeforeChild) {
   EXPECT_TRUE(success);
 
   auto statePtr = strenv.allocateSharedState("RootDomain");
-    void *args[] = {statePtr.get()};
+  void *args[] = {statePtr.get()};
 
-  auto counter = [&]() { return strenv.getStateVar(statePtr.get(), "Counter").value_or(0); };
-  auto parentOrder = [&]() { return strenv.getStateVar(statePtr.get(), "ParentOrder").value_or(0); };
-  auto childOrder = [&]() { return strenv.getStateVar(statePtr.get(), "ChildOrder").value_or(0); };
-      
+  auto counter = [&]() {
+    return strenv.getStateVar(statePtr.get(), "Counter").value_or(0);
+  };
+  auto parentOrder = [&]() {
+    return strenv.getStateVar(statePtr.get(), "ParentOrder").value_or(0);
+  };
+  auto childOrder = [&]() {
+    return strenv.getStateVar(statePtr.get(), "ChildOrder").value_or(0);
+  };
+
   strenv.invoke("RootDomain_init", args);
   EXPECT_EQ(counter(), 0);
   EXPECT_EQ(parentOrder(), 0);
@@ -455,12 +607,18 @@ TEST(StateMachine, ParallelStateExecution) {
   EXPECT_TRUE(success);
 
   auto statePtr = strenv.allocateSharedState("RootDomain");
-    void *args[] = {statePtr.get()};
+  void *args[] = {statePtr.get()};
 
-  auto parentCounter = [&]() { return strenv.getStateVar(statePtr.get(), "ParentCounter").value_or(0); };
-  auto region1Counter = [&]() { return strenv.getStateVar(statePtr.get(), "Region1Counter").value_or(0); };
-  auto region2Counter = [&]() { return strenv.getStateVar(statePtr.get(), "Region2Counter").value_or(0); };
-      
+  auto parentCounter = [&]() {
+    return strenv.getStateVar(statePtr.get(), "ParentCounter").value_or(0);
+  };
+  auto region1Counter = [&]() {
+    return strenv.getStateVar(statePtr.get(), "Region1Counter").value_or(0);
+  };
+  auto region2Counter = [&]() {
+    return strenv.getStateVar(statePtr.get(), "Region2Counter").value_or(0);
+  };
+
   strenv.invoke("RootDomain_init", args);
   EXPECT_EQ(parentCounter(), 0);
   EXPECT_EQ(region1Counter(), 0);
@@ -498,7 +656,7 @@ TEST(StateMachine, ResumeLastStateExecution) {
   EXPECT_TRUE(success);
 
   auto statePtr = strenv.allocateSharedState("RootDomain");
-    void *args[] = {statePtr.get()};
+  void *args[] = {statePtr.get()};
 
   strenv.invoke("RootDomain_init", args);
   // Initial state resolves to SubState1 (id 3)
@@ -523,4 +681,48 @@ TEST(StateMachine, ResumeLastStateExecution) {
   strenv.requestTransition(statePtr, 3); // ToComposite is transition 3
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(strenv.getActiveStateId(statePtr), 4); // Restored SubState2!
+}
+
+TEST(StateMachine, DomainSwitches) {
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                              "statemachines_switches.stride");
+  EXPECT_NE(tree, nullptr);
+
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+  bool success = strenv.generateIr(tree);
+  EXPECT_TRUE(success);
+  success = strenv.compileInMemory();
+  EXPECT_TRUE(success);
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  void *args[] = {statePtr.get()};
+
+  auto switchEntry = [&]() {
+    return strenv.getStateVar(statePtr.get(), "SwitchEntry").value_or(0);
+  };
+  auto switchProcess = [&]() {
+    return strenv.getStateVar(statePtr.get(), "SwitchProcess").value_or(0);
+  };
+  auto switchExit = [&]() {
+    return strenv.getStateVar(statePtr.get(), "SwitchExit").value_or(0);
+  };
+
+  strenv.invoke("RootDomain_init", args);
+  EXPECT_EQ(switchEntry(), 0);
+  EXPECT_EQ(switchProcess(), 0);
+  EXPECT_EQ(switchExit(), 0);
+
+  // Tick the domain: should run onEntry and then onProcess of Child1
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(switchEntry(), 1);
+  EXPECT_EQ(switchProcess(), 1);
+  EXPECT_EQ(switchExit(), 0);
+
+  // Request transition to FinalState
+  strenv.requestTransition(statePtr, 1);
+  strenv.invoke("RootDomain_process", args);
+
+  EXPECT_EQ(switchExit(), 1);
 }

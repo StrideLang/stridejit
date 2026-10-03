@@ -98,8 +98,12 @@ BinaryExprAST::codegen(StrideCompiler &state) {
               assert(0 == 1);
             }
           }
-          auto *GEP = state.Builder->CreateGEP(Type, Val, idxList);
-          Val = state.Builder->CreateLoad(Type, GEP, varExpr->getName());
+          llvm::Type *gepElemType = Type;
+          if (gepElemType->isArrayTy()) {
+            gepElemType = static_cast<llvm::ArrayType *>(gepElemType)->getElementType();
+          }
+          auto *GEP = state.Builder->CreateGEP(gepElemType, Val, idxList);
+          Val = state.Builder->CreateLoad(gepElemType, GEP, varExpr->getName());
         } else {
           Val = state.Builder->CreateLoad(Type, Val);
         }
@@ -242,9 +246,14 @@ BinaryExprAST::codegen(StrideCompiler &state) {
               assert(0 == 1); // we shouldn't get here
             }
           }
+          llvm::Type *gepElemType = LType.value();
+          if (gepElemType->isArrayTy()) {
+            gepElemType = static_cast<llvm::ArrayType *>(gepElemType)->getElementType();
+          }
           // TODO explore using CreateInBoundsGEP when possible
-          auto GEP = state.Builder->CreateGEP(LType.value(), L, idxList);
-          L = state.Builder->CreateLoad(LType.value(), GEP, varExpr->getName());
+          auto GEP = state.Builder->CreateGEP(gepElemType, L, idxList);
+          L = state.Builder->CreateLoad(gepElemType, GEP, varExpr->getName());
+          LType = gepElemType;
         } else {
           L = state.Builder->CreateLoad(LType.value(), L);
         }
@@ -282,8 +291,13 @@ BinaryExprAST::codegen(StrideCompiler &state) {
               assert(0 == 1);
             }
           }
-          auto GEP = state.Builder->CreateGEP(RType.value(), R, idxList);
-          R = state.Builder->CreateLoad(RType.value(), GEP, varExpr->getName());
+          llvm::Type *gepElemType = RType.value();
+          if (gepElemType->isArrayTy()) {
+            gepElemType = static_cast<llvm::ArrayType *>(gepElemType)->getElementType();
+          }
+          auto GEP = state.Builder->CreateGEP(gepElemType, R, idxList);
+          R = state.Builder->CreateLoad(gepElemType, GEP, varExpr->getName());
+          RType = gepElemType;
           //          Variable = state.Builder->CreateLoad(
           //              Variable->getType()->getNonOpaquePointerElementType(),
           //              GEP, varExpr->getName());

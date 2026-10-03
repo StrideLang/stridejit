@@ -98,11 +98,20 @@ public:
   size_t getStateSize(const std::string &funcName) const;
 
   // Dynamic state variable access by name or pattern
+  template <typename T>
+  std::optional<T> getStateVar(const void *statePtr,
+                               const std::string &varName,
+                               std::optional<int> index = std::nullopt,
+                               const std::string &domainName = "") const;
+
   std::optional<int32_t> getStateVar(const void *statePtr,
                                      const std::string &varName,
                                      std::optional<int> index = std::nullopt,
-                                     const std::string &domainName = "") const;
-  bool setStateVar(void *statePtr, const std::string &varName, int32_t value,
+                                     const std::string &domainName = "") const {
+      return getStateVar<int32_t>(statePtr, varName, index, domainName);
+  }
+  template <typename T>
+  bool setStateVar(void *statePtr, const std::string &varName, T value,
                    std::optional<int> index = std::nullopt,
                    const std::string &domainName = "");
 
@@ -138,6 +147,13 @@ public:
       const std::shared_ptr<void> &statePtr, const std::string &stateName = "",
       const std::string &smName = "", const std::string &domainName = "") const;
 
+  std::optional<int32_t> getStateId(const std::string &stateName,
+                                    const std::string &smName = "",
+                                    const std::string &domainName = "") const;
+  std::optional<int32_t> getTransitionId(const std::string &transitionName,
+                                         const std::string &smName = "",
+                                         const std::string &domainName = "") const;
+
   // Programmatic function inspection and dynamic invocation
   std::vector<FunctionArgInfo>
   getFunctionArgs(const std::string &funcName) const;
@@ -161,7 +177,7 @@ public:
   bool compileInMemory();
   bool compileObjectToDisk(std::string path);
 
-  StrideCompiler state;
+  StrideCompiler mStrideEnv;
   std::unique_ptr<llvm::orc::LLJIT> JIT;
   llvm::orc::ThreadSafeContext TSCtx;
 

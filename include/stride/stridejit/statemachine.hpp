@@ -56,8 +56,17 @@ struct FlattenedState {
   std::vector<Transition> transitions;
 };
 
+enum class StateMachineField {
+  ActiveStateId,
+  TransitionRequestId,
+  IsEntered,
+  HistoryStateId
+};
+
 class StateMachine {
 public:
+  using Field = StateMachineField;
+
   StateMachine() = default;
   StateMachine(const StateMachine &) = delete;
   StateMachine &operator=(const StateMachine &) = delete;
@@ -70,6 +79,12 @@ public:
   int initialStateId;
   std::string activeStateVarName;
   std::string transitionRequestVarName;
+  std::string isEnteredVarName;
+
+  static std::string getFieldSuffix(StateMachineField field);
+  static std::string getVariableName(StateMachineField field,
+                                     const std::string &prefix,
+                                     const std::string &name);
 
   static void flattenStateMachine(std::shared_ptr<DeclarationNode> stateNode,
                                   int &idCounter, StateMachine &sm,
@@ -83,6 +98,8 @@ public:
   static std::vector<StateMachine>
   collectStateMachines(std::shared_ptr<DeclarationNode> domainDecl,
                        ScopeStack &scope, ASTNode tree);
+
+  const FlattenedState *findState(const std::string &stateName) const;
 };
 
 class StateMachineExprAST : public ExprAST {

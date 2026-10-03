@@ -16,22 +16,31 @@ TEST(NestedFunctions, ModuleInLoop) {
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
-  ASSERT_TRUE(static_cast<bool>(EntrySym));
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
 
-  auto *Entry = EntrySym->toPtr<void (*)(int32_t *, int32_t *)>();
-  ASSERT_NE(Entry, nullptr);
+    strenv.setStateVar(statePtr.get(), "List", 1, 0, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 2, 1, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 3, 2, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out1 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_EQ(out1.value_or(0), 12);
+  }
 
-  int32_t list1[3] = {1, 2, 3};
-  int32_t out1 = 0;
-  Entry(list1, &out1);
-  EXPECT_EQ(out1, 12);
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
 
-  int32_t list2[3] = {10, 20, 30};
-  int32_t out2 = 0;
-  Entry(list2, &out2);
-  EXPECT_EQ(out2, 66);
+    strenv.setStateVar(statePtr.get(), "List", 10, 0, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 20, 1, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 30, 2, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out2 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_EQ(out2.value_or(0), 66);
+  }
 }
 
 TEST(NestedFunctions, ReactionInLoop) {
@@ -44,22 +53,31 @@ TEST(NestedFunctions, ReactionInLoop) {
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
-  ASSERT_TRUE(static_cast<bool>(EntrySym));
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
 
-  auto *Entry = EntrySym->toPtr<void (*)(int32_t *, int32_t *)>();
-  ASSERT_NE(Entry, nullptr);
+    strenv.setStateVar(statePtr.get(), "List", 1, 0, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 2, 1, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 3, 2, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out1 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_EQ(out1.value_or(0), 12);
+  }
 
-  int32_t list1[3] = {1, 2, 3};
-  int32_t out1 = 0;
-  Entry(list1, &out1);
-  EXPECT_EQ(out1, 12);
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
 
-  int32_t list2[3] = {10, 20, 30};
-  int32_t out2 = 0;
-  Entry(list2, &out2);
-  EXPECT_EQ(out2, 66);
+    strenv.setStateVar(statePtr.get(), "List", 10, 0, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 20, 1, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 30, 2, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out2 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_EQ(out2.value_or(0), 66);
+  }
 }
 
 TEST(NestedFunctions, LoopInLoop) {
@@ -72,22 +90,31 @@ TEST(NestedFunctions, LoopInLoop) {
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
-  ASSERT_TRUE(static_cast<bool>(EntrySym));
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
 
-  auto *Entry = EntrySym->toPtr<void (*)(int32_t *, int32_t *)>();
-  ASSERT_NE(Entry, nullptr);
+    strenv.setStateVar(statePtr.get(), "List", 1, 0, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 2, 1, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 3, 2, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out1 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_EQ(out1.value_or(0), 12);
+  }
 
-  int32_t list1[3] = {1, 2, 3};
-  int32_t out1 = 0;
-  Entry(list1, &out1);
-  EXPECT_EQ(out1, 12);
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
 
-  int32_t list2[3] = {10, 20, 30};
-  int32_t out2 = 0;
-  Entry(list2, &out2);
-  EXPECT_EQ(out2, 66);
+    strenv.setStateVar(statePtr.get(), "List", 10, 0, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 20, 1, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 30, 2, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out2 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_EQ(out2.value_or(0), 66);
+  }
 }
 
 TEST(NestedFunctions, ModuleInReaction) {
@@ -100,22 +127,19 @@ TEST(NestedFunctions, ModuleInReaction) {
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
-  ASSERT_TRUE(static_cast<bool>(EntrySym));
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  auto *Entry = EntrySym->toPtr<void (*)(double *, double *)>();
-  ASSERT_NE(Entry, nullptr);
+  strenv.setStateVar(statePtr.get(), "In", 5.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  auto out1 = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+  EXPECT_DOUBLE_EQ(out1.value_or(0.0), 7.0);
 
-  double in1 = 5.0;
-  double out1 = 0.0;
-  Entry(&in1, &out1);
-  EXPECT_DOUBLE_EQ(out1, 7.0);
-
-  double in2 = 10.5;
-  double out2 = 0.0;
-  Entry(&in2, &out2);
-  EXPECT_DOUBLE_EQ(out2, 12.5);
+  strenv.setStateVar(statePtr.get(), "In", 10.5, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  auto out2 = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+  EXPECT_DOUBLE_EQ(out2.value_or(0.0), 12.5);
 }
 
 TEST(NestedFunctions, ReactionInReaction) {
@@ -128,22 +152,19 @@ TEST(NestedFunctions, ReactionInReaction) {
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
-  ASSERT_TRUE(static_cast<bool>(EntrySym));
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  auto *Entry = EntrySym->toPtr<void (*)(double *, double *)>();
-  ASSERT_NE(Entry, nullptr);
+  strenv.setStateVar(statePtr.get(), "In", 5.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  auto out1 = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+  EXPECT_DOUBLE_EQ(out1.value_or(0.0), 7.0);
 
-  double in1 = 5.0;
-  double out1 = 0.0;
-  Entry(&in1, &out1);
-  EXPECT_DOUBLE_EQ(out1, 7.0);
-
-  double in2 = 10.5;
-  double out2 = 0.0;
-  Entry(&in2, &out2);
-  EXPECT_DOUBLE_EQ(out2, 12.5);
+  strenv.setStateVar(statePtr.get(), "In", 10.5, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  auto out2 = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+  EXPECT_DOUBLE_EQ(out2.value_or(0.0), 12.5);
 }
 
 TEST(NestedFunctions, LoopInReaction) {
@@ -156,22 +177,19 @@ TEST(NestedFunctions, LoopInReaction) {
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
-  ASSERT_TRUE(static_cast<bool>(EntrySym));
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  auto *Entry = EntrySym->toPtr<void (*)(int32_t *, int32_t *)>();
-  ASSERT_NE(Entry, nullptr);
+  strenv.setStateVar(statePtr.get(), "In", 1, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  auto out1 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+  EXPECT_EQ(out1.value_or(0), 3);
 
-  int32_t in1 = 1;
-  int32_t out1 = 0;
-  Entry(&in1, &out1);
-  EXPECT_EQ(out1, 3);
-
-  int32_t in2 = 10;
-  int32_t out2 = 0;
-  Entry(&in2, &out2);
-  EXPECT_EQ(out2, 12);
+  strenv.setStateVar(statePtr.get(), "In", 10, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  auto out2 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+  EXPECT_EQ(out2.value_or(0), 12);
 }
 
 TEST(NestedFunctions, ModuleInModule) {
@@ -184,22 +202,19 @@ TEST(NestedFunctions, ModuleInModule) {
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
-  ASSERT_TRUE(static_cast<bool>(EntrySym));
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
 
-  auto *Entry = EntrySym->toPtr<void (*)(double *, double *)>();
-  ASSERT_NE(Entry, nullptr);
+  strenv.setStateVar(statePtr.get(), "In", 5.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  auto out1 = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+  EXPECT_DOUBLE_EQ(out1.value_or(0.0), 10.0);
 
-  double in1 = 5.0;
-  double out1 = 0.0;
-  Entry(&in1, &out1);
-  EXPECT_DOUBLE_EQ(out1, 10.0);
-
-  double in2 = 10.5;
-  double out2 = 0.0;
-  Entry(&in2, &out2);
-  EXPECT_DOUBLE_EQ(out2, 15.5);
+  strenv.setStateVar(statePtr.get(), "In", 10.5, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  auto out2 = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+  EXPECT_DOUBLE_EQ(out2.value_or(0.0), 15.5);
 }
 
 TEST(NestedFunctions, ReactionInModule) {
@@ -212,27 +227,41 @@ TEST(NestedFunctions, ReactionInModule) {
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
-  ASSERT_TRUE(static_cast<bool>(EntrySym));
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
 
-  auto *Entry = EntrySym->toPtr<void (*)(double *, double *)>();
-  ASSERT_NE(Entry, nullptr);
+    strenv.setStateVar(statePtr.get(), "Out", 1.0, std::nullopt, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "In", 3.0, std::nullopt, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out1 = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_DOUBLE_EQ(out1.value_or(0.0), 1.0);
+  }
 
-  double in1 = 3.0;
-  double out1 = 1.0;
-  Entry(&in1, &out1);
-  EXPECT_DOUBLE_EQ(out1, 1.0);
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
 
-  double in2 = 6.0;
-  double out2 = 1.0;
-  Entry(&in2, &out2);
-  EXPECT_DOUBLE_EQ(out2, 6.0);
+    strenv.setStateVar(statePtr.get(), "Out", 1.0, std::nullopt, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "In", 6.0, std::nullopt, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out2 = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_DOUBLE_EQ(out2.value_or(0.0), 6.0);
+  }
 
-  double in3 = 10.0;
-  double out3 = 1.0;
-  Entry(&in3, &out3);
-  EXPECT_DOUBLE_EQ(out3, 10.0);
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
+
+    strenv.setStateVar(statePtr.get(), "Out", 1.0, std::nullopt, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "In", 10.0, std::nullopt, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out3 = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_DOUBLE_EQ(out3.value_or(0.0), 10.0);
+  }
 }
 
 TEST(NestedFunctions, LoopInModule) {
@@ -245,22 +274,31 @@ TEST(NestedFunctions, LoopInModule) {
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
-  ASSERT_TRUE(static_cast<bool>(EntrySym));
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
 
-  auto *Entry = EntrySym->toPtr<void (*)(int32_t *, int32_t *)>();
-  ASSERT_NE(Entry, nullptr);
+    strenv.setStateVar(statePtr.get(), "List", 1, 0, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 2, 1, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 3, 2, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out1 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_EQ(out1.value_or(0), 6);
+  }
 
-  int32_t list1[3] = {1, 2, 3};
-  int32_t out1 = 0;
-  Entry(list1, &out1);
-  EXPECT_EQ(out1, 6);
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
 
-  int32_t list2[3] = {10, 20, 30};
-  int32_t out2 = 0;
-  Entry(list2, &out2);
-  EXPECT_EQ(out2, 60);
+    strenv.setStateVar(statePtr.get(), "List", 10, 0, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 20, 1, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 30, 2, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out2 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_EQ(out2.value_or(0), 60);
+  }
 }
 
 TEST(NestedFunctions, StatefulModuleInLoop) {
@@ -273,22 +311,31 @@ TEST(NestedFunctions, StatefulModuleInLoop) {
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
-  ASSERT_TRUE(static_cast<bool>(EntrySym));
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
 
-  auto *Entry = EntrySym->toPtr<void (*)(int32_t *, int32_t *)>();
-  ASSERT_NE(Entry, nullptr);
+    strenv.setStateVar(statePtr.get(), "List", 1, 0, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 2, 1, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 3, 2, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out1 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_EQ(out1.value_or(0), 6);
+  }
 
-  int32_t list1[3] = {1, 2, 3};
-  int32_t out1 = 0;
-  Entry(list1, &out1);
-  EXPECT_EQ(out1, 6);
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
 
-  int32_t list2[3] = {10, 20, 30};
-  int32_t out2 = 0;
-  Entry(list2, &out2);
-  EXPECT_EQ(out2, 60);
+    strenv.setStateVar(statePtr.get(), "List", 10, 0, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 20, 1, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 30, 2, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out2 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_EQ(out2.value_or(0), 60);
+  }
 }
 
 TEST(NestedFunctions, StatefulModuleInReaction) {
@@ -301,22 +348,27 @@ TEST(NestedFunctions, StatefulModuleInReaction) {
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
-  ASSERT_TRUE(static_cast<bool>(EntrySym));
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
 
-  auto *Entry = EntrySym->toPtr<void (*)(int32_t *, int32_t *)>();
-  ASSERT_NE(Entry, nullptr);
+    strenv.setStateVar(statePtr.get(), "In", 5, std::nullopt, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out1 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_EQ(out1.value_or(0), 5);
+  }
 
-  int32_t in1 = 5;
-  int32_t out1 = 0;
-  Entry(&in1, &out1);
-  EXPECT_EQ(out1, 5);
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
 
-  int32_t in2 = 12;
-  int32_t out2 = 0;
-  Entry(&in2, &out2);
-  EXPECT_EQ(out2, 12);
+    strenv.setStateVar(statePtr.get(), "In", 12, std::nullopt, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out2 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_EQ(out2.value_or(0), 12);
+  }
 }
 
 TEST(NestedFunctions, StatefulModuleInModule) {
@@ -329,22 +381,27 @@ TEST(NestedFunctions, StatefulModuleInModule) {
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
-  ASSERT_TRUE(static_cast<bool>(EntrySym));
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
 
-  auto *Entry = EntrySym->toPtr<void (*)(int32_t *, int32_t *)>();
-  ASSERT_NE(Entry, nullptr);
+    strenv.setStateVar(statePtr.get(), "In", 5, std::nullopt, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out1 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_EQ(out1.value_or(0), 15);
+  }
 
-  int32_t in1 = 5;
-  int32_t out1 = 0;
-  Entry(&in1, &out1);
-  EXPECT_EQ(out1, 15);
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
 
-  int32_t in2 = 8;
-  int32_t out2 = 0;
-  Entry(&in2, &out2);
-  EXPECT_EQ(out2, 18);
+    strenv.setStateVar(statePtr.get(), "In", 8, std::nullopt, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out2 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_EQ(out2.value_or(0), 18);
+  }
 }
 
 TEST(NestedFunctions, MultipleStatefulModulesInLoop) {
@@ -357,22 +414,31 @@ TEST(NestedFunctions, MultipleStatefulModulesInLoop) {
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("RootDomain_process");
-  ASSERT_TRUE(static_cast<bool>(EntrySym));
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
 
-  auto *Entry = EntrySym->toPtr<void (*)(int32_t *, int32_t *)>();
-  ASSERT_NE(Entry, nullptr);
+    strenv.setStateVar(statePtr.get(), "List", 1, 0, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 2, 1, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 3, 2, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out1 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_EQ(out1.value_or(0), 18);
+  }
 
-  int32_t list1[3] = {1, 2, 3};
-  int32_t out1 = 0;
-  Entry(list1, &out1);
-  EXPECT_EQ(out1, 18);
+  {
+    auto statePtr = strenv.allocateSharedState("RootDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
 
-  int32_t list2[3] = {10, 20, 30};
-  int32_t out2 = 0;
-  Entry(list2, &out2);
-  EXPECT_EQ(out2, 180);
+    strenv.setStateVar(statePtr.get(), "List", 10, 0, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 20, 1, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", 30, 2, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto out2 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain");
+    EXPECT_EQ(out2.value_or(0), 180);
+  }
 }
 
 TEST(NestedFunctions, StandaloneStatelessModuleInModule) {
@@ -387,8 +453,8 @@ TEST(NestedFunctions, StandaloneStatelessModuleInModule) {
   auto ret = strenv.generateStandaloneFunction("TestModule", scope, tree);
   ASSERT_TRUE(ret);
 
-  EXPECT_EQ(strenv.state.TheModule->getFunction("RootDomain_process"), nullptr);
-  EXPECT_NE(strenv.state.TheModule->getFunction("TestModule"), nullptr);
+  EXPECT_EQ(strenv.mStrideEnv.TheModule->getFunction("RootDomain_process"), nullptr);
+  EXPECT_NE(strenv.mStrideEnv.TheModule->getFunction("TestModule"), nullptr);
 
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
@@ -423,8 +489,8 @@ TEST(NestedFunctions, StandaloneReactionInModule) {
   auto ret = strenv.generateStandaloneFunction("Max", scope, tree);
   ASSERT_TRUE(ret);
 
-  EXPECT_EQ(strenv.state.TheModule->getFunction("RootDomain_process"), nullptr);
-  EXPECT_NE(strenv.state.TheModule->getFunction("Max"), nullptr);
+  EXPECT_EQ(strenv.mStrideEnv.TheModule->getFunction("RootDomain_process"), nullptr);
+  EXPECT_NE(strenv.mStrideEnv.TheModule->getFunction("Max"), nullptr);
 
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
@@ -458,8 +524,8 @@ TEST(NestedFunctions, StandaloneLoopInModule) {
   auto ret = strenv.generateStandaloneFunction("TestModule", scope, tree);
   ASSERT_TRUE(ret);
 
-  EXPECT_EQ(strenv.state.TheModule->getFunction("RootDomain_process"), nullptr);
-  EXPECT_NE(strenv.state.TheModule->getFunction("TestModule"), nullptr);
+  EXPECT_EQ(strenv.mStrideEnv.TheModule->getFunction("RootDomain_process"), nullptr);
+  EXPECT_NE(strenv.mStrideEnv.TheModule->getFunction("TestModule"), nullptr);
 
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
@@ -494,8 +560,8 @@ TEST(NestedFunctions, StandaloneStatefulAccumulator) {
   auto ret = strenv.generateStandaloneFunction("InnerAccumulator", scope, tree);
   ASSERT_TRUE(ret);
 
-  EXPECT_EQ(strenv.state.TheModule->getFunction("RootDomain_process"), nullptr);
-  EXPECT_NE(strenv.state.TheModule->getFunction("InnerAccumulator"), nullptr);
+  EXPECT_EQ(strenv.mStrideEnv.TheModule->getFunction("RootDomain_process"), nullptr);
+  EXPECT_NE(strenv.mStrideEnv.TheModule->getFunction("InnerAccumulator"), nullptr);
 
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
@@ -538,9 +604,9 @@ TEST(NestedFunctions, StandaloneStatefulModuleInModule) {
   auto ret = strenv.generateStandaloneFunction("OuterModule", scope, tree);
   ASSERT_TRUE(ret);
 
-  EXPECT_EQ(strenv.state.TheModule->getFunction("RootDomain_process"), nullptr);
-  EXPECT_NE(strenv.state.TheModule->getFunction("OuterModule"), nullptr);
-  EXPECT_NE(strenv.state.TheModule->getFunction("InnerAccumulator"), nullptr);
+  EXPECT_EQ(strenv.mStrideEnv.TheModule->getFunction("RootDomain_process"), nullptr);
+  EXPECT_NE(strenv.mStrideEnv.TheModule->getFunction("OuterModule"), nullptr);
+  EXPECT_NE(strenv.mStrideEnv.TheModule->getFunction("InnerAccumulator"), nullptr);
 
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
@@ -587,9 +653,9 @@ TEST(NestedFunctions, StandaloneStatefulModuleInReaction) {
   auto ret = strenv.generateStandaloneFunction("TestReaction", scope, tree);
   ASSERT_TRUE(ret);
 
-  EXPECT_EQ(strenv.state.TheModule->getFunction("RootDomain_process"), nullptr);
-  EXPECT_NE(strenv.state.TheModule->getFunction("TestReaction"), nullptr);
-  EXPECT_NE(strenv.state.TheModule->getFunction("Counter"), nullptr);
+  EXPECT_EQ(strenv.mStrideEnv.TheModule->getFunction("RootDomain_process"), nullptr);
+  EXPECT_NE(strenv.mStrideEnv.TheModule->getFunction("TestReaction"), nullptr);
+  EXPECT_NE(strenv.mStrideEnv.TheModule->getFunction("Counter"), nullptr);
 
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);
@@ -636,9 +702,9 @@ TEST(NestedFunctions, StandaloneStatefulModuleInLoop) {
   auto ret = strenv.generateStandaloneFunction("TestLoop", scope, tree);
   ASSERT_TRUE(ret);
 
-  EXPECT_EQ(strenv.state.TheModule->getFunction("RootDomain_process"), nullptr);
-  EXPECT_NE(strenv.state.TheModule->getFunction("TestLoop"), nullptr);
-  EXPECT_NE(strenv.state.TheModule->getFunction("Accumulator"), nullptr);
+  EXPECT_EQ(strenv.mStrideEnv.TheModule->getFunction("RootDomain_process"), nullptr);
+  EXPECT_NE(strenv.mStrideEnv.TheModule->getFunction("TestLoop"), nullptr);
+  EXPECT_NE(strenv.mStrideEnv.TheModule->getFunction("Accumulator"), nullptr);
 
   ret = strenv.compileInMemory();
   ASSERT_TRUE(ret);

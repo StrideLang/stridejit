@@ -55,6 +55,26 @@ static bool isTrueProp(ASTNode prop) {
   return false;
 }
 
+std::string StateMachine::getFieldSuffix(StateMachineField field) {
+  switch (field) {
+  case StateMachineField::ActiveStateId:
+    return "_active_state_id";
+  case StateMachineField::TransitionRequestId:
+    return "_transition_request_id";
+  case StateMachineField::IsEntered:
+    return "_is_entered";
+  case StateMachineField::HistoryStateId:
+    return "_history_state_id";
+  }
+  return "";
+}
+
+std::string StateMachine::getVariableName(StateMachineField field,
+                                          const std::string &prefix,
+                                          const std::string &name) {
+  return "__" + prefix + "_" + name + getFieldSuffix(field);
+}
+
 void StateMachine::flattenStateMachine(
     std::shared_ptr<DeclarationNode> stateNode, int &idCounter,
     StateMachine &sm, const ScopeStack &scope, ASTNode tree, int parentId) {
@@ -91,8 +111,8 @@ void StateMachine::flattenStateMachine(
   }
 
   if (fs.resumeLastState) {
-    fs.historyStateVarName =
-        "__" + sm.name + "_" + stateNode->getName() + "_history_state_id";
+    fs.historyStateVarName = StateMachine::getVariableName(
+        StateMachineField::HistoryStateId, sm.name, stateNode->getName());
   }
 
   int currentId = fs.id;
@@ -123,10 +143,12 @@ StateMachine::processStateMachine(std::shared_ptr<BlockNode> child,
     StateMachine sm;
     sm.name = smName;
     sm.smDecl = smDecl;
-    // TODO encapsulate this name generation
-    sm.activeStateVarName = "__" + prefix + "_" + smName + "_active_state_id";
-    sm.transitionRequestVarName =
-        "__" + prefix + "_" + smName + "_transition_request_id";
+    sm.activeStateVarName = StateMachine::getVariableName(
+        StateMachineField::ActiveStateId, prefix, smName);
+    sm.transitionRequestVarName = StateMachine::getVariableName(
+        StateMachineField::TransitionRequestId, prefix, smName);
+    sm.isEnteredVarName = StateMachine::getVariableName(
+        StateMachineField::IsEntered, prefix, smName);
 
     int idCounter = 1; // 0 usually means uninitialized or inactive
     flattenStateMachine(smDecl, idCounter, sm, scope, tree);
@@ -229,6 +251,16 @@ StateMachine::collectStateMachines(std::shared_ptr<DeclarationNode> domainDecl,
   return machines;
 }
 
+const FlattenedState *
+StateMachine::findState(const std::string &stateName) const {
+  for (const auto &fs : flattenedStates) {
+    if (fs.stateDecl && fs.stateDecl->getName() == stateName) {
+      return &fs;
+    }
+  }
+  return nullptr;
+}
+
 } // namespace strd
 
 std::pair<llvm::Value *, std::optional<llvm::Type *>>
@@ -236,10 +268,7 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
   auto *func = state.Builder->GetInsertBlock()->getParent();
 
   // 1. Load activeStateVar
-
   llvm::Value *activeStatePtr = nullptr;
-  std::cout << "DEBUG: Looking for " << smContext.activeStateVarName
-            << " in NamedValues...\n";
   auto activeStateIt = state.NamedValues.find(smContext.activeStateVarName);
 
   if (activeStateIt != state.NamedValues.end()) {
@@ -249,10 +278,65 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
         state.TheModule->getNamedGlobal(smContext.activeStateVarName);
   }
   assert(activeStatePtr && "Active state variable global not found!");
+
+  // 2. Check and handle initial entry
+  llvm::Value *isEnteredPtr = nullptr;
+  if (!smContext.isEnteredVarName.empty()) {
+    auto isEnteredIt = state.NamedValues.find(smContext.isEnteredVarName);
+    if (isEnteredIt != state.NamedValues.end()) {
+      isEnteredPtr = isEnteredIt->second.first;
+    } else {
+      isEnteredPtr =
+          state.TheModule->getNamedGlobal(smContext.isEnteredVarName);
+    }
+  }
+
+  if (isEnteredPtr) {
+    auto *initialEntryBB =
+        llvm::BasicBlock::Create(*state.TheContext, "sm_initial_entry", func);
+    auto *switchEntryBB =
+        llvm::BasicBlock::Create(*state.TheContext, "sm_switch_entry", func);
+
+    auto *isEnteredVal =
+        state.Builder->CreateLoad(state.Builder->getInt1Ty(), isEnteredPtr);
+    state.Builder->CreateCondBr(isEnteredVal, switchEntryBB, initialEntryBB);
+
+    state.Builder->SetInsertPoint(initialEntryBB);
+
+    // Run onEntryCode for initial state ancestry top-down
+    std::vector<const FlattenedState *> initAncestry;
+    int ancId = smContext.initialStateId;
+    while (ancId != -1) {
+      const FlattenedState *aFs = nullptr;
+      for (const auto &s : smContext.flattenedStates) {
+        if (s.id == ancId) {
+          aFs = &s;
+          break;
+        }
+      }
+      if (!aFs)
+        break;
+      initAncestry.push_back(aFs);
+      ancId = aFs->parentId;
+    }
+    std::reverse(initAncestry.begin(), initAncestry.end());
+
+    for (const auto *aFs : initAncestry) {
+      for (auto &expr : aFs->onEntryCode) {
+        expr->codegen(state);
+      }
+    }
+
+    state.Builder->CreateStore(state.Builder->getInt1(true), isEnteredPtr);
+    state.Builder->CreateBr(switchEntryBB);
+
+    state.Builder->SetInsertPoint(switchEntryBB);
+  }
+
   auto *activeStateVal =
       state.Builder->CreateLoad(state.Builder->getInt32Ty(), activeStatePtr);
 
-  // 2. Create the master switch
+  // 3. Create the master switch
   auto *endBB = llvm::BasicBlock::Create(*state.TheContext, "sm_end", func);
   auto *switchInst = state.Builder->CreateSwitch(
       activeStateVal, endBB, smContext.flattenedStates.size());

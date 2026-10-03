@@ -9,6 +9,7 @@
 #include "stride/utils/astquery.h"
 
 // stridejit
+#include "stride/stridejit/statemachine.hpp"
 #include "stride/stridejit/strideenvironment.hpp"
 #include "stride/stridejit/stridegenerator.hpp"
 
@@ -71,6 +72,15 @@ StrideEnvironment::StrideEnvironment(std::string strideRoot)
 void StrideEnvironment::initializeJIT() {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
+  if (auto JTMB = llvm::orc::JITTargetMachineBuilder::detectHost()) {
+    if (auto TM = JTMB->createTargetMachine()) {
+      m_dataLayout = (*TM)->createDataLayout();
+      if (mStrideEnv.TheModule) {
+        mStrideEnv.TheModule->setDataLayout(*m_dataLayout);
+        mStrideEnv.TheModule->setTargetTriple((*TM)->getTargetTriple());
+      }
+    }
+  }
 }
 
 void StrideEnvironment::prepareTree(ASTNode tree) {
@@ -117,7 +127,7 @@ bool StrideEnvironment::generateIr(ASTNode root) {
         auto decl = std::static_pointer_cast<DeclarationNode>(member);
         if (decl->getObjectType() == "platformModule") {
           StrideGenerator::generatePlatformFunctionSignature(
-              decl, frameworkScope, state);
+              decl, frameworkScope, mStrideEnv);
         }
       }
     }
@@ -126,7 +136,7 @@ bool StrideEnvironment::generateIr(ASTNode root) {
   if (!ASTFunctions::preprocess(root, &globalScope)) {
     return false;
   }
-  StrideGenerator::compile(root, globalScope, state);
+  StrideGenerator::compile(root, globalScope, mStrideEnv);
   //  if (mVerbose) {
   //    state.TheModule->print(llvm::outs(), nullptr);
   //    llvm::outs() << "\n";
@@ -156,7 +166,7 @@ void StrideEnvironment::optimizeModule() {
     llvm::ModulePassManager MPM =
         PB.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
 
-    MPM.run(*state.TheModule, MAM);
+    MPM.run(*mStrideEnv.TheModule, MAM);
 #else
     // Legacy Pass Manager
     std::unique_ptr<llvm::legacy::FunctionPassManager> TheFPM;
@@ -199,7 +209,7 @@ void StrideEnvironment::optimizeModule() {
 #endif
   }
   if (m_verbose) {
-    state.TheModule->print(llvm::outs(), nullptr);
+    mStrideEnv.TheModule->print(llvm::outs(), nullptr);
     llvm::outs() << "\n";
   }
 }
@@ -207,8 +217,8 @@ void StrideEnvironment::optimizeModule() {
 bool StrideEnvironment::generateStandaloneFunction(std::string funcName,
                                                    ScopeStack &scope,
                                                    ASTNode tree) {
-  auto func =
-      StrideGenerator::generateStandaloneFunction(funcName, tree, scope, state);
+  auto func = StrideGenerator::generateStandaloneFunction(funcName, tree, scope,
+                                                          mStrideEnv);
   if (!func) {
     return false;
   }
@@ -264,33 +274,29 @@ const llvm::DataLayout *StrideEnvironment::getDataLayout() const {
     m_dataLayout = JIT->getDataLayout();
     return &*m_dataLayout;
   }
-  if (state.TheModule) {
-    m_dataLayout = state.TheModule->getDataLayout();
+  if (mStrideEnv.TheModule) {
+    m_dataLayout = mStrideEnv.TheModule->getDataLayout();
     return &*m_dataLayout;
   }
   return nullptr;
 }
 
 void *StrideEnvironment::allocateState(const std::string &funcName) {
-  const auto *info = state.getStateStructInfo(funcName);
-  if (!info || !info->structType) {
+  const auto *info = mStrideEnv.getStateStructInfo(funcName);
+  if (!info || !info->structType || info->allocSize == 0) {
     return nullptr;
   }
-  const auto *DL = getDataLayout();
-  if (!DL) {
-    return nullptr;
-  }
-  size_t allocSize = DL->getTypeAllocSize(info->structType);
-  if (allocSize == 0) {
-    return nullptr;
-  }
-  void *mem = malloc(allocSize);
+  void *mem = malloc(info->allocSize);
   if (!mem) {
     return nullptr;
   }
-  memset(mem, 0, allocSize);
+  memset(mem, 0, info->allocSize);
   if (info->defaultConstant) {
-    writeConstantToBuffer(info->defaultConstant, static_cast<char *>(mem), *DL);
+    const auto *DL = getDataLayout();
+    if (DL) {
+      writeConstantToBuffer(info->defaultConstant, static_cast<char *>(mem),
+                            *DL);
+    }
   }
   return mem;
 }
@@ -311,20 +317,16 @@ void StrideEnvironment::deallocateState(void *statePtr) {
 }
 
 bool StrideEnvironment::hasState(const std::string &funcName) const {
-  const auto *info = state.getStateStructInfo(funcName);
+  const auto *info = mStrideEnv.getStateStructInfo(funcName);
   return info && info->structType != nullptr;
 }
 
 size_t StrideEnvironment::getStateSize(const std::string &funcName) const {
-  const auto *info = state.getStateStructInfo(funcName);
+  const auto *info = mStrideEnv.getStateStructInfo(funcName);
   if (!info || !info->structType) {
     return 0;
   }
-  const auto *DL = getDataLayout();
-  if (!DL) {
-    return 0;
-  }
-  return DL->getTypeAllocSize(info->structType);
+  return info->allocSize;
 }
 
 static const StrideCompiler::StateStructInfo *
@@ -340,8 +342,9 @@ findStructInfo(const StrideCompiler &compilerState,
 }
 
 static std::optional<unsigned> findFieldByFunctionality(
-    const StrideCompiler::StateStructInfo &info, const std::string &suffix,
+    const StrideCompiler::StateStructInfo &info, StateMachineField field,
     const std::string &filter1 = "", const std::string &filter2 = "") {
+  std::string suffix = StateMachine::getFieldSuffix(field);
   for (const auto &[key, idx] : info.varIndices) {
     if (key.length() >= suffix.length() &&
         key.compare(key.length() - suffix.length(), suffix.length(), suffix) ==
@@ -356,7 +359,8 @@ static std::optional<unsigned> findFieldByFunctionality(
   return std::nullopt;
 }
 
-std::optional<int32_t>
+template <typename T>
+std::optional<T>
 StrideEnvironment::getStateVar(const void *statePtr, const std::string &varName,
                                std::optional<int> index,
                                const std::string &domainName) const {
@@ -365,23 +369,8 @@ StrideEnvironment::getStateVar(const void *statePtr, const std::string &varName,
 
   std::string baseName = varName;
   size_t arrayIdx = index.has_value() ? static_cast<size_t>(index.value()) : 0;
-  // auto bracketPos = varName.find('[');
-  // if (bracketPos != std::string::npos) {
-  //   baseName = varName.substr(0, bracketPos);
-  //   if (!index.has_value()) {
-  //     auto closeBracketPos = varName.find(']', bracketPos);
-  //     if (closeBracketPos != std::string::npos) {
-  //       std::string idxStr =
-  //           varName.substr(bracketPos + 1, closeBracketPos - bracketPos - 1);
-  //       try {
-  //         arrayIdx = std::stoul(idxStr);
-  //       } catch (...) {
-  //       }
-  //     }
-  //   }
-  // }
 
-  const auto *info = findStructInfo(state, domainName);
+  const auto *info = findStructInfo(mStrideEnv, domainName);
   if (!info || !info->structType)
     return std::nullopt;
 
@@ -407,44 +396,62 @@ StrideEnvironment::getStateVar(const void *statePtr, const std::string &varName,
     }
   }
 
-  const auto *DL = getDataLayout();
-  if (!DL)
+  if (fieldIdx >= info->fieldOffsets.size())
     return std::nullopt;
 
-  const auto *structLayout = DL->getStructLayout(info->structType);
-  uint64_t offset = structLayout->getElementOffset(fieldIdx);
+  uint64_t offset = info->fieldOffsets[fieldIdx];
   llvm::Type *fieldType = info->structType->getElementType(fieldIdx);
 
   const char *bytePtr = static_cast<const char *>(statePtr) + offset;
   if (fieldType->isArrayTy()) {
     llvm::Type *elemTy = fieldType->getArrayElementType();
-    size_t elemSz = DL->getTypeAllocSize(elemTy);
-    const char *elemPtr = bytePtr + (arrayIdx * elemSz);
-    if (elemTy->isIntegerTy(1) || elemTy->isIntegerTy(8)) {
-      return static_cast<int32_t>(*reinterpret_cast<const uint8_t *>(elemPtr));
-    } else if (elemTy->isIntegerTy(32)) {
-      return *reinterpret_cast<const int32_t *>(elemPtr);
-    } else if (elemTy->isIntegerTy(64)) {
-      return static_cast<int32_t>(*reinterpret_cast<const int64_t *>(elemPtr));
-    } else if (elemTy->isDoubleTy() || elemTy->isFloatTy()) {
-      return static_cast<int32_t>(*reinterpret_cast<const double *>(elemPtr));
+    size_t elemSz = (fieldIdx < info->fieldAllocSizes.size() &&
+                     fieldType->getArrayNumElements() > 0)
+                        ? (info->fieldAllocSizes[fieldIdx] /
+                           fieldType->getArrayNumElements())
+                        : 0;
+    if (elemSz == 0) {
+      const auto *DL = getDataLayout();
+      if (!DL)
+        return std::nullopt;
+      elemSz = DL->getTypeAllocSize(elemTy);
     }
-    return *reinterpret_cast<const int32_t *>(elemPtr);
+    const char *elemPtr = bytePtr + (arrayIdx * elemSz);
+    if (elemTy->isDoubleTy()) {
+      return static_cast<T>(*reinterpret_cast<const double *>(elemPtr));
+    } else if (elemTy->isFloatTy()) {
+      return static_cast<T>(*reinterpret_cast<const float *>(elemPtr));
+    } else if (elemTy->isIntegerTy(1) || elemTy->isIntegerTy(8)) {
+      return static_cast<T>(*reinterpret_cast<const uint8_t *>(elemPtr));
+    } else if (elemTy->isIntegerTy(16)) {
+      return static_cast<T>(*reinterpret_cast<const int16_t *>(elemPtr));
+    } else if (elemTy->isIntegerTy(32)) {
+      return static_cast<T>(*reinterpret_cast<const int32_t *>(elemPtr));
+    } else if (elemTy->isIntegerTy(64)) {
+      return static_cast<T>(*reinterpret_cast<const int64_t *>(elemPtr));
+    }
+    return static_cast<T>(*reinterpret_cast<const int32_t *>(elemPtr));
   }
 
-  if (fieldType->isIntegerTy(1) || fieldType->isIntegerTy(8)) {
-    return static_cast<int32_t>(*reinterpret_cast<const uint8_t *>(bytePtr));
+  if (fieldType->isDoubleTy()) {
+    return static_cast<T>(*reinterpret_cast<const double *>(bytePtr));
+  } else if (fieldType->isFloatTy()) {
+    return static_cast<T>(*reinterpret_cast<const float *>(bytePtr));
+  } else if (fieldType->isIntegerTy(1) || fieldType->isIntegerTy(8)) {
+    return static_cast<T>(*reinterpret_cast<const uint8_t *>(bytePtr));
+  } else if (fieldType->isIntegerTy(16)) {
+    return static_cast<T>(*reinterpret_cast<const int16_t *>(bytePtr));
+  } else if (fieldType->isIntegerTy(32)) {
+    return static_cast<T>(*reinterpret_cast<const int32_t *>(bytePtr));
   } else if (fieldType->isIntegerTy(64)) {
-    return static_cast<int32_t>(*reinterpret_cast<const int64_t *>(bytePtr));
-  } else if (fieldType->isDoubleTy() || fieldType->isFloatTy()) {
-    return static_cast<int32_t>(*reinterpret_cast<const double *>(bytePtr));
+    return static_cast<T>(*reinterpret_cast<const int64_t *>(bytePtr));
   }
-
-  return *reinterpret_cast<const int32_t *>(bytePtr);
+  return static_cast<T>(*reinterpret_cast<const int32_t *>(bytePtr));
 }
 
+template <typename T>
 bool StrideEnvironment::setStateVar(void *statePtr, const std::string &varName,
-                                    int32_t value, std::optional<int> index,
+                                    T value, std::optional<int> index,
                                     const std::string &domainName) {
   if (!statePtr)
     return false;
@@ -467,7 +474,7 @@ bool StrideEnvironment::setStateVar(void *statePtr, const std::string &varName,
     }
   }
 
-  const auto *info = findStructInfo(state, domainName);
+  const auto *info = findStructInfo(mStrideEnv, domainName);
   if (!info || !info->structType)
     return false;
 
@@ -493,18 +500,26 @@ bool StrideEnvironment::setStateVar(void *statePtr, const std::string &varName,
     }
   }
 
-  const auto *DL = getDataLayout();
-  if (!DL)
+  if (fieldIdx >= info->fieldOffsets.size())
     return false;
 
-  const auto *structLayout = DL->getStructLayout(info->structType);
-  uint64_t offset = structLayout->getElementOffset(fieldIdx);
+  uint64_t offset = info->fieldOffsets[fieldIdx];
   llvm::Type *fieldType = info->structType->getElementType(fieldIdx);
 
   char *bytePtr = static_cast<char *>(statePtr) + offset;
   if (fieldType->isArrayTy()) {
     llvm::Type *elemTy = fieldType->getArrayElementType();
-    size_t elemSz = DL->getTypeAllocSize(elemTy);
+    size_t elemSz = (fieldIdx < info->fieldAllocSizes.size() &&
+                     fieldType->getArrayNumElements() > 0)
+                        ? (info->fieldAllocSizes[fieldIdx] /
+                           fieldType->getArrayNumElements())
+                        : 0;
+    if (elemSz == 0) {
+      const auto *DL = getDataLayout();
+      if (!DL)
+        return false;
+      elemSz = DL->getTypeAllocSize(elemTy);
+    }
     char *elemPtr = bytePtr + (arrayIdx * elemSz);
     if (elemTy->isIntegerTy(1) || elemTy->isIntegerTy(8)) {
       *reinterpret_cast<int8_t *>(elemPtr) = static_cast<int8_t>(value);
@@ -540,24 +555,20 @@ std::optional<int32_t>
 StrideEnvironment::getActiveStateId(const void *statePtr,
                                     const std::string &smName,
                                     const std::string &domainName) const {
-  if (!statePtr)
+  if (!statePtr) {
     return std::nullopt;
-  const auto *info = findStructInfo(state, domainName);
-  if (!info || !info->structType)
+  }
+  const auto *info = findStructInfo(mStrideEnv, domainName);
+  if (!info || !info->structType) {
     return std::nullopt;
+  }
 
   auto fieldIdxOpt =
-      findFieldByFunctionality(*info, "_active_state_id", smName);
-  if (!fieldIdxOpt)
+      findFieldByFunctionality(*info, StateMachineField::ActiveStateId, smName);
+  if (!fieldIdxOpt || *fieldIdxOpt >= info->fieldOffsets.size())
     return std::nullopt;
 
-  const auto *DL = getDataLayout();
-  if (!DL)
-    return std::nullopt;
-
-  const auto *structLayout = DL->getStructLayout(info->structType);
-  uint64_t offset = structLayout->getElementOffset(*fieldIdxOpt);
-
+  uint64_t offset = info->fieldOffsets[*fieldIdxOpt];
   const char *bytePtr = static_cast<const char *>(statePtr) + offset;
   return *reinterpret_cast<const int32_t *>(bytePtr);
 }
@@ -572,24 +583,21 @@ StrideEnvironment::getActiveStateId(const std::shared_ptr<void> &statePtr,
 bool StrideEnvironment::requestTransition(void *statePtr, int32_t transitionId,
                                           const std::string &smName,
                                           const std::string &domainName) {
-  if (!statePtr)
+  if (!statePtr) {
     return false;
-  const auto *info = findStructInfo(state, domainName);
-  if (!info || !info->structType)
+  }
+  const auto *info = findStructInfo(mStrideEnv, domainName);
+  if (!info || !info->structType) {
     return false;
+  }
 
-  auto fieldIdxOpt =
-      findFieldByFunctionality(*info, "_transition_request_id", smName);
-  if (!fieldIdxOpt)
+  auto fieldIdxOpt = findFieldByFunctionality(
+      *info, StateMachineField::TransitionRequestId, smName);
+  if (!fieldIdxOpt || *fieldIdxOpt >= info->fieldOffsets.size()) {
     return false;
+  }
 
-  const auto *DL = getDataLayout();
-  if (!DL)
-    return false;
-
-  const auto *structLayout = DL->getStructLayout(info->structType);
-  uint64_t offset = structLayout->getElementOffset(*fieldIdxOpt);
-
+  uint64_t offset = info->fieldOffsets[*fieldIdxOpt];
   char *bytePtr = static_cast<char *>(statePtr) + offset;
   *reinterpret_cast<int32_t *>(bytePtr) = transitionId;
   return true;
@@ -608,22 +616,16 @@ StrideEnvironment::getTransitionRequestId(const void *statePtr,
                                           const std::string &domainName) const {
   if (!statePtr)
     return std::nullopt;
-  const auto *info = findStructInfo(state, domainName);
+  const auto *info = findStructInfo(mStrideEnv, domainName);
   if (!info || !info->structType)
     return std::nullopt;
 
-  auto fieldIdxOpt =
-      findFieldByFunctionality(*info, "_transition_request_id", smName);
-  if (!fieldIdxOpt)
+  auto fieldIdxOpt = findFieldByFunctionality(
+      *info, StateMachineField::TransitionRequestId, smName);
+  if (!fieldIdxOpt || *fieldIdxOpt >= info->fieldOffsets.size())
     return std::nullopt;
 
-  const auto *DL = getDataLayout();
-  if (!DL)
-    return std::nullopt;
-
-  const auto *structLayout = DL->getStructLayout(info->structType);
-  uint64_t offset = structLayout->getElementOffset(*fieldIdxOpt);
-
+  uint64_t offset = info->fieldOffsets[*fieldIdxOpt];
   const char *bytePtr = static_cast<const char *>(statePtr) + offset;
   return *reinterpret_cast<const int32_t *>(bytePtr);
 }
@@ -640,22 +642,16 @@ std::optional<int32_t> StrideEnvironment::getHistoryStateId(
     const std::string &smName, const std::string &domainName) const {
   if (!statePtr)
     return std::nullopt;
-  const auto *info = findStructInfo(state, domainName);
+  const auto *info = findStructInfo(mStrideEnv, domainName);
   if (!info || !info->structType)
     return std::nullopt;
 
-  auto fieldIdxOpt =
-      findFieldByFunctionality(*info, "_history_state_id", stateName, smName);
-  if (!fieldIdxOpt)
+  auto fieldIdxOpt = findFieldByFunctionality(
+      *info, StateMachineField::HistoryStateId, stateName, smName);
+  if (!fieldIdxOpt || *fieldIdxOpt >= info->fieldOffsets.size())
     return std::nullopt;
 
-  const auto *DL = getDataLayout();
-  if (!DL)
-    return std::nullopt;
-
-  const auto *structLayout = DL->getStructLayout(info->structType);
-  uint64_t offset = structLayout->getElementOffset(*fieldIdxOpt);
-
+  uint64_t offset = info->fieldOffsets[*fieldIdxOpt];
   const char *bytePtr = static_cast<const char *>(statePtr) + offset;
   return *reinterpret_cast<const int32_t *>(bytePtr);
 }
@@ -664,6 +660,40 @@ std::optional<int32_t> StrideEnvironment::getHistoryStateId(
     const std::shared_ptr<void> &statePtr, const std::string &stateName,
     const std::string &smName, const std::string &domainName) const {
   return getHistoryStateId(statePtr.get(), stateName, smName, domainName);
+}
+
+std::optional<int32_t>
+StrideEnvironment::getStateId(const std::string &stateName,
+                              const std::string &smName,
+                              const std::string &domainName) const {
+  for (const auto &smInfo : mStrideEnv.stateMachineInfos) {
+    if (!domainName.empty() && smInfo.domainName != domainName)
+      continue;
+    if (!smName.empty() && smInfo.smName != smName)
+      continue;
+    auto it = smInfo.stateIdsByName.find(stateName);
+    if (it != smInfo.stateIdsByName.end()) {
+      return it->second;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<int32_t>
+StrideEnvironment::getTransitionId(const std::string &transitionName,
+                                   const std::string &smName,
+                                   const std::string &domainName) const {
+  for (const auto &smInfo : mStrideEnv.stateMachineInfos) {
+    if (!domainName.empty() && smInfo.domainName != domainName)
+      continue;
+    if (!smName.empty() && smInfo.smName != smName)
+      continue;
+    auto it = smInfo.transitionIdsByName.find(transitionName);
+    if (it != smInfo.transitionIdsByName.end()) {
+      return it->second;
+    }
+  }
+  return std::nullopt;
 }
 
 static void fillTypeInfo(llvm::Type *ty, const llvm::DataLayout *DL,
@@ -709,15 +739,16 @@ static void fillTypeInfo(llvm::Type *ty, const llvm::DataLayout *DL,
 std::vector<FunctionArgInfo>
 StrideEnvironment::getFunctionArgs(const std::string &funcName) const {
   std::vector<FunctionArgInfo> result;
-  auto it = state.FunctionProtos.find(funcName);
-  if (it == state.FunctionProtos.end()) {
+  auto it = mStrideEnv.FunctionProtos.find(funcName);
+  if (it == mStrideEnv.FunctionProtos.end()) {
     return result;
   }
   const auto *DL = getDataLayout();
   const auto &proto = it->second;
 
-  assert(state.m_tree);
-  auto funcDecl = ASTQuery::findDeclarationByName(funcName, {}, state.m_tree);
+  assert(mStrideEnv.m_tree);
+  auto funcDecl =
+      ASTQuery::findDeclarationByName(funcName, {}, mStrideEnv.m_tree);
   assert(funcDecl);
 
   auto makeArgInfo = [&](const PrototypeArg &arg, FunctionArgInfo::Role role,
@@ -737,7 +768,7 @@ StrideEnvironment::getFunctionArgs(const std::string &funcName) const {
         nullptr);
     info.count = 1;
     if (blockDecl) {
-      int sz = ASTQuery::getBlockDeclaredSize(blockDecl, {}, state.m_tree);
+      int sz = ASTQuery::getBlockDeclaredSize(blockDecl, {}, mStrideEnv.m_tree);
       if (sz > 0) {
         info.count = static_cast<size_t>(sz);
       } else {
@@ -776,12 +807,12 @@ StrideEnvironment::getFunctionArgs(const std::string &funcName) const {
     info.elementSize = getStateSize(funcName);
     info.totalBytes = info.elementSize;
 
-    const auto *stateInfo = state.getStateStructInfo(funcName);
+    const auto *stateInfo = mStrideEnv.getStateStructInfo(funcName);
     if (stateInfo && stateInfo->structType) {
       info.llvmType =
           llvm::PointerType::get(stateInfo->structType->getContext(), 0);
-    } else if (state.TheContext) {
-      info.llvmType = llvm::PointerType::get(*state.TheContext, 0);
+    } else if (mStrideEnv.TheContext) {
+      info.llvmType = llvm::PointerType::get(*mStrideEnv.TheContext, 0);
     }
     result.push_back(info);
   }
@@ -1022,9 +1053,9 @@ bool StrideEnvironment::compileInMemory() {
   llvm::cantFail(JIT->getMainJITDylib().define(llvm::orc::absoluteSymbols(M)));
 
   m_dataLayout = JIT->getDataLayout();
-  TSCtx = llvm::orc::ThreadSafeContext(std::move(state.TheContext));
-  if (auto Err = JIT->addIRModule(
-          llvm::orc::ThreadSafeModule(std::move(state.TheModule), TSCtx))) {
+  TSCtx = llvm::orc::ThreadSafeContext(std::move(mStrideEnv.TheContext));
+  if (auto Err = JIT->addIRModule(llvm::orc::ThreadSafeModule(
+          std::move(mStrideEnv.TheModule), TSCtx))) {
     return false;
   }
   return true;
@@ -1047,7 +1078,7 @@ bool StrideEnvironment::compileObjectToDisk(std::string path) {
     }
     f << "// Auto generated by stridejit. Do not modify" << std::endl;
     f << "#pragma once" << std::endl << std::endl;
-    for (const auto &domain : state.domainArgs) {
+    for (const auto &domain : mStrideEnv.domainArgs) {
       f << "int"; // Return type
       f << " " << domain.first << "_process(";
       for (const auto &domainFunc : domain.second) {
@@ -1163,8 +1194,8 @@ bool StrideEnvironment::generateCompiledObject(std::string path,
       llvm::Triple(TargetTriple), CPU, Features, opt, RM,
       llvm::CodeModel::Large, // 👈 Force Large Code Model here
       llvm::CodeGenOptLevel::Default);
-  state.TheModule->setDataLayout(TargetMachine->createDataLayout());
-  state.TheModule->setTargetTriple(llvm::Triple(TargetTriple));
+  mStrideEnv.TheModule->setDataLayout(TargetMachine->createDataLayout());
+  mStrideEnv.TheModule->setTargetTriple(llvm::Triple(TargetTriple));
 
   auto fspath = std::filesystem::path(path);
   fspath.append(TargetTriple + "/");
@@ -1186,7 +1217,7 @@ bool StrideEnvironment::generateCompiledObject(std::string path,
     return false;
   }
 
-  pass.run(*state.TheModule);
+  pass.run(*mStrideEnv.TheModule);
   dest.flush();
   return true;
 }
@@ -1236,3 +1267,58 @@ StrideEnvironment::getFunction(std::string functionName) {
   auto EntrySym = JIT->lookup(functionName.c_str());
   return EntrySym;
 }
+
+template std::optional<int32_t>
+StrideEnvironment::getStateVar<int32_t>(const void *, const std::string &,
+                                        std::optional<int>,
+                                        const std::string &) const;
+template std::optional<double>
+StrideEnvironment::getStateVar<double>(const void *, const std::string &,
+                                       std::optional<int>,
+                                       const std::string &) const;
+
+template bool StrideEnvironment::setStateVar<int32_t>(void *,
+                                                      const std::string &,
+                                                      int32_t,
+                                                      std::optional<int>,
+                                                      const std::string &);
+template bool StrideEnvironment::setStateVar<double>(void *,
+                                                     const std::string &,
+                                                     double, std::optional<int>,
+                                                     const std::string &);
+
+template std::optional<bool>
+StrideEnvironment::getStateVar<bool>(const void *, const std::string &,
+                                     std::optional<int>,
+                                     const std::string &) const;
+template bool StrideEnvironment::setStateVar<bool>(void *, const std::string &,
+                                                   bool, std::optional<int>,
+                                                   const std::string &);
+
+template std::optional<float>
+StrideEnvironment::getStateVar<float>(const void *, const std::string &,
+                                      std::optional<int>,
+                                      const std::string &) const;
+template bool StrideEnvironment::setStateVar<float>(void *, const std::string &,
+                                                    float, std::optional<int>,
+                                                    const std::string &);
+
+template std::optional<int64_t>
+StrideEnvironment::getStateVar<int64_t>(const void *, const std::string &,
+                                        std::optional<int>,
+                                        const std::string &) const;
+template bool StrideEnvironment::setStateVar<int64_t>(void *,
+                                                      const std::string &,
+                                                      int64_t,
+                                                      std::optional<int>,
+                                                      const std::string &);
+
+template std::optional<uint32_t>
+StrideEnvironment::getStateVar<uint32_t>(const void *, const std::string &,
+                                         std::optional<int>,
+                                         const std::string &) const;
+template bool StrideEnvironment::setStateVar<uint32_t>(void *,
+                                                       const std::string &,
+                                                       uint32_t,
+                                                       std::optional<int>,
+                                                       const std::string &);
