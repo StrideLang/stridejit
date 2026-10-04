@@ -15,7 +15,16 @@
 
 namespace strd {
 
-static int resolveLeafInitialState(int stateId, const StateMachine &sm) {
+static int resolveLeafInitialState(int stateId, const StateMachine &sm,
+                                   std::vector<int> &visited) {
+  for (int v : visited) {
+    if (v == stateId) {
+      LOG_ERROR() << "Cycle detected in initialState hierarchy for state ID: "
+                  << stateId << std::endl;
+      return stateId;
+    }
+  }
+  visited.push_back(stateId);
   for (const auto &fs : sm.flattenedStates) {
     if (fs.id == stateId) {
       auto initProp = fs.stateDecl->getPropertyValue("initialState");
@@ -24,7 +33,7 @@ static int resolveLeafInitialState(int stateId, const StateMachine &sm) {
             std::static_pointer_cast<BlockNode>(initProp)->getName();
         for (const auto &childFs : sm.flattenedStates) {
           if (childFs.stateDecl->getName() == initName) {
-            return resolveLeafInitialState(childFs.id, sm);
+            return resolveLeafInitialState(childFs.id, sm, visited);
           }
         }
       }
@@ -32,6 +41,11 @@ static int resolveLeafInitialState(int stateId, const StateMachine &sm) {
     }
   }
   return stateId;
+}
+
+static int resolveLeafInitialState(int stateId, const StateMachine &sm) {
+  std::vector<int> visited;
+  return resolveLeafInitialState(stateId, sm, visited);
 }
 
 static bool isTrueProp(ASTNode prop) {

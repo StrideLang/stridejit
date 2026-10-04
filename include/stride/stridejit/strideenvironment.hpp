@@ -154,6 +154,11 @@ public:
                                          const std::string &smName = "",
                                          const std::string &domainName = "") const;
 
+  const std::vector<StrideCompiler::StateMachineInfo> &
+  getStateMachineInfos() const {
+    return mStrideEnv.stateMachineInfos;
+  }
+
   // Programmatic function inspection and dynamic invocation
   std::vector<FunctionArgInfo>
   getFunctionArgs(const std::string &funcName) const;

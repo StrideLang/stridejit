@@ -745,7 +745,7 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
                 belongsToDomain =
                     (ASTQuery::getNodeName(domainProp) == domainName);
               } else if (!domainProp) {
-                belongsToDomain = false;
+                belongsToDomain = true;
               }
 
               if (belongsToDomain) {
@@ -989,85 +989,28 @@ void StrideGenerator::collectInputArgs(
     ASTNode tree, std::shared_ptr<DeclarationNode> funcDecl,
     std::shared_ptr<FunctionNode> func) {
   // TODO collect function port arguments
-  if (typeTree) {
-    auto input = typeTree->instance->getCompilerProperty("mainInput");
-    if (input) {
-      if (auto prevFunc = std::dynamic_pointer_cast<FunctionNode>(input)) {
-        args.MainIn.args.emplace_back(std::move(exprs.back()));
-        exprs.pop_back();
-        // FIXME do automatic type casting int ->float
-        args.MainIn.argTypes.push_back(
-            llvm::Type::getDoubleTy(*state.TheContext));
-      } else if (auto prevList = std::dynamic_pointer_cast<ListNode>(input)) {
-        auto *v = dynamic_cast<ListExprAST *>(exprs.back().get());
-        auto listNodes = prevList->getChildren();
-        auto nodeIt = listNodes.begin();
-        if (v->getType() == ListExprAST::Type::MUTABLE_CONSISTENT) {
-          for (auto elemExpr = v->elements().begin();
-               elemExpr != v->elements().end(); elemExpr++) {
-            args.MainIn.args.emplace_back(std::move(*elemExpr));
-            std::string typeStr;
-            auto typecastNode = (*nodeIt)->getCompilerProperty("typecast");
-            if (typecastNode && typecastNode->getNodeType() == AST::String) {
-              typeStr = std::static_pointer_cast<ValueNode>(typecastNode)
-                            ->getStringValue();
-            } else {
-              typeStr =
-                  CodeAnalysis::resolveNodeOutDataType(*nodeIt, scope, tree);
-            }
-            if (!typeStr.empty()) {
-              if (typeStr == "_IntType") {
-                args.MainIn.argTypes.push_back(
-                    llvm::Type::getInt32Ty(*state.TheContext));
-              } else if (typeStr == "_SwitchType") {
-                args.MainIn.argTypes.push_back(
-                    llvm::Type::getInt1Ty(*state.TheContext));
-              } else {
-                args.MainIn.argTypes.push_back(
-                    llvm::Type::getDoubleTy(*state.TheContext));
-              }
-            } else {
-              auto elemDecl = ASTQuery::findDeclarationByName(
-                  ASTQuery::getNodeName(*nodeIt), scope, tree);
-
-              if (elemDecl) {
-                args.MainIn.argTypes.push_back(
-                    state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
-              } else if ((*nodeIt)->getNodeType() == AST::Int) {
-                // TODO get types from framework
-                args.MainIn.argTypes.push_back(
-                    llvm::Type::getInt32Ty(*state.TheContext));
-              } else if ((*nodeIt)->getNodeType() == AST::Real) {
-                args.MainIn.argTypes.push_back(
-                    llvm::Type::getDoubleTy(*state.TheContext));
-              } else if ((*nodeIt)->getNodeType() == AST::PortProperty) {
-                auto pp = std::static_pointer_cast<PortPropertyNode>(*nodeIt);
-                if (pp->getPortName() == "size") {
-                  args.MainIn.argTypes.push_back(
-                      llvm::Type::getInt32Ty(*state.TheContext));
-                } else if (pp->getPortName() == "rate") {
-                  args.MainIn.argTypes.push_back(
-                      llvm::Type::getDoubleTy(*state.TheContext));
-                } else {
-                  LOG_ERROR()
-                      << ":Port property not supported: " << pp->getPortName()
-                      << std::endl;
-                  args.MainIn.argTypes.push_back(
-                      llvm::Type::getDoubleTy(*state.TheContext));
-                }
-              } else {
-                // Fallback. We shouldn't get here when things are fully
-                // implemented
-                args.MainIn.argTypes.push_back(
-                    state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
-                LOG_ERROR() << "Unsupported type for: " << (*nodeIt)->toText()
-                            << std::endl;
-              }
-            }
-            nodeIt++;
-          }
-        } else if (v->getType() == ListExprAST::Type::IMMUTABLE_CONSISTENT) {
-          args.MainIn.args.emplace_back(std::move(exprs.back()));
+  ASTNode input = nullptr;
+  if (typeTree && typeTree->instance) {
+    input = typeTree->instance->getCompilerProperty("mainInput");
+  }
+  if (!input && func) {
+    input = func->getCompilerProperty("mainInput");
+  }
+  if (input) {
+    if (auto prevFunc = std::dynamic_pointer_cast<FunctionNode>(input)) {
+      args.MainIn.args.emplace_back(std::move(exprs.back()));
+      exprs.pop_back();
+      // FIXME do automatic type casting int ->float
+      args.MainIn.argTypes.push_back(
+          llvm::Type::getDoubleTy(*state.TheContext));
+    } else if (auto prevList = std::dynamic_pointer_cast<ListNode>(input)) {
+      auto *v = dynamic_cast<ListExprAST *>(exprs.back().get());
+      auto listNodes = prevList->getChildren();
+      auto nodeIt = listNodes.begin();
+      if (v->getType() == ListExprAST::Type::MUTABLE_CONSISTENT) {
+        for (auto elemExpr = v->elements().begin();
+             elemExpr != v->elements().end(); elemExpr++) {
+          args.MainIn.args.emplace_back(std::move(*elemExpr));
           std::string typeStr;
           auto typecastNode = (*nodeIt)->getCompilerProperty("typecast");
           if (typecastNode && typecastNode->getNodeType() == AST::String) {
@@ -1091,40 +1034,101 @@ void StrideGenerator::collectInputArgs(
           } else {
             auto elemDecl = ASTQuery::findDeclarationByName(
                 ASTQuery::getNodeName(*nodeIt), scope, tree);
-            args.MainIn.argTypes.push_back(
-                state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
-          }
-        } else {
-          // Not supported
-          LOG_ERROR() << "ERROR: List type not supported" << std::endl;
-          assert(0 == 1);
-        }
-        exprs.pop_back();
 
-      } else {
-        if (exprs.size() > 0) {
-          args.MainIn.args.emplace_back(std::move(exprs.back()));
-          exprs.pop_back();
-          LOG_DEBUG() << "Calling getOutputDataTypes for input: "
-                      << input->toText() << std::endl;
-          auto prevTypes = CodeAnalysis::getOutputDataTypes(input, scope, tree);
-          LOG_DEBUG() << "getOutputDataTypes returned " << prevTypes.size()
-                      << " types" << std::endl;
-          for (const auto &prevType : prevTypes) {
-            auto typeName = ASTQuery::getNodeName(prevType);
-            LOG_DEBUG() << "prevType name is: " << typeName << std::endl;
-            if (state.typesMap.find(typeName) != state.typesMap.end()) {
-              args.MainIn.argTypes.push_back(state.typesMap[typeName]);
-              LOG_DEBUG() << "added type to argTypes, size is now "
-                          << args.MainIn.argTypes.size() << std::endl;
+            if (elemDecl) {
+              args.MainIn.argTypes.push_back(
+                  state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
+            } else if ((*nodeIt)->getNodeType() == AST::Int) {
+              // TODO get types from framework
+              args.MainIn.argTypes.push_back(
+                  llvm::Type::getInt32Ty(*state.TheContext));
+            } else if ((*nodeIt)->getNodeType() == AST::Real) {
+              args.MainIn.argTypes.push_back(
+                  llvm::Type::getDoubleTy(*state.TheContext));
+            } else if ((*nodeIt)->getNodeType() == AST::PortProperty) {
+              auto pp = std::static_pointer_cast<PortPropertyNode>(*nodeIt);
+              if (pp->getPortName() == "size") {
+                args.MainIn.argTypes.push_back(
+                    llvm::Type::getInt32Ty(*state.TheContext));
+              } else if (pp->getPortName() == "rate") {
+                args.MainIn.argTypes.push_back(
+                    llvm::Type::getDoubleTy(*state.TheContext));
+              } else {
+                LOG_ERROR()
+                    << ":Port property not supported: " << pp->getPortName()
+                    << std::endl;
+                args.MainIn.argTypes.push_back(
+                    llvm::Type::getDoubleTy(*state.TheContext));
+              }
             } else {
-              LOG_DEBUG() << "typeName " << typeName
-                          << " not found in typesMap!" << std::endl;
+              // Fallback. We shouldn't get here when things are fully
+              // implemented
+              args.MainIn.argTypes.push_back(
+                  state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
+              LOG_ERROR() << "Unsupported type for: " << (*nodeIt)->toText()
+                          << std::endl;
             }
           }
-        } else {
-          LOG_ERROR() << "ERROR: No code generated for domain." << std::endl;
+          nodeIt++;
         }
+      } else if (v->getType() == ListExprAST::Type::IMMUTABLE_CONSISTENT) {
+        args.MainIn.args.emplace_back(std::move(exprs.back()));
+        std::string typeStr;
+        auto typecastNode = (*nodeIt)->getCompilerProperty("typecast");
+        if (typecastNode && typecastNode->getNodeType() == AST::String) {
+          typeStr = std::static_pointer_cast<ValueNode>(typecastNode)
+                        ->getStringValue();
+        } else {
+          typeStr =
+              CodeAnalysis::resolveNodeOutDataType(*nodeIt, scope, tree);
+        }
+        if (!typeStr.empty()) {
+          if (typeStr == "_IntType") {
+            args.MainIn.argTypes.push_back(
+                llvm::Type::getInt32Ty(*state.TheContext));
+          } else if (typeStr == "_SwitchType") {
+            args.MainIn.argTypes.push_back(
+                llvm::Type::getInt1Ty(*state.TheContext));
+          } else {
+            args.MainIn.argTypes.push_back(
+                llvm::Type::getDoubleTy(*state.TheContext));
+          }
+        } else {
+          auto elemDecl = ASTQuery::findDeclarationByName(
+              ASTQuery::getNodeName(*nodeIt), scope, tree);
+          args.MainIn.argTypes.push_back(
+              state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
+        }
+      } else {
+        // Not supported
+        LOG_ERROR() << "ERROR: List type not supported" << std::endl;
+        assert(0 == 1);
+      }
+      exprs.pop_back();
+
+    } else {
+      if (exprs.size() > 0) {
+        args.MainIn.args.emplace_back(std::move(exprs.back()));
+        exprs.pop_back();
+        LOG_DEBUG() << "Calling getOutputDataTypes for input: "
+                    << input->toText() << std::endl;
+        auto prevTypes = CodeAnalysis::getOutputDataTypes(input, scope, tree);
+        LOG_DEBUG() << "getOutputDataTypes returned " << prevTypes.size()
+                    << " types" << std::endl;
+        for (const auto &prevType : prevTypes) {
+          auto typeName = ASTQuery::getNodeName(prevType);
+          LOG_DEBUG() << "prevType name is: " << typeName << std::endl;
+          if (state.typesMap.find(typeName) != state.typesMap.end()) {
+            args.MainIn.argTypes.push_back(state.typesMap[typeName]);
+            LOG_DEBUG() << "added type to argTypes, size is now "
+                        << args.MainIn.argTypes.size() << std::endl;
+          } else {
+            LOG_DEBUG() << "typeName " << typeName
+                        << " not found in typesMap!" << std::endl;
+          }
+        }
+      } else {
+        LOG_ERROR() << "ERROR: No code generated for domain." << std::endl;
       }
     }
   }
@@ -1137,10 +1141,11 @@ void StrideGenerator::collectPropertyArgs(
     ASTNode tree, std::shared_ptr<DeclarationNode> funcDecl,
     std::shared_ptr<FunctionNode> func) {
   // TODO collect function port arguments
-  if (typeTree) {
-    assert(typeTree->instance->getNodeType() == AST::Function);
-    auto funcInstance =
-        std::static_pointer_cast<FunctionNode>(typeTree->instance);
+  auto funcInstance = (typeTree && typeTree->instance &&
+                       typeTree->instance->getNodeType() == AST::Function)
+                          ? std::static_pointer_cast<FunctionNode>(typeTree->instance)
+                          : func;
+  if (funcInstance) {
     auto props = funcInstance->getProperties();
     for (const auto &propNode : props) {
       args.Properties.args.emplace_back(createExpr(propNode->getValue()));
@@ -1321,10 +1326,15 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
 
       auto nextExpr = createExpr(next);
       if (nextExpr) {
+        ASTNode outputNode = nullptr;
         if (typeTree && typeTree->instance) {
-          auto outputNode =
-              typeTree->instance->getCompilerProperty("mainOutput");
-          args.MainOut.args.emplace_back(std::move(nextExpr));
+          outputNode = typeTree->instance->getCompilerProperty("mainOutput");
+        }
+        if (!outputNode && func) {
+          outputNode = func->getCompilerProperty("mainOutput");
+        }
+        args.MainOut.args.emplace_back(std::move(nextExpr));
+        if (outputNode) {
           auto blockName = ASTQuery::getNodeName(outputNode);
           ScopeStack scope;
           if (auto blocksNode = funcDecl->getPropertyValue("blocks")) {
@@ -1335,8 +1345,6 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               ASTQuery::findDeclarationByName(blockName, scope, nullptr);
 
           args.MainOut.argTypes.push_back(state.getLLVMType(mainOutputDecl));
-        } else {
-          args.MainOut.args.emplace_back(std::move(nextExpr));
         }
       }
 
@@ -1389,6 +1397,20 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               if (arg.name != "__state") {
                 args.Internal.args.push_back(
                     std::make_unique<VariableExprAST>(arg.name));
+              }
+            }
+          } else {
+            auto protoIt = state.FunctionProtos.find(funcDecl->getName());
+            if (protoIt != state.FunctionProtos.end()) {
+              for (const auto &arg : protoIt->second->getExternalArgs()) {
+                args.External.args.push_back(
+                    std::make_unique<VariableExprAST>(arg.name));
+              }
+              for (const auto &arg : protoIt->second->getInternalArgs()) {
+                if (arg.name != "__state") {
+                  args.Internal.args.push_back(
+                      std::make_unique<VariableExprAST>(arg.name));
+                }
               }
             }
           }
@@ -1633,13 +1655,13 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
     std::shared_ptr<FunctionNode> funcInstance, ASTNode tree, ScopeStack *scope,
     StrideCompiler &state) {
 
-  // if (!ASTQuery::isCallable(funcDecl, scope, tree)) {
-  //   LOG_ERROR() << "ERROR: Can't create function for: " << funcDecl->toText()
-  //             << std::endl
-  //             << "is not _Callable." << std::endl;
-  //   return nullptr;
-  // }
   std::string funcName = funcDecl->getName();
+
+  llvm::Function *TheFunction = state.getFunctionInModule(funcName);
+  if (TheFunction) {
+    LOG_INFO() << " Function already defined: " << funcName << std::endl;
+    return nullptr;
+  }
 
   auto functionScope = *scope;
   if (functionScope.size() == 0) {
@@ -1800,12 +1822,6 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
           PrototypeArg{name, llvm::Type::getDoubleTy(*state.TheContext)});
     }
   }
-  llvm::Function *TheFunction = state.getFunctionInModule(funcName);
-  if (TheFunction) {
-    LOG_INFO() << " Function already defined: " << funcName << std::endl;
-    // TODO check if current function is the same as existing function
-    return nullptr;
-  }
 
   auto *nodeTree =
       funcInstance ? state.findTypeTreeNode(funcInstance) : nullptr;
@@ -1861,9 +1877,10 @@ void StrideGenerator::generatePlatformFunctionSignature(
   auto outputList = decl->getPropertyValue("outputs");
   auto functionNameNode = decl->getPropertyValue("processing");
   if (inputList && outputList && functionNameNode) {
-    //            LOG_INFO() << "Loaded: " << decl->getName() <<
-    //            std::endl;
-    frameworkScope.push_back(decl);
+    if (std::find(frameworkScope.begin(), frameworkScope.end(), decl) ==
+        frameworkScope.end()) {
+      frameworkScope.push_back(decl);
+    }
     for (const auto &input : inputList->getChildren()) {
       if (input->getNodeType() == AST::Block) {
         auto inputBlock = std::static_pointer_cast<BlockNode>(input);
@@ -1896,7 +1913,14 @@ void StrideGenerator::generatePlatformFunctionSignature(
         std::static_pointer_cast<ValueNode>(functionNameNode)->getStringValue();
     llvm::FunctionType *FT =
         llvm::FunctionType::get(retType, parameters, false);
-    state.functionMap[decl->getName()].push_back(ExternalFunction{name, FT});
+
+    auto &funcList = state.functionMap[decl->getName()];
+    for (const auto &existing : funcList) {
+      if (existing.name == name && existing.llvmFunctionType == FT) {
+        return; // Already registered
+      }
+    }
+    funcList.push_back(ExternalFunction{name, FT});
     std::string atName;
     auto atNode = decl->getCompilerProperty("_at");
     if (atNode && atNode->getNodeType() == AST::String) {
