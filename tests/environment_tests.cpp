@@ -26,6 +26,21 @@ TEST(StrideEnvironmentTest, ConstructionWithStrideRoot) {
   EXPECT_NE(env.mStrideEnv.TheContext, nullptr);
 }
 
+TEST(StrideEnvironmentTest, IncludePathsManagement) {
+  strd::StrideEnvironment env;
+  EXPECT_TRUE(env.getIncludePaths().empty());
+
+  env.addIncludePath("/path/one");
+  env.addIncludePath("/path/two");
+  EXPECT_EQ(env.getIncludePaths().size(), 2);
+  EXPECT_EQ(env.getIncludePaths()[0], "/path/one");
+  EXPECT_EQ(env.getIncludePaths()[1], "/path/two");
+
+  env.setIncludePaths({"/custom/path"});
+  EXPECT_EQ(env.getIncludePaths().size(), 1);
+  EXPECT_EQ(env.getIncludePaths()[0], "/custom/path");
+}
+
 // ============================================================================
 // IR Generation Tests
 // ============================================================================

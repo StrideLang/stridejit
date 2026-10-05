@@ -82,6 +82,17 @@ class StrideEnvironment {
 public:
   StrideEnvironment(std::string strideroot = std::string());
 
+  // Include paths
+  void addIncludePath(const std::string &path) {
+    m_includePaths.push_back(path);
+  }
+  void setIncludePaths(const std::vector<std::string> &paths) {
+    m_includePaths = paths;
+  }
+  const std::vector<std::string> &getIncludePaths() const {
+    return m_includePaths;
+  }
+
   // IR generator
   bool generateIr(std::string path);
   bool generateIr(strd::ASTNode root);
@@ -198,6 +209,7 @@ private:
 
   // Configuration
   std::string m_strideRoot;
+  std::vector<std::string> m_includePaths;
   bool m_optimizeCode{true};
   bool m_verbose{true};
 };

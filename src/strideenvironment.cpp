@@ -91,7 +91,8 @@ void StrideEnvironment::prepareTree(ASTNode tree) {
     tree->addChild(systemNode);
   }
 
-  CodeResolver resolver(tree, ASTFunctions::getDefaultStrideRoot());
+  CodeResolver resolver(tree, ASTFunctions::getDefaultStrideRoot(),
+                        SystemConfiguration(), m_includePaths);
   resolver.process();
 }
 
@@ -103,6 +104,15 @@ bool StrideEnvironment::generateIr(std::string path) {
       LOG_ERROR() << error.getErrorText() << std::endl;
     }
     return false;
+  }
+
+  std::filesystem::path filePath(path);
+  if (filePath.has_parent_path()) {
+    std::string parentDir = filePath.parent_path().generic_string();
+    if (std::find(m_includePaths.begin(), m_includePaths.end(), parentDir) ==
+        m_includePaths.end()) {
+      m_includePaths.insert(m_includePaths.begin(), parentDir);
+    }
   }
 
   prepareTree(tree);
