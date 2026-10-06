@@ -1,0 +1,50 @@
+# ModuleTest.stride
+
+module Gain {
+    ports: [
+        mainInputPort InPort {
+            block: Input
+        },
+        mainOutputPort OutPort {
+            block: Output
+        },
+        propertyInputPort FactorPort {
+            name: 'factor'
+            block: Factor
+        }
+    ]
+    blocks: [
+        signal Input { default: 0.0 }
+        signal Output { default: 0.0 }
+        propertyBlock Factor { default: 2.0 }
+    ]
+    streams: [
+        Input * Factor >> Output;
+    ]
+}
+
+_domainDefinition GainDomain {
+    framework: _JitFramework
+    rate: -1
+    substitutions: []
+    domainIncludes: []
+    inputs: [
+        signal In { domain: GainDomain type: _RealType }
+    ]
+    outputs: [
+        signal Out { domain: GainDomain type: _RealType }
+    ]
+    domainFunctionCode: ''
+}
+
+In >> Gain(factor: 3.0) >> Out;
+
+functionTest GainModuleTest {
+    target: GainDomain
+    prepare: [
+        [ 1.0, 2.0, 3.0, 4.0 ] >> In;
+    ]
+    validate: [
+        [ Out, [ 3.0, 6.0, 9.0, 12.0 ] ] >> ExpectEqual();
+    ]
+}

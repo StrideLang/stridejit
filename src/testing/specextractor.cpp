@@ -52,6 +52,134 @@ void flattenStream(const ASTNode& node, std::vector<ASTNode>& elements) {
     }
 }
 
+inline void extractValuesFromNode(const ASTNode& node, std::vector<SignalScalarValue>& values) {
+    if (!node) return;
+    if (node->getNodeType() == AST::List) {
+        for (const auto& item : node->getChildren()) {
+            extractValuesFromNode(item, values);
+        }
+        return;
+    }
+    auto itemVal = findValueNode(node);
+    if (itemVal) {
+        if (itemVal->getNodeType() == AST::Real) {
+            values.push_back(itemVal->getRealValue());
+        } else if (itemVal->getNodeType() == AST::Int) {
+            values.push_back(static_cast<int32_t>(itemVal->getIntValue()));
+        } else if (itemVal->getNodeType() == AST::Switch) {
+            values.push_back(itemVal->getSwitchValue());
+        }
+    }
+}
+
+void extractNodeInfo(const ASTNode& elem, SignalStreamVector& streamVec) {
+    if (!elem) return;
+
+    if (elem->getNodeType() == AST::List) {
+        for (const auto& item : elem->getChildren()) {
+            if (!item) continue;
+            if (item->getNodeType() == AST::List) {
+                extractValuesFromNode(item, streamVec.values);
+            } else {
+                auto itemVal = findValueNode(item);
+                if (itemVal && (item->getNodeType() == AST::Real || item->getNodeType() == AST::Int || item->getNodeType() == AST::Switch)) {
+                    if (itemVal->getNodeType() == AST::Real) {
+                        streamVec.values.push_back(itemVal->getRealValue());
+                    } else if (itemVal->getNodeType() == AST::Int) {
+                        streamVec.values.push_back(static_cast<int32_t>(itemVal->getIntValue()));
+                    } else if (itemVal->getNodeType() == AST::Switch) {
+                        streamVec.values.push_back(itemVal->getSwitchValue());
+                    }
+                } else if (item->getNodeType() == AST::Declaration) {
+                    auto declSub = std::static_pointer_cast<DeclarationNode>(item);
+                    auto kindOpt = parseAssertionKind(declSub->getObjectType());
+                    if (!kindOpt.has_value()) {
+                        kindOpt = parseAssertionKind(declSub->getName());
+                    }
+                    if (kindOpt.has_value()) {
+                        streamVec.kind = kindOpt.value();
+                        auto epsProp = declSub->getPropertyValue("epsilon");
+                        auto epsVal = findValueNode(epsProp);
+                        if (epsVal) {
+                            streamVec.epsilon = epsVal->getRealValue();
+                        }
+                    } else {
+                        streamVec.portName = declSub->getName();
+                    }
+                } else if (item->getNodeType() == AST::Function) {
+                    auto funcNode = std::static_pointer_cast<FunctionNode>(item);
+                    auto kindOpt = parseAssertionKind(funcNode->getName());
+                    if (kindOpt.has_value()) {
+                        streamVec.kind = kindOpt.value();
+                        auto epsProp = funcNode->getPropertyValue("epsilon");
+                        auto epsVal = findValueNode(epsProp);
+                        if (epsVal) {
+                            streamVec.epsilon = epsVal->getRealValue();
+                        }
+                    } else {
+                        streamVec.portName = funcNode->getName();
+                    }
+                } else {
+                    std::string nodeName = ASTQuery::getNodeName(item);
+                    auto kindOpt = parseAssertionKind(nodeName);
+                    if (kindOpt.has_value()) {
+                        streamVec.kind = kindOpt.value();
+                    } else if (!nodeName.empty()) {
+                        streamVec.portName = nodeName;
+                    }
+                }
+            }
+        }
+    } else if (elem->getNodeType() == AST::Declaration) {
+        auto declSub = std::static_pointer_cast<DeclarationNode>(elem);
+        auto kindOpt = parseAssertionKind(declSub->getObjectType());
+        if (!kindOpt.has_value()) {
+            kindOpt = parseAssertionKind(declSub->getName());
+        }
+
+        if (kindOpt.has_value()) {
+            streamVec.kind = kindOpt.value();
+            auto epsProp = declSub->getPropertyValue("epsilon");
+            auto epsVal = findValueNode(epsProp);
+            if (epsVal) {
+                streamVec.epsilon = epsVal->getRealValue();
+            }
+        } else {
+            streamVec.portName = declSub->getName();
+        }
+    } else if (elem->getNodeType() == AST::Function) {
+        auto funcNode = std::static_pointer_cast<FunctionNode>(elem);
+        auto kindOpt = parseAssertionKind(funcNode->getName());
+        if (kindOpt.has_value()) {
+            streamVec.kind = kindOpt.value();
+            auto epsProp = funcNode->getPropertyValue("epsilon");
+            auto epsVal = findValueNode(epsProp);
+            if (epsVal) {
+                streamVec.epsilon = epsVal->getRealValue();
+            }
+        } else {
+            streamVec.portName = funcNode->getName();
+        }
+    } else if (isValueNodeType(elem->getNodeType())) {
+        auto valNode = std::static_pointer_cast<ValueNode>(elem);
+        if (elem->getNodeType() == AST::Real) {
+            streamVec.values.push_back(valNode->getRealValue());
+        } else if (elem->getNodeType() == AST::Int) {
+            streamVec.values.push_back(static_cast<int32_t>(valNode->getIntValue()));
+        } else if (elem->getNodeType() == AST::Switch) {
+            streamVec.values.push_back(valNode->getSwitchValue());
+        }
+    } else {
+        std::string nodeName = ASTQuery::getNodeName(elem);
+        auto kindOpt = parseAssertionKind(nodeName);
+        if (kindOpt.has_value()) {
+            streamVec.kind = kindOpt.value();
+        } else if (!nodeName.empty()) {
+            streamVec.portName = nodeName;
+        }
+    }
+}
+
 } // namespace
 
 std::vector<FunctionTestSpec> SpecExtractor::extractTests(const ASTNode& tree) {
@@ -83,14 +211,17 @@ FunctionTestSpec SpecExtractor::extractSingleTest(const ASTNode& testNode) {
         auto decl = std::static_pointer_cast<DeclarationNode>(testNode);
         spec.testName = decl->getName();
 
-        // Target function
-        auto funcVal = decl->getPropertyValue("function");
-        if (funcVal) {
-            auto valNode = findValueNode(funcVal);
+        // Target function / domain / module
+        auto targetVal = decl->getPropertyValue("target");
+        if (!targetVal) {
+            targetVal = decl->getPropertyValue("function");
+        }
+        if (targetVal) {
+            auto valNode = findValueNode(targetVal);
             if (valNode) {
                 spec.functionName = valNode->getStringValue();
             } else {
-                spec.functionName = ASTQuery::getNodeName(funcVal);
+                spec.functionName = ASTQuery::getNodeName(targetVal);
             }
         }
 
@@ -139,69 +270,7 @@ void SpecExtractor::extractStreams(const ASTNode& blockNode, std::vector<SignalS
         flattenStream(child, elements);
 
         for (const auto& elem : elements) {
-            if (!elem) continue;
-
-            if (elem->getNodeType() == AST::List) {
-                for (const auto& item : elem->getChildren()) {
-                    auto itemVal = findValueNode(item);
-                    if (itemVal) {
-                        if (itemVal->getNodeType() == AST::Real) {
-                            streamVec.values.push_back(itemVal->getRealValue());
-                        } else if (itemVal->getNodeType() == AST::Int) {
-                            streamVec.values.push_back(static_cast<int32_t>(itemVal->getIntValue()));
-                        } else if (itemVal->getNodeType() == AST::Switch) {
-                            streamVec.values.push_back(itemVal->getSwitchValue());
-                        }
-                    }
-                }
-            } else if (elem->getNodeType() == AST::Declaration) {
-                auto declSub = std::static_pointer_cast<DeclarationNode>(elem);
-                auto kindOpt = parseAssertionKind(declSub->getObjectType());
-                if (!kindOpt.has_value()) {
-                    kindOpt = parseAssertionKind(declSub->getName());
-                }
-
-                if (kindOpt.has_value()) {
-                    streamVec.kind = kindOpt.value();
-                    auto epsProp = declSub->getPropertyValue("epsilon");
-                    auto epsVal = findValueNode(epsProp);
-                    if (epsVal) {
-                        streamVec.epsilon = epsVal->getRealValue();
-                    }
-                } else {
-                    streamVec.portName = declSub->getName();
-                }
-            } else if (elem->getNodeType() == AST::Function) {
-                auto funcNode = std::static_pointer_cast<FunctionNode>(elem);
-                auto kindOpt = parseAssertionKind(funcNode->getName());
-                if (kindOpt.has_value()) {
-                    streamVec.kind = kindOpt.value();
-                    auto epsProp = funcNode->getPropertyValue("epsilon");
-                    auto epsVal = findValueNode(epsProp);
-                    if (epsVal) {
-                        streamVec.epsilon = epsVal->getRealValue();
-                    }
-                } else {
-                    streamVec.portName = funcNode->getName();
-                }
-            } else if (isValueNodeType(elem->getNodeType())) {
-                auto valNode = std::static_pointer_cast<ValueNode>(elem);
-                if (elem->getNodeType() == AST::Real) {
-                    streamVec.values.push_back(valNode->getRealValue());
-                } else if (elem->getNodeType() == AST::Int) {
-                    streamVec.values.push_back(static_cast<int32_t>(valNode->getIntValue()));
-                } else if (elem->getNodeType() == AST::Switch) {
-                    streamVec.values.push_back(valNode->getSwitchValue());
-                }
-            } else {
-                std::string nodeName = ASTQuery::getNodeName(elem);
-                auto kindOpt = parseAssertionKind(nodeName);
-                if (kindOpt.has_value()) {
-                    streamVec.kind = kindOpt.value();
-                } else if (!nodeName.empty()) {
-                    streamVec.portName = nodeName;
-                }
-            }
+            extractNodeInfo(elem, streamVec);
         }
 
         if (!streamVec.portName.empty() || !streamVec.values.empty() || streamVec.kind == AssertionKind::True || streamVec.kind == AssertionKind::False) {

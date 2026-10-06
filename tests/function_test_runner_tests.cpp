@@ -235,6 +235,47 @@ TEST(StrideTestRunner, AssertionKindsExecution) {
     EXPECT_EQ(resultGtLt.ticksExecuted, 2);
 }
 
+TEST(StrideTestRunner, ModuleTestExecution) {
+    strd::StrideEnvironment strenv;
+    auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "ModuleTest.stride");
+    ASSERT_TRUE(ret);
+
+    strenv.initializeJIT();
+    auto compiled = strenv.compileInMemory();
+    ASSERT_TRUE(compiled);
+
+    auto entrySym = strenv.getFunction("GainDomain_process");
+    ASSERT_TRUE(entrySym.operator bool());
+
+    void* fnPtr = reinterpret_cast<void*>(entrySym->getValue());
+    ASSERT_NE(fnPtr, nullptr);
+
+    auto specs = SpecExtractor::extractTestsFromFile(STRIDEJIT_TESTS_SOURCE_DIR "ModuleTest.stride");
+    ASSERT_EQ(specs.size(), 1);
+    EXPECT_EQ(specs[0].testName, "GainModuleTest");
+    EXPECT_EQ(specs[0].functionName, "GainDomain");
+
+    FunctionTestRunner runner(fnPtr);
+    std::shared_ptr<void> state = strenv.allocateSharedState("GainDomain");
+    ASSERT_NE(state, nullptr);
+    runner.setStatePointer(state.get());
+    runner.setStateAccessor({
+        [&strenv](void* statePtr, const std::string& name, double val) {
+            strenv.setStateVar<double>(statePtr, name, val);
+        },
+        [&strenv](const void* statePtr, const std::string& name) {
+            return strenv.getStateVar<double>(statePtr, name).value_or(0.0);
+        }
+    });
+
+    auto result = runner.runTest(specs[0]);
+
+    EXPECT_TRUE(result.passed) << result.errorMessage;
+    EXPECT_EQ(result.ticksExecuted, 4);
+    EXPECT_EQ(result.heapAllocations, 0);
+    EXPECT_GT(result.perfMetrics.meanNs, 0.0);
+}
+
 TEST(StrideTestDynamicLoader, NonExistentLibrary) {
     DynamicLoader loader("non_existent_library_12345.dll");
     EXPECT_FALSE(loader.isLoaded());
