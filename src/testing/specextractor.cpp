@@ -6,12 +6,26 @@
 #include "stride/parser/streamnode.h"
 #include "stride/utils/astquery.h"
 #include <algorithm>
+#include <optional>
 
 namespace strd::test {
 
 namespace {
+
 inline bool isValueNodeType(AST::Token token) {
     return token == AST::Real || token == AST::Int || token == AST::String || token == AST::Switch;
+}
+
+inline std::optional<AssertionKind> parseAssertionKind(const std::string& name) {
+    if (name == "ExpectEqual") return AssertionKind::Equal;
+    if (name == "ExpectNear") return AssertionKind::Near;
+    if (name == "ExpectTrue") return AssertionKind::True;
+    if (name == "ExpectFalse") return AssertionKind::False;
+    if (name == "ExpectGt") return AssertionKind::GreaterThan;
+    if (name == "ExpectGe") return AssertionKind::GreaterThanOrEqual;
+    if (name == "ExpectLt") return AssertionKind::LessThan;
+    if (name == "ExpectLe") return AssertionKind::LessThanOrEqual;
+    return std::nullopt;
 }
 
 void flattenStream(const ASTNode& node, std::vector<ASTNode>& elements) {
@@ -24,6 +38,7 @@ void flattenStream(const ASTNode& node, std::vector<ASTNode>& elements) {
         elements.push_back(node);
     }
 }
+
 } // namespace
 
 std::vector<FunctionTestSpec> SpecExtractor::extractTests(const ASTNode& tree) {
@@ -135,7 +150,13 @@ void SpecExtractor::extractStreams(const ASTNode& blockNode, std::vector<SignalS
                 }
             } else if (elem->getNodeType() == AST::Declaration) {
                 auto declSub = std::static_pointer_cast<DeclarationNode>(elem);
-                if (declSub->getObjectType() == "ExpectEqual" || declSub->getName() == "ExpectEqual") {
+                auto kindOpt = parseAssertionKind(declSub->getObjectType());
+                if (!kindOpt.has_value()) {
+                    kindOpt = parseAssertionKind(declSub->getName());
+                }
+
+                if (kindOpt.has_value()) {
+                    streamVec.kind = kindOpt.value();
                     auto epsProp = declSub->getPropertyValue("epsilon");
                     if (epsProp && isValueNodeType(epsProp->getNodeType())) {
                         auto epsVal = std::static_pointer_cast<ValueNode>(epsProp);
@@ -146,13 +167,16 @@ void SpecExtractor::extractStreams(const ASTNode& blockNode, std::vector<SignalS
                 }
             } else {
                 std::string nodeName = ASTQuery::getNodeName(elem);
-                if (!nodeName.empty() && nodeName != "ExpectEqual") {
+                auto kindOpt = parseAssertionKind(nodeName);
+                if (kindOpt.has_value()) {
+                    streamVec.kind = kindOpt.value();
+                } else if (!nodeName.empty()) {
                     streamVec.portName = nodeName;
                 }
             }
         }
 
-        if (!streamVec.portName.empty() || !streamVec.values.empty()) {
+        if (!streamVec.portName.empty() || !streamVec.values.empty() || streamVec.kind == AssertionKind::True || streamVec.kind == AssertionKind::False) {
             streams.push_back(streamVec);
         }
     }

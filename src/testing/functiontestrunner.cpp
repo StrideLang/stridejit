@@ -179,20 +179,17 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                 if (!valStream.matches(actualVal, t)) {
                     result.passed = false;
                     std::ostringstream ss;
-                    ss << "ExpectEqual failed on port '" << valStream.portName << "' at tick " << t << "\n";
-                    if (t < valStream.values.size()) {
-                        ss << "  Expected: " << valStream.formatValue(t);
-                        ss << "\n  Actual:   ";
-                        if (std::holds_alternative<double>(actualVal)) {
-                            ss << std::get<double>(actualVal);
-                        } else if (std::holds_alternative<int32_t>(actualVal)) {
-                            ss << std::get<int32_t>(actualVal);
-                        } else if (std::holds_alternative<int64_t>(actualVal)) {
-                            ss << std::get<int64_t>(actualVal);
-                        } else if (std::holds_alternative<bool>(actualVal)) {
-                            ss << (std::get<bool>(actualVal) ? "true" : "false");
-                        }
-                        ss << " (epsilon: " << valStream.epsilon << ")";
+                    ss << "Assertion failed on port '" << valStream.portName << "' at tick " << t << "\n";
+                    ss << "  Expected: " << valStream.formatCondition(t);
+                    ss << "\n  Actual:   ";
+                    if (std::holds_alternative<double>(actualVal)) {
+                        ss << std::get<double>(actualVal);
+                    } else if (std::holds_alternative<int32_t>(actualVal)) {
+                        ss << std::get<int32_t>(actualVal);
+                    } else if (std::holds_alternative<int64_t>(actualVal)) {
+                        ss << std::get<int64_t>(actualVal);
+                    } else if (std::holds_alternative<bool>(actualVal)) {
+                        ss << (std::get<bool>(actualVal) ? "true" : "false");
                     }
                     result.errorMessage = ss.str();
                     result.ticksExecuted = t;

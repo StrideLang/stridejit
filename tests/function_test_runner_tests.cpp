@@ -35,6 +35,59 @@ TEST(StrideTestSpec, SignalVectorMatching) {
     EXPECT_FALSE(vec.matches(1.0, 5)); // out of bounds
 }
 
+TEST(StrideTestSpec, AllAssertionKinds) {
+    // ExpectNear
+    SignalStreamVector nearVec;
+    nearVec.kind = AssertionKind::Near;
+    nearVec.epsilon = 0.05;
+    nearVec.values = { 10.0 };
+    EXPECT_TRUE(nearVec.matches(10.04, 0));
+    EXPECT_FALSE(nearVec.matches(10.06, 0));
+
+    // ExpectTrue / ExpectFalse
+    SignalStreamVector trueVec;
+    trueVec.kind = AssertionKind::True;
+    EXPECT_TRUE(trueVec.matches(true, 0));
+    EXPECT_TRUE(trueVec.matches(1.0, 0));
+    EXPECT_FALSE(trueVec.matches(false, 0));
+    EXPECT_FALSE(trueVec.matches(0.0, 0));
+
+    SignalStreamVector falseVec;
+    falseVec.kind = AssertionKind::False;
+    EXPECT_TRUE(falseVec.matches(false, 0));
+    EXPECT_TRUE(falseVec.matches(0.0, 0));
+    EXPECT_FALSE(falseVec.matches(true, 0));
+
+    // ExpectGt / ExpectGe
+    SignalStreamVector gtVec;
+    gtVec.kind = AssertionKind::GreaterThan;
+    gtVec.values = { 5.0 };
+    EXPECT_TRUE(gtVec.matches(5.1, 0));
+    EXPECT_FALSE(gtVec.matches(5.0, 0));
+    EXPECT_FALSE(gtVec.matches(4.9, 0));
+
+    SignalStreamVector geVec;
+    geVec.kind = AssertionKind::GreaterThanOrEqual;
+    geVec.values = { 5.0 };
+    EXPECT_TRUE(geVec.matches(5.0, 0));
+    EXPECT_TRUE(geVec.matches(5.1, 0));
+    EXPECT_FALSE(geVec.matches(4.9, 0));
+
+    // ExpectLt / ExpectLe
+    SignalStreamVector ltVec;
+    ltVec.kind = AssertionKind::LessThan;
+    ltVec.values = { 5.0 };
+    EXPECT_TRUE(ltVec.matches(4.9, 0));
+    EXPECT_FALSE(ltVec.matches(5.0, 0));
+
+    SignalStreamVector leVec;
+    leVec.kind = AssertionKind::LessThanOrEqual;
+    leVec.values = { 5.0 };
+    EXPECT_TRUE(leVec.matches(5.0, 0));
+    EXPECT_TRUE(leVec.matches(4.9, 0));
+    EXPECT_FALSE(leVec.matches(5.1, 0));
+}
+
 TEST(StrideTestPerf, AnalyzerStats) {
     auto stats = PerfAnalyzer::profile(10, 100, []() {
         volatile int x = 0;
@@ -75,6 +128,25 @@ TEST(StrideTestSpec, ExtractFromFile) {
     ASSERT_EQ(specs[0].validateStreams.size(), 1);
     EXPECT_EQ(specs[0].validateStreams[0].portName, "Out");
     EXPECT_EQ(specs[0].validateStreams[0].values.size(), 5);
+    EXPECT_EQ(specs[0].validateStreams[0].kind, AssertionKind::Equal);
+}
+
+TEST(StrideTestSpec, ExtractAssertionsFixture) {
+    auto specs = SpecExtractor::extractTestsFromFile(STRIDEJIT_TESTS_SOURCE_DIR "AssertionsTest.stride");
+    ASSERT_EQ(specs.size(), 2);
+
+    // TestNear
+    EXPECT_EQ(specs[0].testName, "TestNear");
+    EXPECT_EQ(specs[0].functionName, "TestDomain");
+    ASSERT_EQ(specs[0].validateStreams.size(), 1);
+    EXPECT_EQ(specs[0].validateStreams[0].kind, AssertionKind::Near);
+    EXPECT_DOUBLE_EQ(specs[0].validateStreams[0].epsilon, 0.01);
+
+    // TestGtLt
+    EXPECT_EQ(specs[1].testName, "TestGtLt");
+    ASSERT_EQ(specs[1].validateStreams.size(), 2);
+    EXPECT_EQ(specs[1].validateStreams[0].kind, AssertionKind::GreaterThan);
+    EXPECT_EQ(specs[1].validateStreams[1].kind, AssertionKind::LessThan);
 }
 
 TEST(StrideTestRunner, DirectFunctionExecutionSuccess) {
@@ -103,7 +175,7 @@ TEST(StrideTestRunner, FailureDiagnostics) {
 
     EXPECT_FALSE(result.passed);
     EXPECT_EQ(result.ticksExecuted, 2);
-    EXPECT_NE(result.errorMessage.find("ExpectEqual failed on port 'Out' at tick 2"), std::string::npos);
+    EXPECT_NE(result.errorMessage.find("Assertion failed on port 'Out' at tick 2"), std::string::npos);
 }
 
 TEST(StrideTestRunner, JITCompiledPassthruExecution) {
@@ -143,6 +215,23 @@ TEST(StrideTestRunner, JITCompiledPassthruExecution) {
     EXPECT_EQ(result.ticksExecuted, 5);
     EXPECT_EQ(result.heapAllocations, 0);
     EXPECT_GT(result.perfMetrics.meanNs, 0.0);
+}
+
+TEST(StrideTestRunner, AssertionKindsExecution) {
+    auto specs = SpecExtractor::extractTestsFromFile(STRIDEJIT_TESTS_SOURCE_DIR "AssertionsTest.stride");
+    ASSERT_EQ(specs.size(), 2);
+
+    FunctionTestRunner runner(reinterpret_cast<void*>(&mock_passthru_process));
+
+    // TestNear
+    auto resultNear = runner.runTest(specs[0]);
+    EXPECT_TRUE(resultNear.passed) << resultNear.errorMessage;
+    EXPECT_EQ(resultNear.ticksExecuted, 2);
+
+    // TestGtLt
+    auto resultGtLt = runner.runTest(specs[1]);
+    EXPECT_TRUE(resultGtLt.passed) << resultGtLt.errorMessage;
+    EXPECT_EQ(resultGtLt.ticksExecuted, 2);
 }
 
 } // namespace

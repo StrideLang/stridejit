@@ -1,0 +1,40 @@
+# AssertionsTest.stride
+
+import Assertions;
+
+_domainDefinition TestDomain {
+    framework: _JitFramework
+    rate: -1
+    substitutions: []
+    domainIncludes: []
+    inputs: [
+        signal In { domain: TestDomain type: _RealType }
+    ]
+    outputs: [
+        signal Out { domain: TestDomain type: _RealType }
+    ]
+    domainFunctionCode: ''
+}
+
+In >> Out;
+
+functionTest TestNear {
+    function: TestDomain
+    prepare: [
+        In >> [ 1.000001, 2.000002 ];
+    ]
+    validate: [
+        Out >> ExpectNear(epsilon: 0.01) >> [ 1.0, 2.0 ];
+    ]
+}
+
+functionTest TestGtLt {
+    function: TestDomain
+    prepare: [
+        In >> [ 5.0, 10.0 ];
+    ]
+    validate: [
+        Out >> ExpectGt() >> [ 4.0, 9.0 ];
+        Out >> ExpectLt() >> [ 6.0, 11.0 ];
+    ]
+}
