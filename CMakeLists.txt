@@ -214,6 +214,10 @@ if (STRIDEJIT_BUILD_TESTING)
   endif()
   target_include_directories(StrideTesting PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(StrideTesting PUBLIC StrideParser StrideUtils StrideJit gtest)
+
+  add_executable(stridetest src/testing/main.cpp)
+  target_include_directories(stridetest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(stridetest PRIVATE StrideTesting StrideJit StrideParser StrideUtils)
 endif()
 
 add_subdirectory(tests)
