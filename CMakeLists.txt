@@ -183,6 +183,7 @@ if (STRIDEJIT_BUILD_TESTING)
     src/testing/dynamicloader.cpp
     src/testing/specextractor.cpp
     src/testing/functiontestrunner.cpp
+    src/testing/testreporter.cpp
   )
   set(STRIDETESTING_HEADERS
     include/stride/testing/testspec.hpp
@@ -191,6 +192,7 @@ if (STRIDEJIT_BUILD_TESTING)
     include/stride/testing/dynamicloader.hpp
     include/stride/testing/specextractor.hpp
     include/stride/testing/functiontestrunner.hpp
+    include/stride/testing/testreporter.hpp
   )
 
   if (NOT TARGET gtest)

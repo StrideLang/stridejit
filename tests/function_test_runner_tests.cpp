@@ -9,6 +9,7 @@
 #include "stride/testing/memorytracker.hpp"
 #include "stride/testing/specextractor.hpp"
 #include "stride/testing/functiontestrunner.hpp"
+#include "stride/testing/testreporter.hpp"
 
 #include "stride/stridejit/strideenvironment.hpp"
 
@@ -232,6 +233,52 @@ TEST(StrideTestRunner, AssertionKindsExecution) {
     auto resultGtLt = runner.runTest(specs[1]);
     EXPECT_TRUE(resultGtLt.passed) << resultGtLt.errorMessage;
     EXPECT_EQ(resultGtLt.ticksExecuted, 2);
+}
+
+TEST(StrideTestDynamicLoader, NonExistentLibrary) {
+    DynamicLoader loader("non_existent_library_12345.dll");
+    EXPECT_FALSE(loader.isLoaded());
+    EXPECT_FALSE(loader.getErrorMessage().empty());
+    EXPECT_EQ(loader.getRawSymbol("any_symbol"), nullptr);
+}
+
+TEST(StrideTestReporter, ConsoleAndJUnitXmlOutput) {
+    TestReporter reporter;
+    FunctionTestSpec spec1;
+    spec1.testName = "UnitTest1";
+    spec1.functionName = "Proc1";
+    TestRunResult res1;
+    res1.passed = true;
+    res1.ticksExecuted = 10;
+    res1.perfMetrics.meanNs = 45.2;
+    res1.perfMetrics.cv = 0.05;
+    res1.perfMetrics.iterations = 1000;
+    reporter.addResult(spec1, res1);
+
+    FunctionTestSpec spec2;
+    spec2.testName = "UnitTest2";
+    spec2.functionName = "Proc2";
+    TestRunResult res2;
+    res2.passed = false;
+    res2.errorMessage = "Assertion failed on port 'Out'";
+    res2.ticksExecuted = 3;
+    res2.perfMetrics.meanNs = 30.1;
+    res2.perfMetrics.iterations = 500;
+    reporter.addResult(spec2, res2);
+
+    EXPECT_EQ(reporter.totalTests(), 2);
+    EXPECT_EQ(reporter.passedTests(), 1);
+    EXPECT_EQ(reporter.failedTests(), 1);
+
+    std::string consoleSummary = reporter.formatConsoleSummary();
+    EXPECT_NE(consoleSummary.find("UnitTest1"), std::string::npos);
+    EXPECT_NE(consoleSummary.find("UnitTest2"), std::string::npos);
+    EXPECT_NE(consoleSummary.find("1 passed, 1 failed, 2 total"), std::string::npos);
+
+    std::string xml = reporter.generateJUnitXml("StrideModuleTests");
+    EXPECT_NE(xml.find("<testsuite name=\"StrideModuleTests\" tests=\"2\" failures=\"1\""), std::string::npos);
+    EXPECT_NE(xml.find("<testcase name=\"UnitTest1\""), std::string::npos);
+    EXPECT_NE(xml.find("<failure message=\"Assertion failed on port 'Out'\""), std::string::npos);
 }
 
 } // namespace

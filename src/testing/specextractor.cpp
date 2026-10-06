@@ -1,5 +1,6 @@
 #include "stride/testing/specextractor.hpp"
 #include "stride/parser/declarationnode.h"
+#include "stride/parser/functionnode.h"
 #include "stride/parser/propertynode.h"
 #include "stride/parser/valuenode.h"
 #include "stride/parser/listnode.h"
@@ -14,6 +15,18 @@ namespace {
 
 inline bool isValueNodeType(AST::Token token) {
     return token == AST::Real || token == AST::Int || token == AST::String || token == AST::Switch;
+}
+
+inline std::shared_ptr<ValueNode> findValueNode(const ASTNode& node) {
+    if (!node) return nullptr;
+    if (isValueNodeType(node->getNodeType())) {
+        return std::static_pointer_cast<ValueNode>(node);
+    }
+    for (const auto& child : node->getChildren()) {
+        auto res = findValueNode(child);
+        if (res) return res;
+    }
+    return nullptr;
 }
 
 inline std::optional<AssertionKind> parseAssertionKind(const std::string& name) {
@@ -73,8 +86,8 @@ FunctionTestSpec SpecExtractor::extractSingleTest(const ASTNode& testNode) {
         // Target function
         auto funcVal = decl->getPropertyValue("function");
         if (funcVal) {
-            if (isValueNodeType(funcVal->getNodeType())) {
-                auto valNode = std::static_pointer_cast<ValueNode>(funcVal);
+            auto valNode = findValueNode(funcVal);
+            if (valNode) {
                 spec.functionName = valNode->getStringValue();
             } else {
                 spec.functionName = ASTQuery::getNodeName(funcVal);
@@ -83,9 +96,11 @@ FunctionTestSpec SpecExtractor::extractSingleTest(const ASTNode& testNode) {
 
         // Timeout
         auto timeoutVal = decl->getPropertyValue("timeout");
-        if (timeoutVal && isValueNodeType(timeoutVal->getNodeType())) {
-            auto valNode = std::static_pointer_cast<ValueNode>(timeoutVal);
-            spec.timeoutSeconds = valNode->getRealValue();
+        if (timeoutVal) {
+            auto valNode = findValueNode(timeoutVal);
+            if (valNode) {
+                spec.timeoutSeconds = valNode->getRealValue();
+            }
         }
 
         // Prepare streams
@@ -128,25 +143,16 @@ void SpecExtractor::extractStreams(const ASTNode& blockNode, std::vector<SignalS
 
             if (elem->getNodeType() == AST::List) {
                 for (const auto& item : elem->getChildren()) {
-                    if (item && isValueNodeType(item->getNodeType())) {
-                        auto itemVal = std::static_pointer_cast<ValueNode>(item);
-                        if (item->getNodeType() == AST::Real) {
+                    auto itemVal = findValueNode(item);
+                    if (itemVal) {
+                        if (itemVal->getNodeType() == AST::Real) {
                             streamVec.values.push_back(itemVal->getRealValue());
-                        } else if (item->getNodeType() == AST::Int) {
+                        } else if (itemVal->getNodeType() == AST::Int) {
                             streamVec.values.push_back(static_cast<int32_t>(itemVal->getIntValue()));
-                        } else if (item->getNodeType() == AST::Switch) {
+                        } else if (itemVal->getNodeType() == AST::Switch) {
                             streamVec.values.push_back(itemVal->getSwitchValue());
                         }
                     }
-                }
-            } else if (isValueNodeType(elem->getNodeType())) {
-                auto valNode = std::static_pointer_cast<ValueNode>(elem);
-                if (elem->getNodeType() == AST::Real) {
-                    streamVec.values.push_back(valNode->getRealValue());
-                } else if (elem->getNodeType() == AST::Int) {
-                    streamVec.values.push_back(static_cast<int32_t>(valNode->getIntValue()));
-                } else if (elem->getNodeType() == AST::Switch) {
-                    streamVec.values.push_back(valNode->getSwitchValue());
                 }
             } else if (elem->getNodeType() == AST::Declaration) {
                 auto declSub = std::static_pointer_cast<DeclarationNode>(elem);
@@ -158,12 +164,34 @@ void SpecExtractor::extractStreams(const ASTNode& blockNode, std::vector<SignalS
                 if (kindOpt.has_value()) {
                     streamVec.kind = kindOpt.value();
                     auto epsProp = declSub->getPropertyValue("epsilon");
-                    if (epsProp && isValueNodeType(epsProp->getNodeType())) {
-                        auto epsVal = std::static_pointer_cast<ValueNode>(epsProp);
+                    auto epsVal = findValueNode(epsProp);
+                    if (epsVal) {
                         streamVec.epsilon = epsVal->getRealValue();
                     }
                 } else {
                     streamVec.portName = declSub->getName();
+                }
+            } else if (elem->getNodeType() == AST::Function) {
+                auto funcNode = std::static_pointer_cast<FunctionNode>(elem);
+                auto kindOpt = parseAssertionKind(funcNode->getName());
+                if (kindOpt.has_value()) {
+                    streamVec.kind = kindOpt.value();
+                    auto epsProp = funcNode->getPropertyValue("epsilon");
+                    auto epsVal = findValueNode(epsProp);
+                    if (epsVal) {
+                        streamVec.epsilon = epsVal->getRealValue();
+                    }
+                } else {
+                    streamVec.portName = funcNode->getName();
+                }
+            } else if (isValueNodeType(elem->getNodeType())) {
+                auto valNode = std::static_pointer_cast<ValueNode>(elem);
+                if (elem->getNodeType() == AST::Real) {
+                    streamVec.values.push_back(valNode->getRealValue());
+                } else if (elem->getNodeType() == AST::Int) {
+                    streamVec.values.push_back(static_cast<int32_t>(valNode->getIntValue()));
+                } else if (elem->getNodeType() == AST::Switch) {
+                    streamVec.values.push_back(valNode->getSwitchValue());
                 }
             } else {
                 std::string nodeName = ASTQuery::getNodeName(elem);
