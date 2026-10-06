@@ -126,7 +126,9 @@ add_library(StrideJit
   doc/code_geneartion.md
 )
 
-target_compile_options(StrideJit PRIVATE -fPIC)
+if (NOT MSVC)
+  target_compile_options(StrideJit PRIVATE -fPIC)
+endif()
 target_link_libraries(StrideJit PUBLIC StrideParser StrideUtils StrideCodegen)
 target_include_directories(StrideJit PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -169,6 +171,48 @@ target_link_libraries(StrideJit PUBLIC
 #target_include_directories(StrideLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 #target_compile_definitions(StrideLib PUBLIC
 #  "-DSTRIDELIB_PATH=\"${CMAKE_CURRENT_BINARY_DIR}\"")
+
+# Testing module -----------------------------------
+option(STRIDEJIT_BUILD_TESTING "Build the Stride testing module" ON)
+
+if (STRIDEJIT_BUILD_TESTING)
+  set(STRIDETESTING_SRC
+    src/testing/testspec.cpp
+    src/testing/memorytracker.cpp
+    src/testing/perfanalyzer.cpp
+    src/testing/dynamicloader.cpp
+    src/testing/specextractor.cpp
+    src/testing/functiontestrunner.cpp
+  )
+  set(STRIDETESTING_HEADERS
+    include/stride/testing/testspec.hpp
+    include/stride/testing/memorytracker.hpp
+    include/stride/testing/perfanalyzer.hpp
+    include/stride/testing/dynamicloader.hpp
+    include/stride/testing/specextractor.hpp
+    include/stride/testing/functiontestrunner.hpp
+  )
+
+  if (NOT TARGET gtest)
+    include(FetchContent)
+    FetchContent_Declare(
+      googletest
+      GIT_REPOSITORY https://github.com/google/googletest.git
+      GIT_TAG        release-1.12.0
+    )
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+  endif()
+
+  add_library(StrideTesting
+    ${STRIDETESTING_SRC} ${STRIDETESTING_HEADERS}
+  )
+  if (NOT MSVC)
+    target_compile_options(StrideTesting PRIVATE -fPIC)
+  endif()
+  target_include_directories(StrideTesting PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(StrideTesting PUBLIC StrideParser StrideUtils StrideJit gtest)
+endif()
 
 add_subdirectory(tests)
 

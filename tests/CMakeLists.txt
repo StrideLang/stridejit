@@ -27,6 +27,7 @@ if (STRIDEJIT_BUILD_TESTS)
       nested_function_tests.cpp
       statemachine_tests.cpp
       logical_comparisons_tests.cpp
+      function_test_runner_tests.cpp
       # error_tests.cpp
     )
     add_executable(stridejit_tests ${TEST_SOURCES})
@@ -37,7 +38,11 @@ if (STRIDEJIT_BUILD_TESTS)
     )
     add_test(NAME stridejit_tests COMMAND stridejit_tests)
 
-    target_link_libraries(stridejit_tests PUBLIC StrideParser StrideJit gtest)
+    if (TARGET StrideTesting)
+      target_link_libraries(stridejit_tests PUBLIC StrideParser StrideJit StrideTesting gtest)
+    else()
+      target_link_libraries(stridejit_tests PUBLIC StrideParser StrideJit gtest)
+    endif()
     target_compile_definitions(stridejit_tests PUBLIC
       "-DSTRIDEJIT_TESTS_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data/\"")
 

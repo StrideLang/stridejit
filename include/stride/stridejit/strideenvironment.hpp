@@ -193,6 +193,18 @@ public:
   bool compileInMemory();
   bool compileObjectToDisk(std::string path);
 
+  // Ahead-Of-Time (AOT) Object & C Header Emission
+  bool emitObjectFile(const std::string &outputPath,
+                      const std::string &targetTriple = "",
+                      const std::string &cpu = "",
+                      const std::string &features = "",
+                      const std::string &relocModel = "",
+                      const std::string &codeModel = "");
+
+  bool emitCHeader(const std::string &outputPath,
+                   const std::string &domainName = "") const;
+  std::string generateCHeaderString(const std::string &domainName = "") const;
+
   StrideCompiler mStrideEnv;
   std::unique_ptr<llvm::orc::LLJIT> JIT;
   llvm::orc::ThreadSafeContext TSCtx;

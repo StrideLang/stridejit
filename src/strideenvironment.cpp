@@ -1,7 +1,10 @@
 #include "stride/utils/logger.h"
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <set>
+#include <sstream>
 
 // stride
 #include "stride/codegen/coderesolver.hpp"
@@ -16,21 +19,16 @@
 // llvm
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
-// #include "llvm/ExecutionEngine/Orc/CompileOnDemandLayer.h"
-// #include "llvm/ExecutionEngine/Orc/CompileUtils.h"
 #include "llvm/ExecutionEngine/Orc/Core.h"
-// #include "llvm/ExecutionEngine/Orc/EPCIndirectionUtils.h"
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
-// #include "llvm/ExecutionEngine/Orc/ExecutorProcessControl.h"
-// #include "llvm/ExecutionEngine/Orc/IRCompileLayer.h"
-// #include "llvm/ExecutionEngine/Orc/IRTransformLayer.h"
 #include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
-// #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
-// #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetOptions.h"
 
 #if LLVM_VERSION_MAJOR >= 17
 #include "llvm/Analysis/CGSCCPassManager.h"
@@ -92,7 +90,7 @@ void StrideEnvironment::prepareTree(ASTNode tree) {
   }
 
   CodeResolver resolver(tree, ASTFunctions::getDefaultStrideRoot(),
-                        SystemConfiguration(), m_includePaths);
+                        SystemConfiguration());
   resolver.process();
 }
 
@@ -1190,7 +1188,8 @@ bool StrideEnvironment::generateCompiledObject(std::string path,
   auto CPU = "generic";
   auto Features = "";
   std::string Error;
-  auto Target = llvm::TargetRegistry::lookupTarget(TargetTriple, Error);
+  llvm::Triple triple(TargetTriple);
+  auto Target = llvm::TargetRegistry::lookupTarget(triple, Error);
   // Print an error and exit if we couldn't find the requested target.
   // This generally occurs if we've forgotten to initialise the
   // TargetRegistry or we have a bogus target triple.
@@ -1201,11 +1200,11 @@ bool StrideEnvironment::generateCompiledObject(std::string path,
   llvm::TargetOptions opt;
   auto RM = std::optional<llvm::Reloc::Model>();
   auto TargetMachine = Target->createTargetMachine(
-      llvm::Triple(TargetTriple), CPU, Features, opt, RM,
+      triple, CPU, Features, opt, RM,
       llvm::CodeModel::Large, // 👈 Force Large Code Model here
       llvm::CodeGenOptLevel::Default);
   mStrideEnv.TheModule->setDataLayout(TargetMachine->createDataLayout());
-  mStrideEnv.TheModule->setTargetTriple(llvm::Triple(TargetTriple));
+  mStrideEnv.TheModule->setTargetTriple(triple);
 
   auto fspath = std::filesystem::path(path);
   fspath.append(TargetTriple + "/");
@@ -1332,3 +1331,351 @@ template bool StrideEnvironment::setStateVar<uint32_t>(void *,
                                                        uint32_t,
                                                        std::optional<int>,
                                                        const std::string &);
+
+bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
+                                      const std::string &targetTriple,
+                                      const std::string &cpu,
+                                      const std::string &features,
+                                      const std::string &relocModel,
+                                      const std::string &codeModel) {
+  llvm::InitializeAllTargetInfos();
+  llvm::InitializeAllTargets();
+  llvm::InitializeAllTargetMCs();
+  llvm::InitializeAllAsmParsers();
+  llvm::InitializeAllAsmPrinters();
+
+  std::string tripleStr =
+      targetTriple.empty() ? llvm::sys::getDefaultTargetTriple() : targetTriple;
+  llvm::Triple theTriple(tripleStr);
+
+  std::string error;
+  const llvm::Target *target =
+      llvm::TargetRegistry::lookupTarget(theTriple, error);
+  if (!target) {
+    LOG_ERROR() << "Unable to lookup LLVM target for triple '" << tripleStr
+                << "': " << error << std::endl;
+    return false;
+  }
+
+  std::string targetCPU = cpu.empty() ? "generic" : cpu;
+  std::string targetFeatures = features;
+
+  llvm::TargetOptions opt;
+  std::optional<llvm::Reloc::Model> rm;
+  if (relocModel == "static") {
+    rm = llvm::Reloc::Static;
+  } else if (relocModel == "pic") {
+    rm = llvm::Reloc::PIC_;
+  } else if (relocModel == "dynamic-no-pic") {
+    rm = llvm::Reloc::DynamicNoPIC;
+  } else if (relocModel == "ropi") {
+    rm = llvm::Reloc::ROPI;
+  } else if (relocModel == "rwpi") {
+    rm = llvm::Reloc::RWPI;
+  } else if (relocModel == "ropi-rwpi") {
+    rm = llvm::Reloc::ROPI_RWPI;
+  }
+
+  std::optional<llvm::CodeModel::Model> cm;
+  if (codeModel == "tiny") {
+    cm = llvm::CodeModel::Tiny;
+  } else if (codeModel == "small") {
+    cm = llvm::CodeModel::Small;
+  } else if (codeModel == "kernel") {
+    cm = llvm::CodeModel::Kernel;
+  } else if (codeModel == "medium") {
+    cm = llvm::CodeModel::Medium;
+  } else if (codeModel == "large") {
+    cm = llvm::CodeModel::Large;
+  }
+
+  auto targetMachine = target->createTargetMachine(
+      theTriple, targetCPU, targetFeatures, opt, rm, cm,
+      llvm::CodeGenOptLevel::Default);
+
+  if (!targetMachine) {
+    LOG_ERROR() << "Could not create TargetMachine for triple " << tripleStr
+                << std::endl;
+    return false;
+  }
+
+  mStrideEnv.TheModule->setDataLayout(targetMachine->createDataLayout());
+  mStrideEnv.TheModule->setTargetTriple(theTriple);
+
+  std::filesystem::path outPath(outputPath);
+  if (outPath.has_parent_path()) {
+    std::filesystem::create_directories(outPath.parent_path());
+  }
+
+  std::error_code ec;
+  llvm::raw_fd_ostream dest(outputPath, ec, llvm::sys::fs::OF_None);
+  if (ec) {
+    LOG_ERROR() << "Could not open output object file: " << ec.message()
+                << std::endl;
+    return false;
+  }
+
+  llvm::legacy::PassManager pass;
+  auto fileType = llvm::CodeGenFileType::ObjectFile;
+
+  if (targetMachine->addPassesToEmitFile(pass, dest, nullptr, fileType)) {
+    LOG_ERROR() << "TargetMachine cannot emit an object file for " << tripleStr
+                << std::endl;
+    return false;
+  }
+
+  pass.run(*mStrideEnv.TheModule);
+  dest.flush();
+  return true;
+}
+
+static std::string toUpperSnake(const std::string &str) {
+  std::string result;
+  for (size_t i = 0; i < str.size(); ++i) {
+    char c = str[i];
+    if (std::isupper(static_cast<unsigned char>(c)) && i > 0 &&
+        !std::isupper(static_cast<unsigned char>(str[i - 1])) &&
+        str[i - 1] != '_') {
+      result += '_';
+    }
+    result += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  }
+  return result;
+}
+
+std::string
+StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
+  std::ostringstream ss;
+  std::string guardBase =
+      domainName.empty() ? "STRIDE_GENERATED" : toUpperSnake(domainName);
+  std::string guard = guardBase + "_H";
+
+  ss << "/* Auto-generated by Stride Compiler - Do Not Edit */\n";
+  ss << "#ifndef " << guard << "\n";
+  ss << "#define " << guard << "\n\n";
+  ss << "#include <stdint.h>\n";
+  ss << "#include <stdbool.h>\n";
+  ss << "#include <stddef.h>\n\n";
+  ss << "#ifdef __cplusplus\n";
+  ss << "extern \"C\" {\n";
+  ss << "#endif\n\n";
+
+  // Collect target domain names
+  std::vector<std::string> domains;
+  if (!domainName.empty()) {
+    domains.push_back(domainName);
+  } else if (mStrideEnv.m_tree) {
+    for (const auto &node : mStrideEnv.m_tree->getChildren()) {
+      if (node->getNodeType() == AST::Declaration) {
+        auto decl = std::static_pointer_cast<DeclarationNode>(node);
+        if (decl->getObjectType() == "_domainDefinition") {
+          domains.push_back(decl->getName());
+        }
+      }
+    }
+    // Fallback: search function protos for <domain>_process
+    if (domains.empty()) {
+      for (const auto &protoPair : mStrideEnv.FunctionProtos) {
+        const std::string &fname = protoPair.first;
+        size_t pos = fname.find("_process");
+        if (pos != std::string::npos) {
+          domains.push_back(fname.substr(0, pos));
+        }
+      }
+    }
+  }
+
+  for (const auto &dom : domains) {
+    std::string initFunc = dom + "_init";
+    std::string processFunc = dom + "_process";
+
+    std::shared_ptr<DeclarationNode> domDecl;
+    if (mStrideEnv.m_tree) {
+      domDecl = ASTQuery::findDeclarationByName(dom, {}, mStrideEnv.m_tree);
+    }
+
+    std::set<std::string> outputNames;
+    if (domDecl) {
+      if (auto outProp = domDecl->getPropertyValue("outputs")) {
+        for (const auto &child : outProp->getChildren()) {
+          if (child->getNodeType() == AST::Declaration) {
+            outputNames.insert(
+                std::static_pointer_cast<DeclarationNode>(child)->getName());
+          }
+        }
+      }
+    }
+
+    // 1. Emit init function prototype
+    auto initIt = mStrideEnv.FunctionProtos.find(initFunc);
+    if (initIt != mStrideEnv.FunctionProtos.end()) {
+      ss << "/**\n";
+      ss << " * @brief Initializes or resets the " << dom
+         << " domain state.\n";
+      ss << " */\n";
+
+      const auto &proto = initIt->second;
+      auto extArgs = proto->getExternalArgs();
+      auto inArgs = proto->getInArgs();
+      auto outArgs = proto->getOutArgs();
+
+      if (extArgs.empty() && inArgs.empty() && outArgs.empty()) {
+        ss << "void " << initFunc << "(void);\n\n";
+      } else {
+        ss << "void " << initFunc << "(";
+        bool first = true;
+        for (const auto &arg : extArgs) {
+          if (!first)
+            ss << ", ";
+          first = false;
+          std::string typeName = "double";
+          if (arg.llvmType) {
+            if (arg.llvmType->isIntegerTy(1))
+              typeName = "bool";
+            else if (arg.llvmType->isIntegerTy(32))
+              typeName = "int32_t";
+            else if (arg.llvmType->isIntegerTy(64))
+              typeName = "int64_t";
+            else if (arg.llvmType->isFloatTy())
+              typeName = "float";
+            else if (arg.llvmType->isDoubleTy())
+              typeName = "double";
+          }
+          ss << typeName << "* " << arg.name;
+        }
+        ss << ");\n\n";
+      }
+    }
+
+    // 2. Emit process function prototype
+    auto procIt = mStrideEnv.FunctionProtos.find(processFunc);
+    if (procIt != mStrideEnv.FunctionProtos.end()) {
+      const auto &proto = procIt->second;
+      auto extArgs = proto->getExternalArgs();
+
+      ss << "/**\n";
+      ss << " * @brief Executes one step of the " << dom << " domain.\n";
+      for (const auto &arg : extArgs) {
+        bool isOut = (outputNames.count(arg.name) > 0);
+        ss << " * @param[" << (isOut ? "out" : "in") << "] " << arg.name
+           << "\n";
+      }
+      ss << " */\n";
+
+      ss << "void " << processFunc << "(";
+      if (extArgs.empty()) {
+        ss << "void";
+      } else {
+        bool first = true;
+        for (const auto &arg : extArgs) {
+          if (!first)
+            ss << ", ";
+          first = false;
+          bool isOut = (outputNames.count(arg.name) > 0);
+          std::string typeName = "double";
+          if (arg.llvmType) {
+            if (arg.llvmType->isIntegerTy(1))
+              typeName = "bool";
+            else if (arg.llvmType->isIntegerTy(32))
+              typeName = "int32_t";
+            else if (arg.llvmType->isIntegerTy(64))
+              typeName = "int64_t";
+            else if (arg.llvmType->isFloatTy())
+              typeName = "float";
+            else if (arg.llvmType->isDoubleTy())
+              typeName = "double";
+          }
+          if (isOut) {
+            ss << typeName << "* " << arg.name;
+          } else {
+            ss << "const " << typeName << "* " << arg.name;
+          }
+        }
+      }
+      ss << ");\n\n";
+    }
+  }
+
+  // Standalone functions if any
+  for (const auto &protoPair : mStrideEnv.FunctionProtos) {
+    const std::string &fname = protoPair.first;
+    if (fname.find("_init") != std::string::npos ||
+        fname.find("_process") != std::string::npos ||
+        fname.find("_invoker") != std::string::npos) {
+      continue;
+    }
+    const auto &proto = protoPair.second;
+    ss << "/**\n";
+    ss << " * @brief Standalone function: " << fname << "\n";
+    ss << " */\n";
+    ss << "void " << fname << "(";
+    bool first = true;
+    for (const auto &arg : proto->getInArgs()) {
+      if (!first)
+        ss << ", ";
+      first = false;
+      std::string typeName = "double";
+      if (arg.llvmType) {
+        if (arg.llvmType->isIntegerTy(1))
+          typeName = "bool";
+        else if (arg.llvmType->isIntegerTy(32))
+          typeName = "int32_t";
+        else if (arg.llvmType->isIntegerTy(64))
+          typeName = "int64_t";
+        else if (arg.llvmType->isFloatTy())
+          typeName = "float";
+      }
+      ss << "const " << typeName << "* " << arg.name;
+    }
+    for (const auto &arg : proto->getOutArgs()) {
+      if (!first)
+        ss << ", ";
+      first = false;
+      std::string typeName = "double";
+      if (arg.llvmType) {
+        if (arg.llvmType->isIntegerTy(1))
+          typeName = "bool";
+        else if (arg.llvmType->isIntegerTy(32))
+          typeName = "int32_t";
+        else if (arg.llvmType->isIntegerTy(64))
+          typeName = "int64_t";
+        else if (arg.llvmType->isFloatTy())
+          typeName = "float";
+      }
+      ss << typeName << "* " << arg.name;
+    }
+    if (first) {
+      ss << "void";
+    }
+    ss << ");\n\n";
+  }
+
+  ss << "#ifdef __cplusplus\n";
+  ss << "}\n";
+  ss << "#endif\n\n";
+  ss << "#endif /* " << guard << " */\n";
+
+  return ss.str();
+}
+
+bool StrideEnvironment::emitCHeader(const std::string &outputPath,
+                                    const std::string &domainName) const {
+  std::string content = generateCHeaderString(domainName);
+  if (content.empty()) {
+    return false;
+  }
+  std::filesystem::path outPath(outputPath);
+  if (outPath.has_parent_path()) {
+    std::filesystem::create_directories(outPath.parent_path());
+  }
+  std::ofstream outFile(outputPath);
+  if (!outFile.is_open()) {
+    LOG_ERROR() << "Could not open C header file for writing: " << outputPath
+                << std::endl;
+    return false;
+  }
+  outFile << content;
+  outFile.close();
+  return true;
+}
+

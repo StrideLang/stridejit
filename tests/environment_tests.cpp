@@ -1,4 +1,5 @@
 #include "gtest/gtest.h"
+#include <filesystem>
 
 #include "stride/parser/ast.h"
 #include "stride/stridejit/numberexprast.hpp"
@@ -118,6 +119,38 @@ TEST(StrideEnvironmentTest, GetFunctionBeforeCompilation) {
   // Should return error since JIT is not initialized
   EXPECT_FALSE((bool)result);
   llvm::consumeError(result.takeError());
+}
+
+TEST(StrideEnvironmentTest, EmitCHeaderAndObjectFile) {
+  strd::StrideEnvironment env;
+  bool ok = env.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
+  ASSERT_TRUE(ok);
+
+  std::string headerStr = env.generateCHeaderString();
+  EXPECT_FALSE(headerStr.empty());
+  EXPECT_NE(headerStr.find("#ifndef"), std::string::npos);
+  EXPECT_NE(headerStr.find("extern \"C\""), std::string::npos);
+  EXPECT_NE(headerStr.find("RootDomain_process"), std::string::npos);
+
+  std::filesystem::path tempDir = std::filesystem::temp_directory_path() / "stride_test_aot";
+  std::filesystem::create_directories(tempDir);
+
+  std::string headerPath = (tempDir / "passthru.h").string();
+  EXPECT_TRUE(env.emitCHeader(headerPath));
+  EXPECT_TRUE(std::filesystem::exists(headerPath));
+
+  std::string objPathHost = (tempDir / "passthru_host.o").string();
+  EXPECT_TRUE(env.emitObjectFile(objPathHost));
+  EXPECT_TRUE(std::filesystem::exists(objPathHost));
+  EXPECT_GT(std::filesystem::file_size(objPathHost), 0);
+
+  // Cross-compile to Cortex-M0+ (RP2040)
+  std::string objPathArm = (tempDir / "passthru_arm.o").string();
+  EXPECT_TRUE(env.emitObjectFile(objPathArm, "thumbv6m-none-eabi", "cortex-m0plus"));
+  EXPECT_TRUE(std::filesystem::exists(objPathArm));
+  EXPECT_GT(std::filesystem::file_size(objPathArm), 0);
+
+  std::filesystem::remove_all(tempDir);
 }
 
 } // namespace
