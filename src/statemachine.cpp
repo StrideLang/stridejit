@@ -562,8 +562,33 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
 
       for (const auto &s : smContext.flattenedStates) {
         if (s.id == resolvedTargetId) {
-          for (auto &expr : s.onEntryCode) {
-            expr->codegen(state);
+          std::vector<const FlattenedState *> targetAncestry;
+          int ancId = s.id;
+          while (ancId != -1) {
+            const FlattenedState *aFs = nullptr;
+            for (const auto &cand : smContext.flattenedStates) {
+              if (cand.id == ancId) {
+                aFs = &cand;
+                break;
+              }
+            }
+            if (!aFs)
+              break;
+            targetAncestry.push_back(aFs);
+            ancId = aFs->parentId;
+          }
+          std::reverse(targetAncestry.begin(), targetAncestry.end());
+
+          for (const auto *aFs : targetAncestry) {
+            for (auto &expr : aFs->updateGuardCode) {
+              expr->codegen(state);
+            }
+          }
+
+          for (const auto *aFs : targetAncestry) {
+            for (auto &expr : aFs->onEntryCode) {
+              expr->codegen(state);
+            }
           }
           break;
         }
