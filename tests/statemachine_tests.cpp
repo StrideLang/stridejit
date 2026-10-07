@@ -170,7 +170,7 @@ TEST(StateMachine, CodegenExecution) {
   EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), 2);
 
   auto counter = [&]() {
-    return strenv.getStateVar(statePtr.get(), "Counter").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "Counter", std::nullopt, "RootDomain").value_or(0);
   };
   EXPECT_EQ(counter(), 0);
 
@@ -253,14 +253,14 @@ TEST(StateMachine, TransitionExecution) {
   void *args[] = {statePtr.get()};
 
   auto counter = [&]() {
-    return strenv.getStateVar(statePtr.get(), "Counter").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "Counter", std::nullopt, "RootDomain").value_or(0);
   };
 
-  auto state1Id = strenv.getStateId("State1").value_or(-1);
-  auto state2Id = strenv.getStateId("State2").value_or(-1);
-  auto state3Id = strenv.getStateId("State3").value_or(-1);
-  auto toState2Id = strenv.getTransitionId("ToState2").value_or(-1);
-  auto toState3Id = strenv.getTransitionId("ToState3").value_or(-1);
+  auto state1Id = strenv.getStateId("State1", "", "RootDomain").value_or(-1);
+  auto state2Id = strenv.getStateId("State2", "", "RootDomain").value_or(-1);
+  auto state3Id = strenv.getStateId("State3", "", "RootDomain").value_or(-1);
+  auto toState2Id = strenv.getTransitionId("ToState2", "", "RootDomain").value_or(-1);
+  auto toState3Id = strenv.getTransitionId("ToState3", "", "RootDomain").value_or(-1);
 
   EXPECT_NE(state1Id, -1);
   EXPECT_NE(state2Id, -1);
@@ -270,28 +270,28 @@ TEST(StateMachine, TransitionExecution) {
 
   strenv.invoke("RootDomain_init", args);
 
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), state1Id);
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), state1Id);
   EXPECT_EQ(counter(), 0);
 
   // Tick the domain without a request, nothing should happen
   strenv.invoke("RootDomain_process", args);
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), state1Id);
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), state1Id);
   EXPECT_EQ(counter(), 0);
 
   // Request transition (ToState2)
-  strenv.requestTransition(statePtr, toState2Id);
+  strenv.requestTransition(statePtr, toState2Id, "", "RootDomain");
   strenv.invoke("RootDomain_process", args);
 
   // activeState should be State2
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), state2Id);
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), state2Id);
   EXPECT_EQ(counter(), 1);
-  EXPECT_EQ(strenv.getTransitionRequestId(statePtr), 0);
+  EXPECT_EQ(strenv.getTransitionRequestId(statePtr, "", "RootDomain"), 0);
 
   // Request transition (ToState3)
-  strenv.requestTransition(statePtr, toState3Id);
+  strenv.requestTransition(statePtr, toState3Id, "", "RootDomain");
   strenv.invoke("RootDomain_process", args);
 
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), state3Id);
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), state3Id);
   EXPECT_EQ(counter(), 2);
 }
 
@@ -392,33 +392,33 @@ TEST(StateMachine, AdvancedFormalizationsExecution) {
   void *args[] = {statePtr.get()};
 
   auto counter = [&]() {
-    return strenv.getStateVar(statePtr.get(), "Counter").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "Counter", std::nullopt, "RootDomain").value_or(0);
   };
   auto entryCounter = [&]() {
-    return strenv.getStateVar(statePtr.get(), "EntryCounter").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "EntryCounter", std::nullopt, "RootDomain").value_or(0);
   };
   auto exitCounter = [&]() {
-    return strenv.getStateVar(statePtr.get(), "ExitCounter").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "ExitCounter", std::nullopt, "RootDomain").value_or(0);
   };
   auto parallel1Counter = [&]() {
-    return strenv.getStateVar(statePtr.get(), "Parallel1Counter").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "Parallel1Counter", std::nullopt, "RootDomain").value_or(0);
   };
   auto parallel2Counter = [&]() {
-    return strenv.getStateVar(statePtr.get(), "Parallel2Counter").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "Parallel2Counter", std::nullopt, "RootDomain").value_or(0);
   };
   auto child2Counter = [&]() {
-    return strenv.getStateVar(statePtr.get(), "Child2Counter").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "Child2Counter", std::nullopt, "RootDomain").value_or(0);
   };
 
-  auto child1Id = strenv.getStateId("Child1").value_or(-1);
-  auto child2Id = strenv.getStateId("Child2").value_or(-1);
-  auto parallelStateId = strenv.getStateId("ParallelState").value_or(-1);
-  auto finalStateId = strenv.getStateId("FinalState").value_or(-1);
+  auto child1Id = strenv.getStateId("Child1", "", "RootDomain").value_or(-1);
+  auto child2Id = strenv.getStateId("Child2", "", "RootDomain").value_or(-1);
+  auto parallelStateId = strenv.getStateId("ParallelState", "", "RootDomain").value_or(-1);
+  auto finalStateId = strenv.getStateId("FinalState", "", "RootDomain").value_or(-1);
 
-  auto toChild2TransId = strenv.getTransitionId("ToChild2").value_or(-1);
-  auto toParallelTransId = strenv.getTransitionId("ToParallel").value_or(-1);
-  auto toCompositeTransId = strenv.getTransitionId("ToComposite").value_or(-1);
-  auto toFinalTransId = strenv.getTransitionId("ToFinal").value_or(-1);
+  auto toChild2TransId = strenv.getTransitionId("ToChild2", "", "RootDomain").value_or(-1);
+  auto toParallelTransId = strenv.getTransitionId("ToParallel", "", "RootDomain").value_or(-1);
+  auto toCompositeTransId = strenv.getTransitionId("ToComposite", "", "RootDomain").value_or(-1);
+  auto toFinalTransId = strenv.getTransitionId("ToFinal", "", "RootDomain").value_or(-1);
 
   EXPECT_NE(child1Id, -1);
   EXPECT_NE(child2Id, -1);
@@ -432,7 +432,7 @@ TEST(StateMachine, AdvancedFormalizationsExecution) {
   strenv.invoke("RootDomain_init", args);
 
   // 1. Initial state should be Child1 (inside CompositeState)
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), child1Id);
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), child1Id);
 
   // Verify default values
   EXPECT_EQ(counter(), 100);
@@ -454,9 +454,9 @@ TEST(StateMachine, AdvancedFormalizationsExecution) {
   EXPECT_EQ(child2Counter(), 600);
 
   // 2. Transition from Child1 to Child2 within CompositeState
-  strenv.requestTransition(statePtr, toChild2TransId);
+  strenv.requestTransition(statePtr, toChild2TransId, "", "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), child2Id);
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), child2Id);
   EXPECT_EQ(exitCounter(), 1); // Child1 onExitCode fired
   // Old values should remain
   EXPECT_EQ(entryCounter(), 1);
@@ -475,12 +475,12 @@ TEST(StateMachine, AdvancedFormalizationsExecution) {
 
   // 3. Transition from Child2 to ParallelState (CompositeState saves history
   // state)
-  strenv.requestTransition(statePtr, toParallelTransId);
+  strenv.requestTransition(statePtr, toParallelTransId, "", "RootDomain");
   strenv.invoke("RootDomain_process", args);
 
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), parallelStateId);
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), parallelStateId);
   // Verify history state saved for CompositeState is child2Id
-  EXPECT_EQ(strenv.getHistoryStateId(statePtr, "CompositeState"), child2Id);
+  EXPECT_EQ(strenv.getHistoryStateId(statePtr, "CompositeState", "", "RootDomain"), child2Id);
 
   // Tick domain while ParallelState is active: both parallel sub-states execute
   // their onProcessCode simultaneously
@@ -490,17 +490,17 @@ TEST(StateMachine, AdvancedFormalizationsExecution) {
 
   // 4. Transition back to CompositeState: should restore to Child2 (not default
   // Child1)
-  strenv.requestTransition(statePtr, toCompositeTransId);
+  strenv.requestTransition(statePtr, toCompositeTransId, "", "RootDomain");
   strenv.invoke("RootDomain_process", args);
 
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), child2Id);
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), child2Id);
 
   // 5. Fire transition to FinalState
-  strenv.requestTransition(statePtr, toFinalTransId);
+  strenv.requestTransition(statePtr, toFinalTransId, "", "RootDomain");
   strenv.invoke("RootDomain_process", args);
 
-  EXPECT_EQ(strenv.getTransitionRequestId(statePtr), 0);
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), finalStateId);
+  EXPECT_EQ(strenv.getTransitionRequestId(statePtr, "", "RootDomain"), 0);
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), finalStateId);
 }
 
 TEST(StateMachine, TransitionGuardBlocking) {
@@ -520,29 +520,29 @@ TEST(StateMachine, TransitionGuardBlocking) {
   void *args[] = {statePtr.get()};
 
   auto guardSignal = [&]() {
-    return strenv.getStateVar(statePtr.get(), "GuardSignal").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "GuardSignal", std::nullopt, "RootDomain").value_or(0);
   };
   auto counter = [&]() {
-    return strenv.getStateVar(statePtr.get(), "Counter").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "Counter", std::nullopt, "RootDomain").value_or(0);
   };
 
   strenv.invoke("RootDomain_init", args);
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), 2); // State1 is 2
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), 2); // State1 is 2
   EXPECT_EQ(guardSignal(), 0);
   EXPECT_EQ(counter(), 0);
 
   // Tick domain while GuardSignal == 0. Transition is guarded by GuardSignal
   // and should NOT fire!
   strenv.invoke("RootDomain_process", args);
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), 2); // Still in State1
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), 2); // Still in State1
   EXPECT_EQ(counter(), 0);
 
   // Now set GuardSignal to 1 (true)
-  strenv.setStateVar(statePtr.get(), "GuardSignal", 1);
+  strenv.setStateVar(statePtr.get(), "GuardSignal", 1, std::nullopt, "RootDomain");
 
   // Tick domain while GuardSignal == 1. Transition should fire!
   strenv.invoke("RootDomain_process", args);
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), 3); // State2 is 3
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), 3); // State2 is 3
   EXPECT_EQ(counter(), 1); // onTransition stream executed
 }
 
@@ -567,13 +567,13 @@ TEST(StateMachine, UpdateGuardParentBeforeChild) {
   void *args[] = {statePtr.get()};
 
   auto counter = [&]() {
-    return strenv.getStateVar(statePtr.get(), "Counter").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "Counter", std::nullopt, "RootDomain").value_or(0);
   };
   auto parentOrder = [&]() {
-    return strenv.getStateVar(statePtr.get(), "ParentOrder").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "ParentOrder", std::nullopt, "RootDomain").value_or(0);
   };
   auto childOrder = [&]() {
-    return strenv.getStateVar(statePtr.get(), "ChildOrder").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "ChildOrder", std::nullopt, "RootDomain").value_or(0);
   };
 
   strenv.invoke("RootDomain_init", args);
@@ -610,13 +610,13 @@ TEST(StateMachine, ParallelStateExecution) {
   void *args[] = {statePtr.get()};
 
   auto parentCounter = [&]() {
-    return strenv.getStateVar(statePtr.get(), "ParentCounter").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "ParentCounter", std::nullopt, "RootDomain").value_or(0);
   };
   auto region1Counter = [&]() {
-    return strenv.getStateVar(statePtr.get(), "Region1Counter").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "Region1Counter", std::nullopt, "RootDomain").value_or(0);
   };
   auto region2Counter = [&]() {
-    return strenv.getStateVar(statePtr.get(), "Region2Counter").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "Region2Counter", std::nullopt, "RootDomain").value_or(0);
   };
 
   strenv.invoke("RootDomain_init", args);
@@ -660,27 +660,27 @@ TEST(StateMachine, ResumeLastStateExecution) {
 
   strenv.invoke("RootDomain_init", args);
   // Initial state resolves to SubState1 (id 3)
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), 3);
-  EXPECT_EQ(strenv.getHistoryStateId(statePtr, "CompositeState"), 0);
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), 3);
+  EXPECT_EQ(strenv.getHistoryStateId(statePtr, "CompositeState", "", "RootDomain"), 0);
 
   // Transition to SubState2 (id 4)
-  strenv.requestTransition(statePtr, 2); // ToSubState2 is transition 2
+  strenv.requestTransition(statePtr, 2, "", "RootDomain"); // ToSubState2 is transition 2
   strenv.invoke("RootDomain_process", args);
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), 4); // SubState2
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), 4); // SubState2
 
   // Transition to OtherState (id 5)
-  strenv.requestTransition(statePtr, 1); // ToOtherState is transition 1
+  strenv.requestTransition(statePtr, 1, "", "RootDomain"); // ToOtherState is transition 1
   strenv.invoke("RootDomain_process", args);
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), 5); // OtherState
-  EXPECT_EQ(strenv.getHistoryStateId(statePtr, "CompositeState"),
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), 5); // OtherState
+  EXPECT_EQ(strenv.getHistoryStateId(statePtr, "CompositeState", "", "RootDomain"),
             4); // Saved SubState2 in history
 
   // Transition back to CompositeState (id 2). Because resumeLastState: on,
   // it restores active_state_id to 4 (SubState2) instead of defaulting to 3
   // (SubState1)
-  strenv.requestTransition(statePtr, 3); // ToComposite is transition 3
+  strenv.requestTransition(statePtr, 3, "", "RootDomain"); // ToComposite is transition 3
   strenv.invoke("RootDomain_process", args);
-  EXPECT_EQ(strenv.getActiveStateId(statePtr), 4); // Restored SubState2!
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), 4); // Restored SubState2!
 }
 
 TEST(StateMachine, DomainSwitches) {
@@ -700,13 +700,13 @@ TEST(StateMachine, DomainSwitches) {
   void *args[] = {statePtr.get()};
 
   auto switchEntry = [&]() {
-    return strenv.getStateVar(statePtr.get(), "SwitchEntry").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "SwitchEntry", std::nullopt, "RootDomain").value_or(0);
   };
   auto switchProcess = [&]() {
-    return strenv.getStateVar(statePtr.get(), "SwitchProcess").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "SwitchProcess", std::nullopt, "RootDomain").value_or(0);
   };
   auto switchExit = [&]() {
-    return strenv.getStateVar(statePtr.get(), "SwitchExit").value_or(0);
+    return strenv.getStateVar(statePtr.get(), "SwitchExit", std::nullopt, "RootDomain").value_or(0);
   };
 
   strenv.invoke("RootDomain_init", args);
@@ -721,7 +721,7 @@ TEST(StateMachine, DomainSwitches) {
   EXPECT_EQ(switchExit(), 0);
 
   // Request transition to FinalState
-  strenv.requestTransition(statePtr, 1);
+  strenv.requestTransition(statePtr, 1, "", "RootDomain");
   strenv.invoke("RootDomain_process", args);
 
   EXPECT_EQ(switchExit(), 1);

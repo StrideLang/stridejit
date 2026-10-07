@@ -340,13 +340,11 @@ size_t StrideEnvironment::getStateSize(const std::string &funcName) const {
 static const StrideCompiler::StateStructInfo *
 findStructInfo(const StrideCompiler &compilerState,
                const std::string &domainName) {
-  if (!domainName.empty()) {
-    return compilerState.getStateStructInfo(domainName);
+  if (domainName.empty()) {
+    LOG_ERROR() << "findStructInfo called with empty domain name." << std::endl;
+    return nullptr;
   }
-  if (!compilerState.stateStructMap.empty()) {
-    return &compilerState.stateStructMap.begin()->second;
-  }
-  return nullptr;
+  return compilerState.getStateStructInfo(domainName);
 }
 
 static std::optional<unsigned> findFieldByFunctionality(

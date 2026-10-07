@@ -27,7 +27,7 @@ functionTest TestNear {
 }
 
 functionTest TestGtLt {
-    function: TestDomain
+    target: TestDomain
     prepare: [
         [ 5.0, 10.0 ] >> In;
     ]

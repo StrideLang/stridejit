@@ -296,9 +296,17 @@ Exports machine-readable XML test results:
 stridetest tests/data/ --junit reports/stride_results.xml
 ```
 
+### Repeated Execution (Stress / Benchmarking)
+Runs each test a specified number of times:
+```powershell
+stridetest path/to/MyTest.stride --repeat 10
+stridetest path/to/MyTest.stride -r 5
+```
+
 ### CLI Options
 | Flag | Parameter | Description |
 |---|---|---|
+| `--repeat`, `-r`, `-n` | `<count>` | Run each test `<count>` times. |
 | `--lib` | `<path>` | Path to compiled `.so` / `.dll` for dynamic testing. |
 | `--junit` | `<path>` | File destination for JUnit XML report. |
 | `--root` | `<path>` | Custom `STRIDEROOT` directory path. |
