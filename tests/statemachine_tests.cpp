@@ -589,6 +589,56 @@ TEST(StateMachine, UpdateGuardParentBeforeChild) {
   EXPECT_EQ(counter(), 2);
 }
 
+TEST(StateMachine, UpdateGuardOnTransitionEntry) {
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                              "statemachines_transition_guard_entry.stride");
+  EXPECT_NE(tree, nullptr);
+
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+
+  strd::CodeValidator validator(tree);
+  EXPECT_TRUE(validator.isValid());
+
+  bool success = strenv.generateIr(tree);
+  EXPECT_TRUE(success);
+  success = strenv.compileInMemory();
+  EXPECT_TRUE(success);
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  void *args[] = {statePtr.get()};
+
+  auto inputVal = [&]() {
+    return strenv.getStateVar(statePtr.get(), "InputVal", std::nullopt, "RootDomain").value_or(0);
+  };
+  auto targetGuard = [&]() {
+    return strenv.getStateVar(statePtr.get(), "TargetGuard", std::nullopt, "RootDomain").value_or(0);
+  };
+  auto targetEntryRan = [&]() {
+    return strenv.getStateVar(statePtr.get(), "TargetEntryRan", std::nullopt, "RootDomain").value_or(0);
+  };
+
+  strenv.invoke("RootDomain_init", args);
+  EXPECT_EQ(inputVal(), 42);
+  EXPECT_EQ(targetGuard(), 0);
+  EXPECT_EQ(targetEntryRan(), 0);
+
+  auto toState2Id = strenv.getTransitionId("ToState2", "", "RootDomain").value_or(-1);
+  EXPECT_NE(toState2Id, -1);
+
+  // Request transition to State2 and tick once.
+  // When transitioning to State2, its onEntry and updateGuard blocks must execute
+  // immediately upon transition entry, updating TargetGuard without needing another tick.
+  strenv.requestTransition(statePtr, toState2Id, "", "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+
+  auto state2Id = strenv.getStateId("State2", "", "RootDomain").value_or(-1);
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), state2Id);
+  EXPECT_EQ(targetEntryRan(), 1);
+  EXPECT_EQ(targetGuard(), 42);
+}
+
 TEST(StateMachine, ParallelStateExecution) {
   strd::ASTNode tree;
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
