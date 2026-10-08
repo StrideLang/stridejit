@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "stride/parser/entitynode.h"
 #include "stride/parser/blocknode.h"
 #include "stride/stridejit/exprast.hpp"
 

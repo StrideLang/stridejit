@@ -98,7 +98,8 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
           LOG_ERROR() << "ERROR: type not supported for default" << std::endl;
           assert(0 == 1);
         }
-      } else if (decl->getNodeType() == AST::BundleDeclaration) {
+      } else if (decl->getNodeType() == AST::ArrayDeclaration ||
+                 decl->getNodeType() == AST::BundleDeclaration) {
         llvm::Type *Int32Ty = state.Builder->getInt32Ty();
         int size = ASTQuery::getBlockDeclaredSize(decl, {}, nullptr);
         llvm::Type *type = state.getLLVMType(decl);
@@ -394,7 +395,8 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
       for (const auto &decl : internalVariables) {
         llvm::Type *type;
         llvm::Value *defaultValue = nullptr;
-        if (decl->getObjectType() == "signal") {
+        if (decl->getEntityType() == "signal" ||
+            decl->getObjectType() == "signal") {
           //  Local signals in loops are reset on every trigger, so they are
           //  allocated and set to their default value
           auto defaultNode = decl->getPropertyValue("default");
@@ -404,9 +406,10 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
             continue;
           }
           auto typeNode = decl->getPropertyValue("type");
-          if (typeNode && typeNode->getNodeType() == AST::Block) {
+          if (typeNode && (typeNode->getNodeType() == AST::Entity ||
+                           typeNode->getNodeType() == AST::Block)) {
             auto typeBlockName =
-                std::static_pointer_cast<BlockNode>(typeNode)->getName();
+                std::static_pointer_cast<EntityNode>(typeNode)->getName();
             if (state.typesMap.find(typeBlockName) != state.typesMap.end()) {
               type = state.typesMap[typeBlockName];
             } else {
@@ -471,7 +474,9 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
           OldVals[VarName] = state.NamedValues[VarName].first;
           state.NamedValues[VarName] = {Variable, type};
 
-        } else if (decl->getObjectType() == "switch" ||
+        } else if (decl->getEntityType() == "switch" ||
+                   decl->getObjectType() == "switch" ||
+                   decl->getEntityType() == "trigger" ||
                    decl->getObjectType() == "trigger") {
           //  Local switches in loops are reset on every trigger, so they are
           //  allocated and set to their default value
@@ -490,7 +495,8 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
           } else {
             LOG_ERROR() << "No default for switch" << std::endl;
           }
-        } else if (decl->getObjectType() == "iterator") {
+        } else if (decl->getEntityType() == "iterator" ||
+                   decl->getObjectType() == "iterator") {
           LOG_INFO() << "iterator" << std::endl;
           auto startNode = decl->getPropertyValue("default");
           auto limitNode = decl->getPropertyValue("limit");

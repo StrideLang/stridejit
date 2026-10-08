@@ -131,6 +131,7 @@ bool StrideEnvironment::generateIr(ASTNode root) {
 
     for (const auto &member : platformlib) {
       if (member->getNodeType() == AST::Declaration ||
+          member->getNodeType() == AST::ArrayDeclaration ||
           member->getNodeType() == AST::BundleDeclaration) {
         auto decl = std::static_pointer_cast<DeclarationNode>(member);
         if (decl->getObjectType() == "platformModule") {
@@ -779,15 +780,17 @@ StrideEnvironment::getFunctionArgs(const std::string &funcName) const {
         info.count = static_cast<size_t>(sz);
       } else {
         info.count = 0; // Undetermined dynamic size
-        if (blockDecl->getNodeType() == AST::BundleDeclaration) {
+        if (blockDecl->getNodeType() == AST::ArrayDeclaration ||
+            blockDecl->getNodeType() == AST::BundleDeclaration) {
           // FIXME this should be calculated much earlier than here!
-          auto bundle = blockDecl->getBundle();
-          if (bundle->index()->getChildren()[0]->getNodeType() ==
-              AST::PortProperty) {
-            auto pp = std::static_pointer_cast<PortPropertyNode>(
-                bundle->index()->getChildren()[0]);
-
-            info.sizeProperty = pp->getName() + "_" + pp->getPortName();
+          auto bundle = blockDecl->getArrayIndex();
+          if (bundle && bundle->index() && !bundle->index()->getChildren().empty()) {
+            auto firstIdx = bundle->index()->getChildren()[0];
+            if (firstIdx->getNodeType() == AST::MemberAccess ||
+                firstIdx->getNodeType() == AST::PortProperty) {
+              auto pp = std::static_pointer_cast<MemberAccessNode>(firstIdx);
+              info.sizeProperty = pp->getEntity() + "_" + pp->getPropertyName();
+            }
           }
         }
       }
