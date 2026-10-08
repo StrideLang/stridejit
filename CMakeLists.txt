@@ -153,25 +153,6 @@ target_link_libraries(StrideJit PUBLIC
 )
 
 
-# separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
-
-#set(STRIDELIB_SRC
-#  src/libcompare.cpp
-#)
-
-#set(STRIDELIB_HEADERS
-#  include/libcompare.hpp
-#)
-
-#add_library(StrideLib SHARED
-#  ${STRIDELIB_SRC} ${STRIDELIB_HEADERS}
-#)
-
-#target_compile_options(StrideLib PUBLIC "-rdynamic")
-#target_include_directories(StrideLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-#target_compile_definitions(StrideLib PUBLIC
-#  "-DSTRIDELIB_PATH=\"${CMAKE_CURRENT_BINARY_DIR}\"")
-
 # Testing module -----------------------------------
 option(STRIDEJIT_BUILD_TESTING "Build the Stride testing module" ON)
 

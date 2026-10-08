@@ -31,7 +31,7 @@ functionTest PassthruTest {
 ```
 
 ### Step 2: Run Tests with the `stridetest` CLI
-Execute `stridetest` against the test file:
+Execute `stridetest` directly against the test file:
 
 ```powershell
 stridetest.exe PassthruTest.stride
@@ -48,6 +48,17 @@ STATUS    TEST NAME                   TICKS   ALLOCS      MEAN (ns)     JITTER (
 ================================================================================
 Summary: 1 passed, 0 failed, 1 total.
 ================================================================================
+```
+
+### Step 3: Run Tests with CTest
+All `.stride` test files can also be run seamlessly through CMake's `ctest`:
+
+```powershell
+# Run all tests with failure diagnostics
+ctest --test-dir build --output-on-failure
+
+# Run only Stride tests using regex matching
+ctest --test-dir build --output-on-failure -R "stridetest\.PassthruTest"
 ```
 
 ---
@@ -315,7 +326,41 @@ stridetest path/to/MyTest.stride -r 5
 
 ---
 
-## 9. Performance & Memory Profiling
+## 9. CMake & CTest Integration
+
+All `.stride` test files can be registered as standard CTest cases in CMake:
+
+```cmake
+file(GLOB STRIDE_TEST_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/data/*Test.stride")
+
+foreach(TEST_FILE ${STRIDE_TEST_FILES})
+    get_filename_component(TEST_NAME ${TEST_FILE} NAME_WE)
+    add_test(
+        NAME "stridetest.${TEST_NAME}"
+        COMMAND stridetest "${TEST_FILE}"
+    )
+    set_tests_properties("stridetest.${TEST_NAME}" PROPERTIES
+        LABELS "StrideLanguage"
+        TIMEOUT 30
+    )
+endforeach()
+```
+
+### Running with CTest
+```powershell
+# Run all tests
+ctest --test-dir build --output-on-failure
+
+# Filter only Stride language tests
+ctest --test-dir build --output-on-failure -R "stridetest\."
+
+# Run a specific test
+ctest --test-dir build --output-on-failure -R "stridetest\.PassthruTest"
+```
+
+---
+
+## 10. Performance & Memory Profiling
 
 Every executed test automatically collects non-functional metrics:
 
@@ -326,7 +371,7 @@ Every executed test automatically collects non-functional metrics:
 
 ---
 
-## 10. C++ API Reference (`StrideTesting` Library)
+## 11. C++ API Reference (`StrideTesting` Library)
 
 To embed Stride tests within custom C++ applications or test harnesses, link against `StrideTesting`:
 

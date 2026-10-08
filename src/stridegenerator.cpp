@@ -61,7 +61,18 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
           }
           for (const auto &t : fs.transitions) {
             if (t.transitionDecl) {
-              smInfo.transitionIdsByName[t.transitionDecl->getName()] = t.id;
+              if (!t.transitionDecl->getName().empty()) {
+                smInfo.transitionIdsByName[t.transitionDecl->getName()] = t.id;
+              }
+              auto labelProp = t.transitionDecl->getPropertyValue("label");
+              if (labelProp && labelProp->getNodeType() == AST::String) {
+                std::string labelStr =
+                    std::static_pointer_cast<ValueNode>(labelProp)
+                        ->getStringValue();
+                if (!labelStr.empty()) {
+                  smInfo.transitionIdsByName[labelStr] = t.id;
+                }
+              }
             }
           }
         }
@@ -293,79 +304,78 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
             if (node->getNodeType() == AST::Declaration) {
               addDeclToResetBody(decl);
             } else if (node->getNodeType() == AST::BundleDeclaration) {
-                std::vector<LangError> errors;
-                int size = ASTQuery::getBlockDeclaredSize(
-                    std::static_pointer_cast<DeclarationNode>(node), scope,
-                    tree, &errors);
-                std::vector<ASTNode> defaultValues;
-                if (defaultValueNode->getNodeType() != AST::List) {
-                  defaultValues.resize(size);
-                  std::fill(defaultValues.begin(), defaultValues.end(),
-                            defaultValueNode);
-                } else {
-                  defaultValues = defaultValueNode->getChildren();
+              std::vector<LangError> errors;
+              int size = ASTQuery::getBlockDeclaredSize(
+                  std::static_pointer_cast<DeclarationNode>(node), scope, tree,
+                  &errors);
+              std::vector<ASTNode> defaultValues;
+              if (defaultValueNode->getNodeType() != AST::List) {
+                defaultValues.resize(size);
+                std::fill(defaultValues.begin(), defaultValues.end(),
+                          defaultValueNode);
+              } else {
+                defaultValues = defaultValueNode->getChildren();
 
-                  if (defaultValues.size() != size) {
-                    LOG_ERROR() << "ERROR default values size does not match "
-                                   "declared size"
-                                << std::endl;
-                    continue;
-                  }
+                if (defaultValues.size() != size) {
+                  LOG_ERROR() << "ERROR default values size does not match "
+                                 "declared size"
+                              << std::endl;
+                  continue;
                 }
-                size_t index = 0;
-                llvm::Type *llvmType = state.getLLVMType(decl);
-                for (const auto &defaultValue : defaultValues) {
-                  std::unique_ptr<ExprAST> valExpr;
-                  if (defaultValue->getNodeType() == AST::Real) {
-                    double val =
-                        std::static_pointer_cast<ValueNode>(defaultValue)
-                            ->getRealValue();
-                    if (llvmType->isDoubleTy())
-                      valExpr = std::make_unique<RealExprAST>(val);
-                    else if (llvmType->isIntegerTy(32))
-                      valExpr = std::make_unique<IntExprAST>(
-                          static_cast<int32_t>(val));
-                    else
-                      valExpr = std::make_unique<BoolExprAST>(val != 0.0);
-                  } else if (defaultValue->getNodeType() == AST::Int) {
-                    int64_t val =
-                        std::static_pointer_cast<ValueNode>(defaultValue)
-                            ->getIntValue();
-                    if (llvmType->isDoubleTy())
-                      valExpr = std::make_unique<RealExprAST>(
-                          static_cast<double>(val));
-                    else if (llvmType->isIntegerTy(32))
-                      valExpr = std::make_unique<IntExprAST>(
-                          static_cast<int32_t>(val));
-                    else
-                      valExpr = std::make_unique<BoolExprAST>(val != 0);
-                  } else if (defaultValue->getNodeType() == AST::Switch) {
-                    bool val = std::static_pointer_cast<ValueNode>(defaultValue)
-                                   ->getSwitchValue();
-                    if (llvmType->isDoubleTy())
-                      valExpr = std::make_unique<RealExprAST>(val ? 1.0 : 0.0);
-                    else if (llvmType->isIntegerTy(32))
-                      valExpr = std::make_unique<IntExprAST>(val ? 1 : 0);
-                    else
-                      valExpr = std::make_unique<BoolExprAST>(val);
-                  }
-                  if (valExpr) {
-                    auto varInit = std::make_unique<BinaryExprAST>(
-                        '=',
-                        std::make_unique<VariableExprAST>(
-                            decl->getName(),
-                            std::vector<std::variant<size_t, std::string>>{
-                                index}),
-                        std::move(valExpr));
-                    resetBody.push_back(std::move(varInit));
-                  }
-                  index++;
+              }
+              size_t index = 0;
+              llvm::Type *llvmType = state.getLLVMType(decl);
+              for (const auto &defaultValue : defaultValues) {
+                std::unique_ptr<ExprAST> valExpr;
+                if (defaultValue->getNodeType() == AST::Real) {
+                  double val = std::static_pointer_cast<ValueNode>(defaultValue)
+                                   ->getRealValue();
+                  if (llvmType->isDoubleTy())
+                    valExpr = std::make_unique<RealExprAST>(val);
+                  else if (llvmType->isIntegerTy(32))
+                    valExpr =
+                        std::make_unique<IntExprAST>(static_cast<int32_t>(val));
+                  else
+                    valExpr = std::make_unique<BoolExprAST>(val != 0.0);
+                } else if (defaultValue->getNodeType() == AST::Int) {
+                  int64_t val =
+                      std::static_pointer_cast<ValueNode>(defaultValue)
+                          ->getIntValue();
+                  if (llvmType->isDoubleTy())
+                    valExpr =
+                        std::make_unique<RealExprAST>(static_cast<double>(val));
+                  else if (llvmType->isIntegerTy(32))
+                    valExpr =
+                        std::make_unique<IntExprAST>(static_cast<int32_t>(val));
+                  else
+                    valExpr = std::make_unique<BoolExprAST>(val != 0);
+                } else if (defaultValue->getNodeType() == AST::Switch) {
+                  bool val = std::static_pointer_cast<ValueNode>(defaultValue)
+                                 ->getSwitchValue();
+                  if (llvmType->isDoubleTy())
+                    valExpr = std::make_unique<RealExprAST>(val ? 1.0 : 0.0);
+                  else if (llvmType->isIntegerTy(32))
+                    valExpr = std::make_unique<IntExprAST>(val ? 1 : 0);
+                  else
+                    valExpr = std::make_unique<BoolExprAST>(val);
                 }
+                if (valExpr) {
+                  auto varInit = std::make_unique<BinaryExprAST>(
+                      '=',
+                      std::make_unique<VariableExprAST>(
+                          decl->getName(),
+                          std::vector<std::variant<size_t, std::string>>{
+                              index}),
+                      std::move(valExpr));
+                  resetBody.push_back(std::move(varInit));
+                }
+                index++;
               }
             }
           }
         }
       }
+    }
 
     auto initFunc = std::make_unique<FunctionAST>(std::move(initProto),
                                                   std::move(resetBody));
@@ -388,18 +398,20 @@ std::unique_ptr<ExprAST> StrideGenerator::createExpr(ASTNode node) {
   if (!node) {
     return nullptr;
   }
-  if (node->getNodeType() == AST::Block) {
+  if (node->getNodeType() == AST::Block || node->getNodeType() == AST::Entity) {
     std::unique_ptr<ExprAST> V = std::make_unique<VariableExprAST>(
-        std::static_pointer_cast<BlockNode>(node)->getName());
+        std::static_pointer_cast<EntityNode>(node)->getName());
     setTypeCastMetadata(node, V.get());
     return V;
-  } else if (node->getNodeType() == AST::Bundle) {
-    auto bundleNode = std::static_pointer_cast<BundleNode>(node);
+  } else if (node->getNodeType() == AST::Bundle ||
+             node->getNodeType() == AST::Array) {
+    auto bundleNode = std::static_pointer_cast<ArrayNode>(node);
 
     std::vector<std::variant<size_t, std::string>> indeces;
     for (const auto &idx : bundleNode->index()->getChildren()) {
-      if (idx->getNodeType() == AST::Block) {
-        indeces.push_back(std::static_pointer_cast<BlockNode>(idx)->getName());
+      if (idx->getNodeType() == AST::Block ||
+          idx->getNodeType() == AST::Entity) {
+        indeces.push_back(std::static_pointer_cast<EntityNode>(idx)->getName());
       } else if (idx->getNodeType() == AST::Int) {
         indeces.push_back(
             (size_t)std::static_pointer_cast<ValueNode>(idx)->getIntValue());
@@ -484,7 +496,8 @@ std::vector<std::unique_ptr<ExprAST>> StrideGenerator::generateStreamsForNodes(
       auto stream = std::static_pointer_cast<StreamNode>(node);
       auto code = createStreamCode(stream, state.m_tree, scope, state);
       for (auto &domainCode : code) {
-        if (targetDomain.empty() || domainCode.first == targetDomain) {
+        if (targetDomain.empty() || domainCode.first == targetDomain ||
+            domainCode.first == "RootDomain") {
           for (const auto &f : domainCode.second.functions) {
             f->codegen(state);
           }
@@ -537,7 +550,9 @@ void StrideGenerator::processStateStreams(
           auto guardProp = t.transitionDecl->getPropertyValue("guard");
           if (guardProp) {
             if (guardProp->getNodeType() == AST::Block ||
-                guardProp->getNodeType() == AST::Bundle) {
+                guardProp->getNodeType() == AST::Entity ||
+                guardProp->getNodeType() == AST::Bundle ||
+                guardProp->getNodeType() == AST::Array) {
               t.guardCode.push_back(createExpr(guardProp));
             } else if (guardProp->getNodeType() == AST::None) {
               std::cerr << "Unsupported guard: " << guardProp->toText()
@@ -593,8 +608,7 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
               llvm::Type *varType = state.getLLVMType(varDecl);
               if (varDecl->getNodeType() == AST::ArrayDeclaration ||
                   varDecl->getNodeType() == AST::BundleDeclaration) {
-                int size =
-                    ASTQuery::getBlockDeclaredSize(varDecl, scope, tree);
+                int size = ASTQuery::getBlockDeclaredSize(varDecl, scope, tree);
                 if (size > 0) {
                   varType = llvm::ArrayType::get(varType, size);
                 }
@@ -609,9 +623,8 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
                 llvm::Constant *scalarDefaultVal = nullptr;
 
                 if (defaultNode->getNodeType() == AST::Int) {
-                  int64_t val =
-                      std::static_pointer_cast<ValueNode>(defaultNode)
-                          ->getIntValue();
+                  int64_t val = std::static_pointer_cast<ValueNode>(defaultNode)
+                                    ->getIntValue();
                   if (scalarType->isFloatingPointTy()) {
                     scalarDefaultVal = llvm::ConstantFP::get(
                         scalarType, static_cast<double>(val));
@@ -628,15 +641,14 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
                     scalarDefaultVal = llvm::ConstantInt::get(scalarType, val);
                   }
                 } else if (defaultNode->getNodeType() == AST::Real) {
-                  double val =
-                      std::static_pointer_cast<ValueNode>(defaultNode)
-                          ->getRealValue();
+                  double val = std::static_pointer_cast<ValueNode>(defaultNode)
+                                   ->getRealValue();
                   if (scalarType->isFloatingPointTy()) {
                     scalarDefaultVal = llvm::ConstantFP::get(scalarType, val);
                   } else if (scalarType->isIntegerTy(1) ||
                              scalarType->isIntegerTy(8)) {
-                    scalarDefaultVal = llvm::ConstantInt::get(
-                        scalarType, val != 0.0 ? 1 : 0);
+                    scalarDefaultVal =
+                        llvm::ConstantInt::get(scalarType, val != 0.0 ? 1 : 0);
                   } else if (scalarType->isIntegerTy(32)) {
                     scalarDefaultVal = llvm::ConstantInt::get(
                         scalarType, static_cast<int32_t>(val));
@@ -648,9 +660,8 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
                         scalarType, static_cast<int64_t>(val));
                   }
                 } else if (defaultNode->getNodeType() == AST::Switch) {
-                  bool val =
-                      std::static_pointer_cast<ValueNode>(defaultNode)
-                          ->getSwitchValue();
+                  bool val = std::static_pointer_cast<ValueNode>(defaultNode)
+                                 ->getSwitchValue();
                   if (scalarType->isFloatingPointTy()) {
                     scalarDefaultVal =
                         llvm::ConstantFP::get(scalarType, val ? 1.0 : 0.0);
@@ -1056,8 +1067,7 @@ void StrideGenerator::collectInputArgs(
                   llvm::Type::getDoubleTy(*state.TheContext));
             } else if ((*nodeIt)->getNodeType() == AST::MemberAccess ||
                        (*nodeIt)->getNodeType() == AST::PortProperty) {
-              auto pp =
-                  std::static_pointer_cast<MemberAccessNode>(*nodeIt);
+              auto pp = std::static_pointer_cast<MemberAccessNode>(*nodeIt);
               if (pp->getPropertyName() == "size") {
                 args.MainIn.argTypes.push_back(
                     llvm::Type::getInt32Ty(*state.TheContext));
@@ -1090,8 +1100,7 @@ void StrideGenerator::collectInputArgs(
           typeStr = std::static_pointer_cast<ValueNode>(typecastNode)
                         ->getStringValue();
         } else {
-          typeStr =
-              CodeAnalysis::resolveNodeOutDataType(*nodeIt, scope, tree);
+          typeStr = CodeAnalysis::resolveNodeOutDataType(*nodeIt, scope, tree);
         }
         if (!typeStr.empty()) {
           if (typeStr == "_IntType") {
@@ -1134,8 +1143,8 @@ void StrideGenerator::collectInputArgs(
             LOG_DEBUG() << "added type to argTypes, size is now "
                         << args.MainIn.argTypes.size() << std::endl;
           } else {
-            LOG_DEBUG() << "typeName " << typeName
-                        << " not found in typesMap!" << std::endl;
+            LOG_DEBUG() << "typeName " << typeName << " not found in typesMap!"
+                        << std::endl;
           }
         }
       } else {
@@ -1152,10 +1161,11 @@ void StrideGenerator::collectPropertyArgs(
     ASTNode tree, std::shared_ptr<DeclarationNode> funcDecl,
     std::shared_ptr<FunctionNode> func) {
   // TODO collect function port arguments
-  auto funcInstance = (typeTree && typeTree->instance &&
-                       typeTree->instance->getNodeType() == AST::Function)
-                          ? std::static_pointer_cast<FunctionNode>(typeTree->instance)
-                          : func;
+  auto funcInstance =
+      (typeTree && typeTree->instance &&
+       typeTree->instance->getNodeType() == AST::Function)
+          ? std::static_pointer_cast<FunctionNode>(typeTree->instance)
+          : func;
   if (funcInstance) {
     auto props = funcInstance->getProperties();
     for (const auto &propNode : props) {
@@ -1508,7 +1518,9 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                   funcDecl->getObjectType() == "module") {
                 callexpr->callType = CallableType::Module;
               } else if (funcDecl->getEntityType() == "reaction" ||
-                         funcDecl->getObjectType() == "reaction") {
+                         funcDecl->getObjectType() == "reaction" ||
+                         funcDecl->getEntityType() == "action" ||
+                         funcDecl->getObjectType() == "action") {
                 callexpr->callType = CallableType::Reaction;
               } else if (funcDecl->getEntityType() == "loop" ||
                          funcDecl->getObjectType() == "loop") {
@@ -1876,7 +1888,9 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
       funcDecl->getObjectType() == "module") {
     newfunc->callType = CallableType::Module;
   } else if (funcDecl->getEntityType() == "reaction" ||
-             funcDecl->getObjectType() == "reaction") {
+             funcDecl->getObjectType() == "reaction" ||
+             funcDecl->getEntityType() == "action" ||
+             funcDecl->getObjectType() == "action") {
     newfunc->callType = CallableType::Reaction;
   } else if (funcDecl->getEntityType() == "loop" ||
              funcDecl->getObjectType() == "loop") {

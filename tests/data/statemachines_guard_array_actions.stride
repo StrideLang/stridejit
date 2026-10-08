@@ -1,0 +1,43 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    stateMachines: [MyStateMachine]
+    inputs: []
+    outputs: []
+	domainFunctionCode: ''
+}
+
+switch GuardArr[3] { default: off domain: RootDomain }
+signal ActionOutput { domain: RootDomain type: _IntType default: 0 }
+signal State2Entered { domain: RootDomain type: _IntType default: 0 }
+
+reaction PlaceMarkerReaction {
+    streams: [
+        42 >> ActionOutput;
+    ]
+    domain: RootDomain
+}
+
+state State1 {
+    transitions: [
+        transition {
+            label: "DoPlaceMarker"
+            guard: GuardArr[1]
+            onTransition: [ on >> PlaceMarkerReaction(); ]
+            targetState: State2
+        }
+    ]
+}
+
+state State2 {
+    onEntry: [
+        1 >> State2Entered;
+    ]
+}
+
+state MyStateMachine {
+    initialState: State1
+    states: [State1, State2]
+}

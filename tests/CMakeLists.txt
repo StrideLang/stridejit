@@ -23,6 +23,7 @@ if (STRIDEJIT_BUILD_TESTS)
       compiler_tests.cpp
       list_expression_tests.cpp
       environment_tests.cpp
+      stridec_test.cpp
       ast_node_tests.cpp
       nested_function_tests.cpp
       statemachine_tests.cpp
@@ -49,5 +50,27 @@ if (STRIDEJIT_BUILD_TESTS)
     if (STRIDEPARSER_CODE_COVERAGE)
       set_target_properties(stridejit_tests PROPERTIES COMPILE_FLAGS "-fPIE -g -O0 -Wall -fprofile-arcs -ftest-coverage")
       target_link_libraries(stridejit_tests PUBLIC gcov)
+    endif()
+
+    if (TARGET stridetest)
+      file(GLOB STRIDE_TEST_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/data/*Test.stride")
+      foreach(TEST_FILE ${STRIDE_TEST_FILES})
+        get_filename_component(TEST_NAME ${TEST_FILE} NAME_WE)
+        if (STRIDEROOT)
+          add_test(
+            NAME "stridetest.${TEST_NAME}"
+            COMMAND stridetest "${TEST_FILE}" --root "${STRIDEROOT}"
+          )
+        else()
+          add_test(
+            NAME "stridetest.${TEST_NAME}"
+            COMMAND stridetest "${TEST_FILE}"
+          )
+        endif()
+        set_tests_properties("stridetest.${TEST_NAME}" PROPERTIES
+          LABELS "StrideLanguage"
+          TIMEOUT 30
+        )
+      endforeach()
     endif()
 endif()

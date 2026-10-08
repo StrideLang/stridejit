@@ -1,5 +1,6 @@
 #include "stride/stridejit/statemachine.hpp"
 #include "stride/stridejit/stridecompiler.hpp"
+#include "stride/stridejit/numberexprast.hpp"
 
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
@@ -458,12 +459,49 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
       }
 
       if (!t.guardCode.empty()) {
+        auto *varExpr =
+            dynamic_cast<VariableExprAST *>(t.guardCode.back().get());
         auto result = t.guardCode.back()->codegen(state);
         llvm::Value *CondV = result.first;
+        llvm::Type *valType = result.second.value_or(nullptr);
         if (CondV) {
-          if (CondV->getType()->isPointerTy()) {
-            CondV =
-                state.Builder->CreateLoad(state.Builder->getInt32Ty(), CondV);
+          if (varExpr && !varExpr->getIndeces().empty() &&
+              CondV->getType()->isPointerTy()) {
+            std::vector<llvm::Value *> idxList;
+            for (const auto &idx : varExpr->getIndeces()) {
+              const size_t *intIdx = std::get_if<size_t>(&idx);
+              if (intIdx) {
+                idxList.push_back(llvm::ConstantInt::get(
+                    *state.TheContext, llvm::APInt(64, *intIdx)));
+              }
+              const std::string *strIdx = std::get_if<std::string>(&idx);
+              if (strIdx) {
+                auto it = state.NamedValues.find(*strIdx);
+                if (it != state.NamedValues.end()) {
+                  llvm::Value *indexVal = it->second.first;
+                  if (indexVal->getType()->isPointerTy()) {
+                    indexVal = state.Builder->CreateLoad(
+                        it->second.second.value(), indexVal, *strIdx);
+                  }
+                  idxList.push_back(indexVal);
+                }
+              }
+            }
+            if (!idxList.empty()) {
+              llvm::Type *gepElemType =
+                  valType ? valType : state.Builder->getInt32Ty();
+              if (gepElemType->isArrayTy()) {
+                gepElemType = static_cast<llvm::ArrayType *>(gepElemType)
+                                  ->getElementType();
+              }
+              CondV = state.Builder->CreateGEP(gepElemType, CondV, idxList);
+              CondV = state.Builder->CreateLoad(gepElemType, CondV,
+                                                varExpr->getName());
+            }
+          } else if (CondV->getType()->isPointerTy()) {
+            llvm::Type *loadType =
+                valType ? valType : state.Builder->getInt32Ty();
+            CondV = state.Builder->CreateLoad(loadType, CondV);
           }
           if (CondV->getType()->isIntegerTy(1)) {
             // Already i1 boolean

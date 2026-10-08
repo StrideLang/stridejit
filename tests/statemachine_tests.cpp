@@ -776,3 +776,71 @@ TEST(StateMachine, DomainSwitches) {
 
   EXPECT_EQ(switchExit(), 1);
 }
+
+TEST(StateMachine, GuardArrayAndRootActionsInDomain) {
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                              "statemachines_guard_array_actions.stride");
+  EXPECT_NE(tree, nullptr);
+
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+
+  strd::CodeValidator validator(tree);
+  EXPECT_TRUE(validator.isValid());
+
+  bool success = strenv.generateIr(tree);
+  EXPECT_TRUE(success);
+  success = strenv.compileInMemory();
+  EXPECT_TRUE(success);
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+
+  strenv.invoke("RootDomain_init", args);
+
+  auto actionOutput = [&]() {
+    return strenv.getStateVar(statePtr.get(), "ActionOutput", std::nullopt, "RootDomain").value_or(0);
+  };
+  auto state2Entered = [&]() {
+    return strenv.getStateVar(statePtr.get(), "State2Entered", std::nullopt, "RootDomain").value_or(0);
+  };
+  auto guard1 = [&]() {
+    return strenv.getStateVar(statePtr.get(), "GuardArr", 1, "RootDomain").value_or(0);
+  };
+
+  EXPECT_EQ(actionOutput(), 0);
+  EXPECT_EQ(state2Entered(), 0);
+  EXPECT_EQ(guard1(), 0);
+
+  auto transIdOpt = strenv.getTransitionId("DoPlaceMarker", "", "RootDomain");
+  ASSERT_TRUE(transIdOpt.has_value());
+  int32_t transId = transIdOpt.value();
+
+  auto state1Id = strenv.getStateId("State1", "", "RootDomain").value_or(-1);
+  auto state2Id = strenv.getStateId("State2", "", "RootDomain").value_or(-1);
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), state1Id);
+
+  // GuardArr[1] is off (0), so requesting transition should NOT fire
+  strenv.requestTransition(statePtr, transId, "", "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), state1Id);
+  EXPECT_EQ(actionOutput(), 0);
+  EXPECT_EQ(state2Entered(), 0);
+
+  // Now enable the guard for index 1
+  strenv.setStateVar(statePtr.get(), "GuardArr", true, 1, "RootDomain");
+  EXPECT_EQ(guard1(), 1);
+
+  // Request transition again; now that guard is true, it should fire:
+  // 1) execute onTransition reaction PlaceMarkerReaction (setting ActionOutput = 42)
+  // 2) enter State2 (executing onEntry, setting State2Entered = 1)
+  strenv.requestTransition(statePtr, transId, "", "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+
+  EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), state2Id);
+  EXPECT_EQ(actionOutput(), 42);
+  EXPECT_EQ(state2Entered(), 1);
+}
+
