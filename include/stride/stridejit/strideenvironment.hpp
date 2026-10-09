@@ -94,8 +94,11 @@ public:
   }
 
   // IR generator
-  bool generateIr(std::string path);
-  bool generateIr(strd::ASTNode root);
+  bool generateIr(std::string path, bool emitAllFunctions = false);
+  bool generateIr(const std::vector<std::string> &paths,
+                  bool emitAllFunctions = false);
+  bool generateIr(strd::ASTNode root, bool emitAllFunctions = false);
+  bool generateAllRootFunctions(strd::ASTNode root);
 
   // Standalone function generator
   bool generateStandaloneFunction(std::string funcName, ScopeStack &scope,

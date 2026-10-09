@@ -94,9 +94,45 @@ void StrideEnvironment::prepareTree(ASTNode tree) {
   resolver.process();
 }
 
-bool StrideEnvironment::generateIr(std::string path) {
-  ASTNode tree;
-  tree = AST::parseFile(path.c_str());
+bool StrideEnvironment::generateAllRootFunctions(ASTNode root) {
+  if (!root)
+    return false;
+
+  ScopeStack scope;
+  scope.push_back({root, {}});
+
+  for (const auto &child : root->getChildren()) {
+    if (child->getNodeType() == AST::Declaration ||
+        child->getNodeType() == AST::ArrayDeclaration ||
+        child->getNodeType() == AST::BundleDeclaration) {
+      auto decl = std::static_pointer_cast<DeclarationNode>(child);
+      std::string objType = decl->getObjectType();
+      std::string entType = decl->getEntityType();
+
+      if (objType == "module" || entType == "module" ||
+          objType == "reaction" || entType == "reaction" ||
+          objType == "action" || entType == "action" ||
+          objType == "function" || entType == "function") {
+        if (objType == "domain" || entType == "domain" ||
+            objType == "_domainDefinition" || entType == "_domainDefinition" ||
+            objType == "platformModule" || entType == "platformModule") {
+          continue;
+        }
+
+        std::string funcName = decl->getName();
+        if (mStrideEnv.FunctionProtos.find(funcName) ==
+            mStrideEnv.FunctionProtos.end()) {
+          StrideGenerator::generateStandaloneFunction(decl, root, scope,
+                                                      mStrideEnv);
+        }
+      }
+    }
+  }
+  return true;
+}
+
+bool StrideEnvironment::generateIr(std::string path, bool emitAllFunctions) {
+  ASTNode tree = AST::parseFile(path.c_str());
   if (!tree) {
     for (auto &error : AST::getParseErrors()) {
       LOG_ERROR() << error.getErrorText() << std::endl;
@@ -114,17 +150,81 @@ bool StrideEnvironment::generateIr(std::string path) {
   }
 
   prepareTree(tree);
-  return generateIr(tree);
+  return generateIr(tree, emitAllFunctions);
 }
 
-bool StrideEnvironment::generateIr(ASTNode root) {
+bool StrideEnvironment::generateIr(const std::vector<std::string> &paths,
+                                   bool emitAllFunctions) {
+  if (paths.empty()) {
+    LOG_ERROR() << "No input files provided to generateIr." << std::endl;
+    return false;
+  }
+  if (paths.size() == 1) {
+    return generateIr(paths[0], emitAllFunctions);
+  }
+
+  for (const auto &p : paths) {
+    std::filesystem::path filePath(p);
+    if (filePath.has_parent_path()) {
+      std::string parentDir = filePath.parent_path().generic_string();
+      if (std::find(m_includePaths.begin(), m_includePaths.end(), parentDir) ==
+          m_includePaths.end()) {
+        m_includePaths.push_back(parentDir);
+      }
+    }
+  }
+
+  for (const auto &p : paths) {
+    ASTNode tree = AST::parseFile(p.c_str());
+    if (!tree) {
+      for (auto &error : AST::getParseErrors()) {
+        LOG_ERROR() << error.getErrorText() << std::endl;
+      }
+      return false;
+    }
+
+    prepareTree(tree);
+
+    // Each file is compiled in its isolated scope into the shared LLVM Module
+    ScopeStack globalScope;
+    {
+      globalScope.push_back({nullptr, {}});
+      std::vector<ASTNode> platformlib = ASTFunctions::loadAllInDirectory(
+          m_strideRoot + "/frameworks/JIT/1.0/platformlib");
+      auto &frameworkScope = globalScope.back().second;
+
+      for (const auto &member : platformlib) {
+        if (member->getNodeType() == AST::Declaration ||
+            member->getNodeType() == AST::ArrayDeclaration ||
+            member->getNodeType() == AST::BundleDeclaration) {
+          auto decl = std::static_pointer_cast<DeclarationNode>(member);
+          if (decl->getObjectType() == "platformModule") {
+            StrideGenerator::generatePlatformFunctionSignature(
+                decl, frameworkScope, mStrideEnv);
+          }
+        }
+      }
+    }
+
+    if (!ASTFunctions::preprocess(tree, &globalScope)) {
+      return false;
+    }
+    StrideGenerator::compile(tree, globalScope, mStrideEnv);
+
+    if (emitAllFunctions) {
+      generateAllRootFunctions(tree);
+    }
+  }
+
+  optimizeModule();
+  return true;
+}
+
+bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
   ScopeStack globalScope;
   {
-    //    StrideLibrary library;
-    //    library.initializeLibrary(m_strideRoot);
-
     globalScope.push_back({nullptr, {}});
-    // FIXME don't hardocde library version
+    // FIXME don't hardcode library version
     std::vector<ASTNode> platformlib = ASTFunctions::loadAllInDirectory(
         m_strideRoot + "/frameworks/JIT/1.0/platformlib");
     auto &frameworkScope = globalScope.back().second;
@@ -146,10 +246,10 @@ bool StrideEnvironment::generateIr(ASTNode root) {
     return false;
   }
   StrideGenerator::compile(root, globalScope, mStrideEnv);
-  //  if (mVerbose) {
-  //    state.TheModule->print(llvm::outs(), nullptr);
-  //    llvm::outs() << "\n";
-  //  }
+
+  if (emitAllFunctions) {
+    generateAllRootFunctions(root);
+  }
 
   optimizeModule();
   return true;

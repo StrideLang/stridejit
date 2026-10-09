@@ -96,3 +96,51 @@ TEST(StridecCompilerTest, SensorDSPExecution) {
   EXPECT_GT(filteredFinal.value(), 5.0);
   EXPECT_TRUE(alertFinal.value_or(false));
 }
+
+TEST(StridecCompilerTest, MultiFileUnifiedCompilation) {
+  strd::StrideEnvironment env;
+  std::vector<std::string> files = {
+      STRIDEJIT_TESTS_SOURCE_DIR "sensor_dsp.stride",
+      STRIDEJIT_TESTS_SOURCE_DIR "math_utils.stride"
+  };
+
+  bool ok = env.generateIr(files, /*emitAllFunctions=*/true);
+  ASSERT_TRUE(ok);
+
+  std::string headerStr = env.generateCHeaderString();
+  EXPECT_NE(headerStr.find("SensorDSP_process"), std::string::npos);
+  EXPECT_NE(headerStr.find("Gain"), std::string::npos);
+  EXPECT_NE(headerStr.find("Offset"), std::string::npos);
+
+  std::filesystem::path tempDir =
+      std::filesystem::temp_directory_path() / "stride_multi_file_jit_test";
+  std::filesystem::create_directories(tempDir);
+
+  std::string objPath = (tempDir / "multi.o").string();
+  EXPECT_TRUE(env.emitObjectFile(objPath));
+  EXPECT_TRUE(std::filesystem::exists(objPath));
+  EXPECT_GT(std::filesystem::file_size(objPath), 0);
+
+  std::filesystem::remove_all(tempDir);
+}
+
+TEST(StridecCompilerTest, StandaloneFunctionLibraryWithFlag) {
+  strd::StrideEnvironment env;
+  bool ok = env.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "math_utils.stride", /*emitAllFunctions=*/true);
+  ASSERT_TRUE(ok);
+
+  std::string headerStr = env.generateCHeaderString();
+  EXPECT_NE(headerStr.find("Gain"), std::string::npos);
+  EXPECT_NE(headerStr.find("Offset"), std::string::npos);
+
+  std::filesystem::path tempDir =
+      std::filesystem::temp_directory_path() / "stride_standalone_fn_jit_test";
+  std::filesystem::create_directories(tempDir);
+
+  std::string objPath = (tempDir / "math.o").string();
+  EXPECT_TRUE(env.emitObjectFile(objPath));
+  EXPECT_TRUE(std::filesystem::exists(objPath));
+  EXPECT_GT(std::filesystem::file_size(objPath), 0);
+
+  std::filesystem::remove_all(tempDir);
+}
