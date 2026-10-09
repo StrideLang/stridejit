@@ -1,0 +1,78 @@
+# Test multi-stage triggered reaction pipeline and literal on stream
+
+signal Result { type: _IntType default: 0 }
+signal LiteralOnResult { type: _IntType default: 0 }
+switch Trigger { default: off }
+
+reaction StepA {
+    ports: [
+        propertyInputPort FactorPort {
+            name: "factor"
+            block: Factor
+        }
+        mainOutputPort OutPort {
+            block: OutA
+        }
+    ]
+    blocks: [
+        signal Factor { type: _IntType }
+        signal OutA { type: _IntType }
+    ]
+    streams: [
+        Factor * 3 >> OutA;
+    ]
+}
+
+reaction StepB {
+    ports: [
+        mainInputPort InPort {
+            block: InB
+            type: _IntType
+        }
+        propertyInputPort OffsetPort {
+            name: "offset"
+            block: Offset
+        }
+        mainOutputPort OutPort {
+            block: OutB
+        }
+    ]
+    blocks: [
+        signal InB { type: _IntType }
+        signal Offset { type: _IntType }
+        signal OutB { type: _IntType }
+    ]
+    streams: [
+        InB + Offset >> OutB;
+    ]
+}
+
+reaction StepC {
+    ports: [
+        mainInputPort InPort {
+            block: InC
+            type: _IntType
+        }
+        propertyInputPort MulPort {
+            name: "multiplier"
+            block: Multiplier
+        }
+        mainOutputPort OutPort {
+            block: OutC
+        }
+    ]
+    blocks: [
+        signal InC { type: _IntType }
+        signal Multiplier { type: _IntType }
+        signal OutC { type: _IntType }
+    ]
+    streams: [
+        InC * Multiplier >> OutC;
+    ]
+}
+
+# 3-step chained pipeline guarded by Trigger: ( (5 * 3) + 5 ) * 2 = 40
+Trigger >> StepA(factor: 5) >> StepB(offset: 5) >> StepC(multiplier: 2) >> Result;
+
+# 2-step chained pipeline guarded by literal 'on': (4 * 3) + 8 = 20
+on >> StepA(factor: 4) >> StepB(offset: 8) >> LiteralOnResult;

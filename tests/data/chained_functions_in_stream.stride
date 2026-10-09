@@ -1,0 +1,54 @@
+# Test chaining modules / functions in a continuous stream pipeline
+
+signal InputValue { type: _IntType default: 10 }
+signal OutputValue { type: _IntType }
+
+module Multiply {
+    ports: [
+        mainInputPort InPort { block: Input }
+        propertyInputPort FactorPort { name: "factor" block: Factor }
+        mainOutputPort OutPort { block: Output }
+    ]
+    blocks: [
+        signal Input { type: _IntType }
+        signal Factor { type: _IntType }
+        signal Output { type: _IntType }
+    ]
+    streams: [
+        Input * Factor >> Output;
+    ]
+}
+
+module AddOffset {
+    ports: [
+        mainInputPort InPort { block: Input }
+        propertyInputPort OffsetPort { name: "offset" block: Offset }
+        mainOutputPort OutPort { block: Output }
+    ]
+    blocks: [
+        signal Input { type: _IntType }
+        signal Offset { type: _IntType }
+        signal Output { type: _IntType }
+    ]
+    streams: [
+        Input + Offset >> Output;
+    ]
+}
+
+module SubtractBase {
+    ports: [
+        mainInputPort InPort { block: Input }
+        propertyInputPort BasePort { name: "base" block: Base }
+        mainOutputPort OutPort { block: Output }
+    ]
+    blocks: [
+        signal Input { type: _IntType }
+        signal Base { type: _IntType }
+        signal Output { type: _IntType }
+    ]
+    streams: [
+        Input - Base >> Output;
+    ]
+}
+
+InputValue >> Multiply(factor: 3) >> AddOffset(offset: 7) >> SubtractBase(base: 2) >> OutputValue;

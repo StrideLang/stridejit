@@ -85,15 +85,35 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
         // Should we optmize here if values are not modified, or just defer to
         // the compiler?
         if (defaultNode->getNodeType() == AST::Int) {
-          llvm::Value *intVal = state.Builder->getInt64(
-              std::static_pointer_cast<ValueNode>(defaultNode)->getIntValue());
-          state.Builder->CreateStore(intVal, alloca);
+          int64_t intVal =
+              std::static_pointer_cast<ValueNode>(defaultNode)->getIntValue();
+          llvm::Value *val = nullptr;
+          if (type->isFloatingPointTy()) {
+            val = llvm::ConstantFP::get(type, static_cast<double>(intVal));
+          } else {
+            val = llvm::ConstantInt::get(type, intVal);
+          }
+          state.Builder->CreateStore(val, alloca);
         } else if (defaultNode->getNodeType() == AST::Real) {
-          llvm::Value *realVal = llvm::ConstantFP::get(
-              *state.TheContext,
-              llvm::APFloat(std::static_pointer_cast<ValueNode>(defaultNode)
-                                ->getRealValue()));
-          state.Builder->CreateStore(realVal, alloca);
+          double realVal = std::static_pointer_cast<ValueNode>(defaultNode)
+                               ->getRealValue();
+          llvm::Value *val = nullptr;
+          if (type->isIntegerTy()) {
+            val = llvm::ConstantInt::get(type, static_cast<int64_t>(realVal));
+          } else {
+            val = llvm::ConstantFP::get(type, realVal);
+          }
+          state.Builder->CreateStore(val, alloca);
+        } else if (defaultNode->getNodeType() == AST::Switch) {
+          bool switchVal =
+              std::static_pointer_cast<ValueNode>(defaultNode)->getSwitchValue();
+          llvm::Value *val = nullptr;
+          if (type->isFloatingPointTy()) {
+            val = llvm::ConstantFP::get(type, switchVal ? 1.0 : 0.0);
+          } else {
+            val = llvm::ConstantInt::get(type, switchVal ? 1 : 0);
+          }
+          state.Builder->CreateStore(val, alloca);
         } else {
           LOG_ERROR() << "ERROR: type not supported for default" << std::endl;
           assert(0 == 1);
@@ -113,7 +133,8 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
         //     state.CreateEntryBlockAllocaArrayConst(TheFunction, varName,
         //     type, size);
         if (defaultNode->getNodeType() == AST::Int ||
-            defaultNode->getNodeType() == AST::Real) {
+            defaultNode->getNodeType() == AST::Real ||
+            defaultNode->getNodeType() == AST::Switch) {
           llvm::Value *Val = nullptr;
           if (defaultNode->getNodeType() == AST::Int) {
             int64_t intVal =
@@ -123,13 +144,21 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
             } else {
               Val = llvm::ConstantInt::get(type, intVal);
             }
-          } else {
+          } else if (defaultNode->getNodeType() == AST::Real) {
             double realVal = std::static_pointer_cast<ValueNode>(defaultNode)
                                  ->getRealValue();
             if (type->isIntegerTy()) {
               Val = llvm::ConstantInt::get(type, static_cast<int64_t>(realVal));
             } else {
               Val = llvm::ConstantFP::get(type, realVal);
+            }
+          } else {
+            bool switchVal = std::static_pointer_cast<ValueNode>(defaultNode)
+                                 ->getSwitchValue();
+            if (type->isFloatingPointTy()) {
+              Val = llvm::ConstantFP::get(type, switchVal ? 1.0 : 0.0);
+            } else {
+              Val = llvm::ConstantInt::get(type, switchVal ? 1 : 0);
             }
           }
 
@@ -214,6 +243,14 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
                 Val = llvm::ConstantInt::get(type, static_cast<int64_t>(v));
               } else {
                 Val = llvm::ConstantFP::get(type, v);
+              }
+            } else if (child->getNodeType() == AST::Switch) {
+              bool v =
+                  std::static_pointer_cast<ValueNode>(child)->getSwitchValue();
+              if (type->isFloatingPointTy()) {
+                Val = llvm::ConstantFP::get(type, v ? 1.0 : 0.0);
+              } else {
+                Val = llvm::ConstantInt::get(type, v ? 1 : 0);
               }
             }
             assert(Val != nullptr);
@@ -794,10 +831,57 @@ void processArgGroup(
     std::vector<std::tuple<std::string, llvm::AllocaInst *, llvm::Type *>>
         *tempOuts = nullptr) {
   for (unsigned i = 0, e = ArgGroup.size(); i != e; ++i) {
-    auto [value, type] = ArgGroup[i]->codegen(state);
     size_t paramIdx = CallArgs.size();
     llvm::Argument *calleeArg =
         (paramIdx < CalleeF->arg_size()) ? CalleeF->getArg(paramIdx) : nullptr;
+
+    if (isOutputGroup) {
+      if (auto *varExpr = dynamic_cast<VariableExprAST *>(ArgGroup[i].get())) {
+        std::string varName = varExpr->getName();
+        if (state.NamedValues.find(varName) == state.NamedValues.end() &&
+            !state.globalExists(varName)) {
+          llvm::Function *TheFunction =
+              state.Builder->GetInsertBlock()->getParent();
+          llvm::Type *elemTy =
+              llvm::Type::getInt32Ty(*state.TheContext);
+          llvm::AllocaInst *tempAlloc = state.CreateEntryBlockAlloca(
+              TheFunction, varName + "_tmp", elemTy);
+          state.Builder->CreateStore(
+              llvm::Constant::getNullValue(elemTy), tempAlloc);
+          if (tempOuts) {
+            tempOuts->push_back({varName, tempAlloc, elemTy});
+          }
+          CallArgs.push_back({tempAlloc, elemTy});
+          continue;
+        }
+      }
+    }
+
+    auto [value, type] = ArgGroup[i]->codegen(state);
+
+    if (isOutputGroup && !value) {
+      llvm::Function *TheFunction =
+          state.Builder->GetInsertBlock()->getParent();
+      auto *varExpr = dynamic_cast<VariableExprAST *>(ArgGroup[i].get());
+      std::string varName = varExpr ? varExpr->getName() : "call_tmp";
+      llvm::Type *elemTy = type.has_value()
+                               ? type.value()
+                               : llvm::Type::getInt32Ty(*state.TheContext);
+      llvm::AllocaInst *tempAlloc =
+          state.CreateEntryBlockAlloca(TheFunction, varName + "_tmp", elemTy);
+      state.Builder->CreateStore(
+          llvm::Constant::getNullValue(elemTy), tempAlloc);
+      if (tempOuts && varExpr) {
+        tempOuts->push_back({varExpr->getName(), tempAlloc, elemTy});
+      }
+      CallArgs.push_back({tempAlloc, elemTy});
+      continue;
+    }
+
+    if (!value) {
+      LOG_ERROR() << "Can't process argument at index " << i << std::endl;
+      return;
+    }
 
     if (value->getType()->isTokenTy()) {
       auto *list = dynamic_cast<ListExprAST *>(ArgGroup[i].get());

@@ -1,0 +1,50 @@
+# Test chaining code generators (reactions) directly in a stream
+
+signal Result { type: _IntType }
+switch Trigger { default: off }
+
+reaction StepOne {
+    ports: [
+        propertyInputPort FactorPort {
+            name: "factor"
+            block: Factor
+        }
+        mainOutputPort OutPort {
+            block: Intermediate
+        }
+    ]
+    blocks: [
+        signal Factor { type: _IntType }
+        signal Intermediate { type: _IntType }
+    ]
+    streams: [
+        Factor * 2 >> Intermediate;
+    ]
+}
+
+reaction StepTwo {
+    ports: [
+        mainInputPort InPort {
+            block: Input
+            type: _IntType
+        }
+        propertyInputPort OffsetPort {
+            name: "offset"
+            block: Offset
+        }
+        mainOutputPort OutPort {
+            block: Output
+        }
+    ]
+    blocks: [
+        signal Input { type: _IntType }
+        signal Offset { type: _IntType }
+        signal Output { type: _IntType }
+    ]
+    streams: [
+        Input + Offset >> Output;
+    ]
+}
+
+Trigger >> StepOne(factor: 5) >> StepTwo(offset: 10) >> Result;
+

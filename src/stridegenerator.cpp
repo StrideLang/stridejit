@@ -1007,7 +1007,7 @@ void StrideGenerator::collectInputArgs(
     FunctionArgs &args, CodeAnalysis::TypeTree *typeTree, StrideCompiler &state,
     std::vector<std::unique_ptr<ExprAST>> &exprs, ScopeStack &scope,
     ASTNode tree, std::shared_ptr<DeclarationNode> funcDecl,
-    std::shared_ptr<FunctionNode> func) {
+    std::shared_ptr<FunctionNode> func, ASTNode prev) {
   // TODO collect function port arguments
   ASTNode input = nullptr;
   if (typeTree && typeTree->instance) {
@@ -1016,13 +1016,43 @@ void StrideGenerator::collectInputArgs(
   if (!input && func) {
     input = func->getCompilerProperty("mainInput");
   }
+  if (!input && prev) {
+    input = prev;
+  }
   if (input) {
     if (auto prevFunc = std::dynamic_pointer_cast<FunctionNode>(input)) {
-      args.MainIn.args.emplace_back(std::move(exprs.back()));
-      exprs.pop_back();
-      // FIXME do automatic type casting int ->float
-      args.MainIn.argTypes.push_back(
-          llvm::Type::getDoubleTy(*state.TheContext));
+      if (auto intermediateNode =
+              prevFunc->getCompilerProperty("intermediateOutput")) {
+        // Verify that the intermediate symbol was produced by the previously connected function
+        std::string intermediateSymbol =
+            ASTQuery::getNodeName(intermediateNode);
+        args.MainIn.args.emplace_back(
+            std::make_unique<VariableExprAST>(intermediateSymbol));
+        auto prevDecls =
+            ASTQuery::findAllDeclarations(prevFunc->getName(), scope, tree);
+        auto prevDecl = CodeAnalysis::matchDefinitionToTypes(
+            prevDecls, prevFunc, scope, tree);
+        if (prevDecl) {
+          auto protoIt = state.FunctionProtos.find(prevDecl->getName());
+          if (protoIt != state.FunctionProtos.end() &&
+              !protoIt->second->getOutArgs().empty()) {
+            args.MainIn.argTypes.push_back(
+                protoIt->second->getOutArgs()[0].llvmType);
+          } else {
+            args.MainIn.argTypes.push_back(
+                llvm::Type::getInt32Ty(*state.TheContext));
+          }
+        } else {
+          args.MainIn.argTypes.push_back(
+              llvm::Type::getInt32Ty(*state.TheContext));
+        }
+      } else {
+        args.MainIn.args.emplace_back(std::move(exprs.back()));
+        exprs.pop_back();
+        // FIXME do automatic type casting int ->float
+        args.MainIn.argTypes.push_back(
+            llvm::Type::getDoubleTy(*state.TheContext));
+      }
     } else if (auto prevList = std::dynamic_pointer_cast<ListNode>(input)) {
       auto *v = dynamic_cast<ListExprAST *>(exprs.back().get());
       auto listNodes = prevList->getChildren();
@@ -1183,6 +1213,41 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                                   StrideCompiler &state) {
   StrideGenerator::GeneratedCode generated;
   ASTNode prev = nullptr;
+  bool isTriggeredReactionStream = false;
+  auto leftNode = stream->getLeft();
+  std::shared_ptr<DeclarationNode> leftDecl = nullptr;
+  if (leftNode) {
+    if (leftNode->getNodeType() != AST::Switch) {
+      leftDecl = ASTQuery::findDeclarationByName(
+          ASTQuery::getNodeName(leftNode), scope, tree);
+    }
+  }
+  if ((leftNode && leftNode->getNodeType() == AST::Switch) ||
+      (leftDecl && (leftDecl->getObjectType() == "switch" ||
+                    leftDecl->getObjectType() == "trigger" ||
+                    leftDecl->getEntityType() == "switch" ||
+                    leftDecl->getEntityType() == "trigger"))) {
+    StreamNodeIterator checkIt(stream);
+    while (auto n = checkIt.next()) {
+      if (n->getNodeType() == AST::Function) {
+        auto funcNode = std::static_pointer_cast<FunctionNode>(n);
+        auto funcDecls =
+            ASTQuery::findAllDeclarations(funcNode->getName(), scope, tree);
+        auto firstFuncDecl = CodeAnalysis::matchDefinitionToTypes(
+            funcDecls, funcNode, scope, tree);
+        if (firstFuncDecl) {
+          std::string entType = firstFuncDecl->getEntityType();
+          std::string objType = firstFuncDecl->getObjectType();
+          if (entType == "reaction" || entType == "action" ||
+              objType == "reaction" || objType == "action") {
+            isTriggeredReactionStream = true;
+          }
+        }
+        break;
+      }
+    }
+  }
+
   StreamNodeIterator streamIt(stream);
   ASTNode current;
   ASTNode next = streamIt.next();
@@ -1265,6 +1330,9 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       // lists and function arguments if on root namespace
       if (current == stream->getLeft()) {
         generated[domainName].readVariables.push_back(current);
+        if (isTriggeredReactionStream) {
+          continue;
+        }
       } else {
         generated[domainName].writeVariables.push_back(current);
       }
@@ -1312,7 +1380,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       FunctionArgs args;
 
       collectInputArgs(args, typeTree, state, generated[domainName].expr, scope,
-                       tree, funcDecl, func);
+                       tree, funcDecl, func, prev);
 
       // ASTExpr for properties are processed in collectPropertyArgs
       collectPropertyArgs(args, typeTree, state, generated[domainName].expr,
@@ -1417,6 +1485,23 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
           std::unique_ptr<FunctionAST> newFuncDecl =
               createFunctionDeclaration(funcDecl, func, tree, &scope, state);
           if (newFuncDecl) {
+            const auto &protoOuts = newFuncDecl->getProto().getOutArgs();
+            while (args.MainOut.args.size() < protoOuts.size()) {
+              const auto &arg = protoOuts[args.MainOut.args.size()];
+              // TODO: Ensure this generated intermediate symbol is managed when checking for symbol clashes across scopes.
+              std::string intermediateName =
+                  "__intermediate_" + state.getName() + "_" + arg.name;
+              if (func) {
+                func->setCompilerProperty(
+                    "intermediateOutput",
+                    std::make_shared<EntityNode>(intermediateName,
+                                                 func->getFilename().c_str(),
+                                                 func->getLine()));
+              }
+              args.MainOut.args.push_back(
+                  std::make_unique<VariableExprAST>(intermediateName));
+              args.MainOut.argTypes.push_back(arg.llvmType);
+            }
             for (const auto &arg : newFuncDecl->getProto().getExternalArgs()) {
               args.External.args.push_back(
                   std::make_unique<VariableExprAST>(arg.name));
@@ -1430,6 +1515,23 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
           } else {
             auto protoIt = state.FunctionProtos.find(funcDecl->getName());
             if (protoIt != state.FunctionProtos.end()) {
+              const auto &protoOuts = protoIt->second->getOutArgs();
+              while (args.MainOut.args.size() < protoOuts.size()) {
+                const auto &arg = protoOuts[args.MainOut.args.size()];
+                // TODO: Ensure this generated intermediate symbol is managed when checking for symbol clashes across scopes.
+                std::string intermediateName =
+                    "__intermediate_" + state.getName() + "_" + arg.name;
+                if (func) {
+                  func->setCompilerProperty(
+                      "intermediateOutput",
+                      std::make_shared<EntityNode>(intermediateName,
+                                                   func->getFilename().c_str(),
+                                                   func->getLine()));
+                }
+                args.MainOut.args.push_back(
+                    std::make_unique<VariableExprAST>(intermediateName));
+                args.MainOut.argTypes.push_back(arg.llvmType);
+              }
               for (const auto &arg : protoIt->second->getExternalArgs()) {
                 args.External.args.push_back(
                     std::make_unique<VariableExprAST>(arg.name));
@@ -1555,7 +1657,11 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         }
       }
     } else if (current->getNodeType() == AST::Switch) {
-      generated[domainName].expr.push_back(createExpr(current));
+      if (current == stream->getLeft() && isTriggeredReactionStream) {
+        // Skip pushing the trigger constant
+      } else {
+        generated[domainName].expr.push_back(createExpr(current));
+      }
     } else if (current->getNodeType() == AST::MemberAccess ||
                current->getNodeType() == AST::PortProperty) {
       generated[domainName].expr.push_back(createExpr(current));
@@ -1563,6 +1669,27 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       LOG_ERROR() << "ERROR: Unsupported type" << std::endl;
     }
   };
+  if (isTriggeredReactionStream) {
+    for (auto &domainCode : generated) {
+      if (!domainCode.second.expr.empty()) {
+        std::unique_ptr<ExprAST> condExpr;
+        std::string condName = "stream_cond";
+        if (leftDecl) {
+          condName = leftDecl->getName();
+          condExpr = std::make_unique<VariableExprAST>(condName);
+        } else if (leftNode) {
+          condExpr = createExpr(leftNode);
+        }
+        if (condExpr) {
+          std::vector<std::unique_ptr<ExprAST>> innerExprs =
+              std::move(domainCode.second.expr);
+          domainCode.second.expr.clear();
+          domainCode.second.expr.push_back(std::make_unique<ResetExprAST>(
+              condName, std::move(condExpr), std::move(innerExprs)));
+        }
+      }
+    }
+  }
   return generated;
 }
 

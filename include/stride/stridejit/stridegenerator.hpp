@@ -130,7 +130,8 @@ private:
                                std::vector<std::unique_ptr<ExprAST>> &exprs,
                                ScopeStack &scope, ASTNode tree,
                                std::shared_ptr<DeclarationNode> funcDecl,
-                               std::shared_ptr<FunctionNode> func);
+                               std::shared_ptr<FunctionNode> func,
+                               ASTNode prev = nullptr);
 
   static void collectPropertyArgs(FunctionArgs &args,
                                   CodeAnalysis::TypeTree *typeTree,

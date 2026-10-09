@@ -1,0 +1,123 @@
+# Test switch default initializations for internal variables (scalar, uniform array, list array)
+
+switch OutScalarOn { default: off }
+switch OutScalarOff { default: on }
+switch OutArrayUniform0 { default: off }
+switch OutArrayUniform1 { default: off }
+switch OutArrayUniform2 { default: off }
+switch OutArrayList0 { default: off }
+switch OutArrayList1 { default: on }
+switch OutArrayList2 { default: off }
+
+module TestSwitchScalar {
+    ports: [
+        mainOutputPort OutPort { block: Output }
+    ]
+    blocks: [
+        switch SwOn { default: on }
+        switch Output { default: off }
+    ]
+    streams: [
+        SwOn >> Output;
+    ]
+}
+
+module TestSwitchScalarOff {
+    ports: [
+        mainOutputPort OutPort { block: Output }
+    ]
+    blocks: [
+        switch SwOff { default: off }
+        switch Output { default: off }
+    ]
+    streams: [
+        SwOff >> Output;
+    ]
+}
+
+module TestSwitchArrayUniform0 {
+    ports: [
+        mainOutputPort OutPort { block: Output }
+    ]
+    blocks: [
+        switch SwArr[3] { default: on }
+        switch Output { default: off }
+    ]
+    streams: [
+        SwArr[0] >> Output;
+    ]
+}
+
+module TestSwitchArrayUniform1 {
+    ports: [
+        mainOutputPort OutPort { block: Output }
+    ]
+    blocks: [
+        switch SwArr[3] { default: on }
+        switch Output { default: off }
+    ]
+    streams: [
+        SwArr[1] >> Output;
+    ]
+}
+
+module TestSwitchArrayUniform2 {
+    ports: [
+        mainOutputPort OutPort { block: Output }
+    ]
+    blocks: [
+        switch SwArr[3] { default: on }
+        switch Output { default: off }
+    ]
+    streams: [
+        SwArr[2] >> Output;
+    ]
+}
+
+module TestSwitchArrayList0 {
+    ports: [
+        mainOutputPort OutPort { block: Output }
+    ]
+    blocks: [
+        switch SwList[3] { default: [on, off, on] }
+        switch Output { default: off }
+    ]
+    streams: [
+        SwList[0] >> Output;
+    ]
+}
+
+module TestSwitchArrayList1 {
+    ports: [
+        mainOutputPort OutPort { block: Output }
+    ]
+    blocks: [
+        switch SwList[3] { default: [on, off, on] }
+        switch Output { default: off }
+    ]
+    streams: [
+        SwList[1] >> Output;
+    ]
+}
+
+module TestSwitchArrayList2 {
+    ports: [
+        mainOutputPort OutPort { block: Output }
+    ]
+    blocks: [
+        switch SwList[3] { default: [on, off, on] }
+        switch Output { default: off }
+    ]
+    streams: [
+        SwList[2] >> Output;
+    ]
+}
+
+TestSwitchScalar() >> OutScalarOn;
+TestSwitchScalarOff() >> OutScalarOff;
+TestSwitchArrayUniform0() >> OutArrayUniform0;
+TestSwitchArrayUniform1() >> OutArrayUniform1;
+TestSwitchArrayUniform2() >> OutArrayUniform2;
+TestSwitchArrayList0() >> OutArrayList0;
+TestSwitchArrayList1() >> OutArrayList1;
+TestSwitchArrayList2() >> OutArrayList2;

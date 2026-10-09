@@ -18,11 +18,11 @@
 
 // llvm
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
 #include "llvm/ExecutionEngine/Orc/Core.h"
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
 #include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
-#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/LLVMContext.h"
@@ -784,7 +784,8 @@ StrideEnvironment::getFunctionArgs(const std::string &funcName) const {
             blockDecl->getNodeType() == AST::BundleDeclaration) {
           // FIXME this should be calculated much earlier than here!
           auto bundle = blockDecl->getArrayIndex();
-          if (bundle && bundle->index() && !bundle->index()->getChildren().empty()) {
+          if (bundle && bundle->index() &&
+              !bundle->index()->getChildren().empty()) {
             auto firstIdx = bundle->index()->getChildren()[0];
             if (firstIdx->getNodeType() == AST::MemberAccess ||
                 firstIdx->getNodeType() == AST::PortProperty) {
@@ -1181,6 +1182,12 @@ bool StrideEnvironment::compileObjectToDisk(std::string path) {
     return false;
   }
 
+  // TargetTriple = "riscv32-unknown-elf";
+  // if (!generateCompiledObject(path, TargetTriple)) {
+  //   LOG_ERROR() << "Error creating object file" << std::endl;
+  //   return false;
+  // }
+
   return true;
 }
 
@@ -1200,10 +1207,9 @@ bool StrideEnvironment::generateCompiledObject(std::string path,
   }
   llvm::TargetOptions opt;
   auto RM = std::optional<llvm::Reloc::Model>();
-  auto TargetMachine = Target->createTargetMachine(
-      triple, CPU, Features, opt, RM,
-      llvm::CodeModel::Large, // 👈 Force Large Code Model here
-      llvm::CodeGenOptLevel::Default);
+  auto TargetMachine =
+      Target->createTargetMachine(triple, CPU, Features, opt, RM, std::nullopt,
+                                  llvm::CodeGenOptLevel::Default);
   mStrideEnv.TheModule->setDataLayout(TargetMachine->createDataLayout());
   mStrideEnv.TheModule->setTargetTriple(triple);
 
@@ -1334,11 +1340,11 @@ template bool StrideEnvironment::setStateVar<uint32_t>(void *,
                                                        const std::string &);
 
 bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
-                                      const std::string &targetTriple,
-                                      const std::string &cpu,
-                                      const std::string &features,
-                                      const std::string &relocModel,
-                                      const std::string &codeModel) {
+                                       const std::string &targetTriple,
+                                       const std::string &cpu,
+                                       const std::string &features,
+                                       const std::string &relocModel,
+                                       const std::string &codeModel) {
   llvm::InitializeAllTargetInfos();
   llvm::InitializeAllTargets();
   llvm::InitializeAllTargetMCs();
@@ -1390,9 +1396,9 @@ bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
     cm = llvm::CodeModel::Large;
   }
 
-  auto targetMachine = target->createTargetMachine(
-      theTriple, targetCPU, targetFeatures, opt, rm, cm,
-      llvm::CodeGenOptLevel::Default);
+  auto targetMachine =
+      target->createTargetMachine(theTriple, targetCPU, targetFeatures, opt, rm,
+                                  cm, llvm::CodeGenOptLevel::Default);
 
   if (!targetMachine) {
     LOG_ERROR() << "Could not create TargetMachine for triple " << tripleStr
@@ -1511,8 +1517,7 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
     auto initIt = mStrideEnv.FunctionProtos.find(initFunc);
     if (initIt != mStrideEnv.FunctionProtos.end()) {
       ss << "/**\n";
-      ss << " * @brief Initializes or resets the " << dom
-         << " domain state.\n";
+      ss << " * @brief Initializes or resets the " << dom << " domain state.\n";
       ss << " */\n";
 
       const auto &proto = initIt->second;
@@ -1679,4 +1684,3 @@ bool StrideEnvironment::emitCHeader(const std::string &outputPath,
   outFile.close();
   return true;
 }
-

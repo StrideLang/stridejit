@@ -150,6 +150,8 @@ target_link_libraries(StrideJit PUBLIC
   LLVMARMCodeGen
   LLVMWebAssemblyAsmParser
   LLVMWebAssemblyCodeGen
+  # LLVMRISCVAsmParser
+  # LLVMRISCVCodeGen
 )
 
 

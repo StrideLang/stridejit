@@ -314,6 +314,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
     if (!RType.has_value()) {
       RType = R->getType();
     }
+
     llvm::Value *Val{nullptr};
     std::optional<llvm::Type *> Type;
     switch (Op) {
@@ -468,25 +469,34 @@ std::pair<llvm::Value *, std::optional<llvm::Type *>>
 ResetExprAST::codegen(StrideCompiler &state) {
   llvm::Function *TheFunction = state.Builder->GetInsertBlock()->getParent();
   llvm::Value *V = Condition->codegen(state).first;
+  if (!V)
+    return {nullptr, std::nullopt};
+  if (V->getType()->isPointerTy()) {
+    V = state.Builder->CreateLoad(
+        llvm::Type::getInt1Ty(*state.TheContext), V, "cond");
+  }
+  if (V->getType()->isDoubleTy()) {
+    V = state.Builder->CreateFCmpONE(
+        V, llvm::ConstantFP::get(*state.TheContext, llvm::APFloat(0.0)),
+        "ifcond");
+  } else if (V->getType()->isIntegerTy() &&
+             !V->getType()->isIntegerTy(1)) {
+    V = state.Builder->CreateICmpNE(
+        V, llvm::ConstantInt::get(V->getType(), 0), "ifcond");
+  }
   llvm::BasicBlock *ThenBB =
       llvm::BasicBlock::Create(*state.TheContext, "then", TheFunction);
-  //  llvm::BasicBlock *ElseBB = llvm::BasicBlock::Create(*state.TheContext,
-  //  "else");
   llvm::BasicBlock *MergeBB =
       llvm::BasicBlock::Create(*state.TheContext, "ifcont", TheFunction);
 
   state.Builder->CreateCondBr(V, ThenBB, MergeBB);
   state.Builder->SetInsertPoint(ThenBB);
 
-  //  llvm::Value *ThenV = Then->codegen();
-  //  if (!ThenV)
-  //    return nullptr;
   for (auto &expr : Expressions) {
     expr->codegen(state);
   }
 
   state.Builder->CreateBr(MergeBB);
-  //  ThenBB = state.Builder->GetInsertBlock();
   state.Builder->SetInsertPoint(MergeBB);
 
   return {nullptr, std::nullopt};
