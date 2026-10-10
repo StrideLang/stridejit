@@ -3,7 +3,7 @@ project(stridejit)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(STRIDEJIT_BUILD_LLVM ON)
+option(STRIDEJIT_BUILD_LLVM "Build LLVM from source via FetchContent" OFF)
 
 message("Building StrideJit with LLVM")
 
@@ -76,12 +76,14 @@ else (STRIDEJIT_BUILD_LLVM)
 # Downloaded from: https://github.com/llvm/llvm-project/releases/tag/llvmorg-22.1.0
 
 
-set(LLVM_DIR "${CMAKE_BINARY_DIR}/_deps/llvm-project-build/lib/cmake/llvm")
+if(NOT LLVM_DIR)
+  set(LLVM_DIR "${CMAKE_BINARY_DIR}/_deps/llvm-project-build/lib/cmake/llvm")
+endif()
 # This is needed if you have moved the llvm build directory
 
 message("${LLVM_DIR}")
 
-  find_package(LLVM REQUIRED CONFIG
+  find_package(LLVM 14 REQUIRED CONFIG
     COMPONENTS
     Support
     Core
