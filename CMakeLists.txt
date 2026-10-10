@@ -83,15 +83,17 @@ endif()
 
 message("${LLVM_DIR}")
 
-  find_package(LLVM REQUIRED CONFIG
-    COMPONENTS
+  find_package(LLVM REQUIRED CONFIG)
+  separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
+  add_definitions(${LLVM_DEFINITIONS_LIST})
+  llvm_map_components_to_libnames(llvm_libs
     Support
     Core
     IRReader
     OrcJIT
-    NativeCodegen
-    Jitlink
-    AllTargetsInfos
+    ExecutionEngine
+    MIRParser
+    ${LLVM_TARGETS_TO_BUILD}
   )
 endif()
 
@@ -137,24 +139,26 @@ target_include_directories(StrideJit PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # Link against LLVM libraries -----------------------
 
 target_include_directories(StrideJit PUBLIC ${LLVM_INCLUDE_DIRS} ${LLVM_STRIDEJIT_INCLUDES})
-target_link_libraries(StrideJit PUBLIC
-  LLVMSupport
-  LLVMCore
-  LLVMIRReader
-  LLVMOrcJIT
-  LLVMExecutionEngine
-  LLVMMIRParser
-  LLVMAArch64AsmParser
-  LLVMAArch64CodeGen
-  LLVMX86AsmParser
-  LLVMX86CodeGen
-  LLVMARMAsmParser
-  LLVMARMCodeGen
-  LLVMWebAssemblyAsmParser
-  LLVMWebAssemblyCodeGen
-  # LLVMRISCVAsmParser
-  # LLVMRISCVCodeGen
-)
+if (STRIDEJIT_BUILD_LLVM)
+  target_link_libraries(StrideJit PUBLIC
+    LLVMSupport
+    LLVMCore
+    LLVMIRReader
+    LLVMOrcJIT
+    LLVMExecutionEngine
+    LLVMMIRParser
+    LLVMAArch64AsmParser
+    LLVMAArch64CodeGen
+    LLVMX86AsmParser
+    LLVMX86CodeGen
+    LLVMARMAsmParser
+    LLVMARMCodeGen
+    LLVMWebAssemblyAsmParser
+    LLVMWebAssemblyCodeGen
+  )
+else()
+  target_link_libraries(StrideJit PUBLIC ${llvm_libs})
+endif()
 
 
 # Testing module -----------------------------------
