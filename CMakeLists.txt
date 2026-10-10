@@ -83,7 +83,7 @@ endif()
 
 message("${LLVM_DIR}")
 
-  find_package(LLVM 14 REQUIRED CONFIG
+  find_package(LLVM REQUIRED CONFIG
     COMPONENTS
     Support
     Core
