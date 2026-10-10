@@ -75,7 +75,11 @@ void StrideEnvironment::initializeJIT() {
       m_dataLayout = (*TM)->createDataLayout();
       if (mStrideEnv.TheModule) {
         mStrideEnv.TheModule->setDataLayout(*m_dataLayout);
+#if LLVM_VERSION_MAJOR >= 20
         mStrideEnv.TheModule->setTargetTriple((*TM)->getTargetTriple());
+#else
+        mStrideEnv.TheModule->setTargetTriple((*TM)->getTargetTriple().str());
+#endif
       }
     }
   }
@@ -1329,7 +1333,11 @@ bool StrideEnvironment::generateCompiledObject(std::string path,
   auto Features = "";
   std::string Error;
   llvm::Triple triple(TargetTriple);
+#if LLVM_VERSION_MAJOR >= 20
   auto Target = llvm::TargetRegistry::lookupTarget(triple, Error);
+#else
+  auto Target = llvm::TargetRegistry::lookupTarget(triple.str(), Error);
+#endif
   // Print an error and exit if we couldn't find the requested target.
   // This generally occurs if we've forgotten to initialise the
   // TargetRegistry or we have a bogus target triple.
@@ -1339,11 +1347,19 @@ bool StrideEnvironment::generateCompiledObject(std::string path,
   }
   llvm::TargetOptions opt;
   auto RM = std::optional<llvm::Reloc::Model>();
+#if LLVM_VERSION_MAJOR >= 20
   auto TargetMachine =
       Target->createTargetMachine(triple, CPU, Features, opt, RM, std::nullopt,
                                   llvm::CodeGenOptLevel::Default);
   mStrideEnv.TheModule->setDataLayout(TargetMachine->createDataLayout());
   mStrideEnv.TheModule->setTargetTriple(triple);
+#else
+  auto TargetMachine =
+      Target->createTargetMachine(triple.str(), CPU, Features, opt, RM, std::nullopt,
+                                  llvm::CodeGenOptLevel::Default);
+  mStrideEnv.TheModule->setDataLayout(TargetMachine->createDataLayout());
+  mStrideEnv.TheModule->setTargetTriple(triple.str());
+#endif
 
   auto fspath = std::filesystem::path(path);
   fspath.append(TargetTriple + "/");
@@ -1491,8 +1507,13 @@ bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
   llvm::Triple theTriple(tripleStr);
 
   std::string error;
+#if LLVM_VERSION_MAJOR >= 20
   const llvm::Target *target =
       llvm::TargetRegistry::lookupTarget(theTriple, error);
+#else
+  const llvm::Target *target =
+      llvm::TargetRegistry::lookupTarget(theTriple.str(), error);
+#endif
   if (!target) {
     LOG_ERROR() << "Unable to lookup LLVM target for triple '" << tripleStr
                 << "': " << error << std::endl;
@@ -1531,9 +1552,15 @@ bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
     cm = llvm::CodeModel::Large;
   }
 
+#if LLVM_VERSION_MAJOR >= 20
   auto targetMachine =
       target->createTargetMachine(theTriple, targetCPU, targetFeatures, opt, rm,
                                   cm, llvm::CodeGenOptLevel::Default);
+#else
+  auto targetMachine =
+      target->createTargetMachine(theTriple.str(), targetCPU, targetFeatures, opt, rm,
+                                  cm, llvm::CodeGenOptLevel::Default);
+#endif
 
   if (!targetMachine) {
     LOG_ERROR() << "Could not create TargetMachine for triple " << tripleStr
@@ -1542,7 +1569,11 @@ bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
   }
 
   mStrideEnv.TheModule->setDataLayout(targetMachine->createDataLayout());
+#if LLVM_VERSION_MAJOR >= 20
   mStrideEnv.TheModule->setTargetTriple(theTriple);
+#else
+  mStrideEnv.TheModule->setTargetTriple(theTriple.str());
+#endif
 
   std::filesystem::path outPath(outputPath);
   if (outPath.has_parent_path()) {
