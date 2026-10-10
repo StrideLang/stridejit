@@ -1521,6 +1521,9 @@ bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
   }
 
   std::string targetCPU = cpu.empty() ? "generic" : cpu;
+  if (targetCPU == "x86_64") {
+    targetCPU = "x86-64";
+  }
   std::string targetFeatures = features;
 
   llvm::TargetOptions opt;

@@ -1,4 +1,16 @@
-import Passthru
+_domainDefinition Passthru {
+    framework: _JitFramework
+    rate: -1
+    inputs: [
+        signal In { domain: Passthru type: _RealType }
+    ]
+    outputs: [
+        signal Out { domain: Passthru type: _RealType }
+    ]
+    domainFunctionCode: ''
+}
+
+In >> Out;
 
 functionTest PassthruTest {
     function: "Passthru"
