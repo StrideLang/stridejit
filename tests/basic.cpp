@@ -1,4 +1,5 @@
 #include "gtest/gtest.h"
+#include <cmath>
 
 // stridejit
 #include "stride/stridejit/binaryexprast.hpp"
