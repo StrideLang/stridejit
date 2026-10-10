@@ -164,9 +164,16 @@ public:
   std::optional<int32_t> getStateId(const std::string &stateName,
                                     const std::string &smName = "",
                                     const std::string &domainName = "") const;
-  std::optional<int32_t> getTransitionId(const std::string &transitionName,
-                                         const std::string &smName = "",
-                                         const std::string &domainName = "") const;
+  std::optional<int32_t>
+  getTransitionId(const std::string &transitionName,
+                  const std::string &smName = "",
+                  const std::string &domainName = "",
+                  const std::string &stateName = "") const;
+  std::optional<int32_t>
+  getTransitionIdForState(const std::string &transitionName,
+                          const std::string &stateName,
+                          const std::string &smName = "",
+                          const std::string &domainName = "") const;
 
   const std::vector<StrideCompiler::StateMachineInfo> &
   getStateMachineInfos() const {
@@ -225,8 +232,9 @@ private:
   // Configuration
   std::string m_strideRoot;
   std::vector<std::string> m_includePaths;
+  std::vector<ASTNode> m_trees;
   bool m_optimizeCode{true};
-  bool m_verbose{true};
+  bool m_moduleOptimized{false};
 };
 
 template <typename T> T *StrideEnvironment::getGlobal(std::string varName) {

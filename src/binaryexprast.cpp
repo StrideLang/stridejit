@@ -60,10 +60,14 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       //     register
       // );
     }
-    Variable->print(llvm::outs());
-    llvm::outs() << " = ";
-    Val->print(llvm::outs());
-    llvm::outs() << "\n";
+    if (Logger::isDebugEnabled()) {
+      std::string s;
+      llvm::raw_string_ostream rso(s);
+      Variable->print(rso);
+      rso << " = ";
+      Val->print(rso);
+      LOG_DEBUG() << rso.str() << "\n";
+    }
     if (Val->getType()->isPointerTy()) {
       llvm::Type *Type;
       if (!TypePtr.has_value()) {
@@ -155,8 +159,12 @@ BinaryExprAST::codegen(StrideCompiler &state) {
           //          Variable = state.Builder->CreateLoad(
           //              Variable->getType()->getNonOpaquePointerElementType(),
           //              GEP, varExpr->getName());
-          Variable->print(llvm::outs());
-          llvm::outs() << "\n";
+          if (Logger::isDebugEnabled()) {
+            std::string s;
+            llvm::raw_string_ostream rso(s);
+            Variable->print(rso);
+            LOG_DEBUG() << rso.str() << "\n";
+          }
         } /*else {
   Variable = state.Builder->CreateLoad(
       Variable->getType()->getNonOpaquePointerElementType(), Val);
@@ -204,8 +212,12 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         state.NamedValues[LHSE->getName()] = {Val, Val->getType()};
       }
     }
-    Val->print(llvm::outs());
-    llvm::outs() << "\n";
+    if (Logger::isDebugEnabled()) {
+      std::string s;
+      llvm::raw_string_ostream rso(s);
+      Val->print(rso);
+      LOG_DEBUG() << rso.str() << "\n";
+    }
     return {Val, std::nullopt};
   } else {
 
@@ -213,10 +225,14 @@ BinaryExprAST::codegen(StrideCompiler &state) {
     auto [R, RType] = RHS->codegen(state);
     if (!L || !R)
       return {nullptr, std::nullopt};
-    L->print(llvm::outs());
-    llvm::outs() << " " << Op << " ";
-    R->print(llvm::outs());
-    llvm::outs() << "\n";
+    if (Logger::isDebugEnabled()) {
+      std::string s;
+      llvm::raw_string_ostream rso(s);
+      L->print(rso);
+      rso << " " << Op << " ";
+      R->print(rso);
+      LOG_DEBUG() << rso.str() << "\n";
+    }
     if (L->getType()->isPointerTy()) {
       if (!LType.has_value()) {
         return {nullptr, std::nullopt};
@@ -500,4 +516,21 @@ ResetExprAST::codegen(StrideCompiler &state) {
   state.Builder->SetInsertPoint(MergeBB);
 
   return {nullptr, std::nullopt};
+}
+
+bool BinaryExprAST::writesTo(const std::string &varName) const {
+  if (Op == '=') {
+    if (auto *varExpr = dynamic_cast<VariableExprAST *>(LHS.get())) {
+      return varExpr->getName() == varName;
+    }
+  }
+  return false;
+}
+
+bool ResetExprAST::writesTo(const std::string &varName) const {
+  for (const auto &expr : Expressions) {
+    if (expr->writesTo(varName))
+      return true;
+  }
+  return false;
 }

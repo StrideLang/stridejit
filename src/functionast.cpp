@@ -288,13 +288,19 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   // Transfer ownership of the prototype to the FunctionProtos map, but keep a
   // reference to it for use below.
   auto &P = *Proto;
-  llvm::Function *TheFunction = state.getFunctionInModule(P.getName());
+  std::string protoName = P.getName();
+  llvm::Function *TheFunction = state.getFunctionInModule(protoName);
   if (!TheFunction) {
     P.callType = callType;
     TheFunction = P.codegen(state);
-    TheFunction->print(llvm::outs());
-    llvm::outs() << "\n";
-    std::string protoName = Proto->getName();
+    if (Logger::isDebugEnabled() && TheFunction) {
+      std::string s;
+      llvm::raw_string_ostream rso(s);
+      TheFunction->print(rso);
+      LOG_DEBUG() << rso.str() << "\n";
+    }
+  }
+  if (Proto && state.FunctionProtos.find(protoName) == state.FunctionProtos.end()) {
     state.FunctionProtos[protoName] = std::move(Proto);
   }
   // If this is an operator, install it.
@@ -332,9 +338,9 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
 
       state.currentFunctionStateInfo = state.getStateStructInfo(funcInstance);
       if (state.currentFunctionStateInfo) {
-        std::cout << "DEBUG: currentFunctionStateInfo is valid!\n";
+        LOG_DEBUG() << "DEBUG: currentFunctionStateInfo is valid!\n";
       } else {
-        std::cout << "DEBUG: currentFunctionStateInfo is NULL!\n";
+        LOG_DEBUG() << "DEBUG: currentFunctionStateInfo is NULL!\n";
       }
 
       if (!state.currentFunctionStateInfo && state.m_tree) {
@@ -367,7 +373,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
               state.currentFunctionStateInfo->structType,
               state.currentFunctionStatePtr, idx, varName + "_ptr");
           state.NamedValues[varName] = {fieldPtr, elemTy};
-          std::cout << "DEBUG: Added " << varName << " to NamedValues!\n";
+          LOG_DEBUG() << "DEBUG: Added " << varName << " to NamedValues!\n";
         }
       }
     }
@@ -384,7 +390,8 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   // For loops
   std::map<std::string, llvm::Value *> OldVals;
   std::map<std::string, llvm::PHINode *> PHIVariables;
-  llvm::BasicBlock *LoopBB;
+  llvm::BasicBlock *LoopBB = nullptr;
+  llvm::BasicBlock *ReactionExitBB = nullptr;
   int64_t itStart = 0, itLimit = 0, itIncrement = 0;
   std::string itName;
 
@@ -394,11 +401,15 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
 
       llvm::BasicBlock *EntryBB = &TheFunction->getEntryBlock();
       state.Builder->SetInsertPoint(EntryBB);
-      EntryBB->print(llvm::outs());
       auto arg = TheFunction->getArg(TheFunction->arg_size() - 1);
-      arg->print(llvm::outs());
-      arg->getType()->print(llvm::outs());
-      llvm::outs() << "\n";
+      if (Logger::isDebugEnabled()) {
+        std::string s;
+        llvm::raw_string_ostream rso(s);
+        EntryBB->print(rso);
+        arg->print(rso);
+        arg->getType()->print(rso);
+        LOG_DEBUG() << rso.str() << "\n";
+      }
       int argCounter = 0;
       for (const auto &externalArg : P.getExternalArgs()) {
         //        auto alloca =
@@ -578,48 +589,64 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     allocateInternalVariables(state, TheFunction);
   }
 
+  if (callType != CallableType::Loop && !terminateWhenName.empty()) {
+    ReactionExitBB = llvm::BasicBlock::Create(
+        *state.TheContext, TheFunction->getName() + ".exit", TheFunction);
+  }
+
   // Generate the function body
   for (const auto &statement : Body) {
     if (!statement) {
       return nullptr;
     }
     auto [RetVal, retType] = statement->codegen(state);
-    //    if (!RetVal) {
-    //      // Error reading body, remove function.
-    //      TheFunction->eraseFromParent();
-    //      if (P.isBinaryOp())
-    //        state.BinopPrecedence.erase(P.getOperatorName());
-    //      return nullptr;
-    //    }
+
+    if (callType != CallableType::Loop && ReactionExitBB &&
+        !terminateWhenName.empty() && statement->writesTo(terminateWhenName)) {
+      if (!state.Builder->GetInsertBlock()->getTerminator()) {
+        llvm::Value *condVal = nullptr;
+        if (state.NamedValues.find(terminateWhenName) !=
+            state.NamedValues.end()) {
+          condVal = state.NamedValues[terminateWhenName].first;
+          if (condVal->getType()->isPointerTy()) {
+            auto elemType =
+                state.NamedValues[terminateWhenName].second.has_value()
+                    ? state.NamedValues[terminateWhenName].second.value()
+                    : llvm::Type::getInt1Ty(*state.TheContext);
+            condVal = state.Builder->CreateLoad(elemType, condVal, "term_cond");
+          }
+        } else if (state.globalExists(terminateWhenName)) {
+          auto global = state.getGlobal(terminateWhenName);
+          auto elemType = global.second.has_value()
+                              ? global.second.value()
+                              : llvm::Type::getInt1Ty(*state.TheContext);
+          condVal =
+              state.Builder->CreateLoad(elemType, global.first, "term_cond");
+        }
+        if (condVal) {
+          if (condVal->getType()->isIntegerTy() &&
+              !condVal->getType()->isIntegerTy(1)) {
+            condVal = state.Builder->CreateICmpNE(
+                condVal, llvm::ConstantInt::get(condVal->getType(), 0),
+                "term_bool");
+          } else if (condVal->getType()->isDoubleTy()) {
+            condVal = state.Builder->CreateFCmpONE(
+                condVal,
+                llvm::ConstantFP::get(*state.TheContext, llvm::APFloat(0.0)),
+                "term_bool");
+          }
+          llvm::BasicBlock *ContBB = llvm::BasicBlock::Create(
+              *state.TheContext, TheFunction->getName() + ".cont", TheFunction);
+          state.Builder->CreateCondBr(condVal, ReactionExitBB, ContBB);
+          state.Builder->SetInsertPoint(ContBB);
+        }
+      }
+    }
   }
 
   // Post Body
   if (callType == CallableType::Loop) {
-    //    // Emit the step value.
-    //    llvm::Value *StepVal = nullptr;
-    //    if (Step) {
-    //      StepVal = Step->codegen();
-    //      if (!StepVal)
-    //        return nullptr;
-    //    } else {
-    //      // If not specified, use 1.0.
-    //      StepVal = llvm::ConstantFP::get(*state.TheContext,
-    //      llvm::APFloat(1.0));
-    //    }
-
-    //    llvm::Value *NextVar = state.Builder->CreateFAdd(Variable, StepVal,
-    //    "nextvar");
-    // Compute the end condition.
     llvm::Value *EndCond = nullptr;
-    //    llvm::Value *EndCond = End->codegen();
-    //    if (!EndCond)
-    //      return nullptr;
-
-    // Convert condition to a bool by comparing non-equal to 0.0.
-    //        EndCond = Builder->CreateFCmpONE(
-    //            EndCond, llvm::ConstantFP::get(*TheContext,
-    //            llvm::APFloat(0.0)), "loopcond");
-
     if (terminateWhenName.size() > 0) {
       EndCond = state.NamedValues[terminateWhenName].first;
       if (EndCond->getType()->isPointerTy()) {
@@ -658,19 +685,27 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
       else
         state.NamedValues.erase(oldVal.first);
     }
-
-    // for expr always returns 0.0.
-    //    return
-    //    llvm::Constant::getNullValue(llvm::Type::getDoubleTy(*TheContext));
   }
+
+  if (ReactionExitBB) {
+    if (!state.Builder->GetInsertBlock()->getTerminator()) {
+      state.Builder->CreateBr(ReactionExitBB);
+    }
+    state.Builder->SetInsertPoint(ReactionExitBB);
+  }
+
   auto *outVal = llvm::ConstantInt::get(state.Builder->getInt32Ty(), 0, true);
   state.Builder->CreateRet(outVal);
   state.currentFunctionStatePtr = prevFunctionStatePtr;
   state.currentFunctionStateInfo = prevFunctionStateInfo;
   // Validate the generated code, checking for consistency.
   verifyFunction(*TheFunction);
-  TheFunction->print(llvm::outs());
-  llvm::outs() << "\n";
+  if (Logger::isDebugEnabled()) {
+    std::string s;
+    llvm::raw_string_ostream rso(s);
+    TheFunction->print(rso);
+    LOG_DEBUG() << rso.str() << "\n";
+  }
   return TheFunction;
 }
 
@@ -977,8 +1012,12 @@ void processArgGroup(
                         << std::endl;
             return;
           }
-          type.value()->print(llvm::outs());
-          llvm::outs() << "\n";
+          if (Logger::isDebugEnabled()) {
+            std::string s;
+            llvm::raw_string_ostream rso(s);
+            type.value()->print(rso);
+            LOG_DEBUG() << rso.str() << "\n";
+          }
           llvm::Type *gepElemType = type.value();
           if (gepElemType->isArrayTy()) {
             gepElemType = static_cast<llvm::ArrayType *>(gepElemType)->getElementType();
@@ -1109,9 +1148,13 @@ CallExprAST::codegen(StrideCompiler &state) {
       }
       CallArgs.resize(outArgCount);
       CallArgs.push_back({arrayAlloc, elemType});
-      llvm::outs() << "Bundled inputs into: ";
-      arrayAlloc->print(llvm::outs());
-      llvm::outs() << "\n";
+      if (Logger::isDebugEnabled()) {
+        std::string s;
+        llvm::raw_string_ostream rso(s);
+        rso << "Bundled inputs into: ";
+        arrayAlloc->print(rso);
+        LOG_DEBUG() << rso.str() << "\n";
+      }
     }
   } else if (callType == CallableType::External) {
     processArgGroup(state, InArgs, CalleeF, CallArgs);
@@ -1171,30 +1214,35 @@ CallExprAST::codegen(StrideCompiler &state) {
   if (callType == CallableType::Reaction || !ExternalArgs.empty()) {
     processArgGroup(state, ExternalArgs, CalleeF, CallArgs);
   }
-  llvm::outs().flush();
 
   for (unsigned i = 0, e = PortPropArgs.size(); i != e; ++i) {
     auto [value, type] = PortPropArgs[i]->codegen(state);
     CallArgs.push_back({std::move(value), type});
   }
 
-  LOG_INFO() << "Callee:\n";
-  CalleeF->print(llvm::outs());
-  llvm::outs() << "\n";
+  if (Logger::isDebugEnabled()) {
+    std::string s;
+    llvm::raw_string_ostream rso(s);
+    rso << "Callee:\n";
+    CalleeF->print(rso);
+    rso << "\nCall Arguments: ";
+    for (const auto &arg : CallArgs) {
+      arg.first->print(rso);
+      rso << "|, ";
+    }
+    LOG_DEBUG() << rso.str() << "\n";
+  }
   llvm::CallInst *call;
 
-  LOG_INFO() << "Call Arguments: ";
-  for (const auto &arg : CallArgs) {
-    arg.first->print(llvm::outs());
-    llvm::outs() << "|, ";
-  }
-  llvm::outs() << "\n";
-  llvm::outs().flush();
   if (callType == CallableType::Reaction && expectedInArgs == 0 &&
       !InArgs.empty()) {
     llvm::Value *CondV = InArgs[0]->codegen(state).first;
-    CondV->print(llvm::outs());
-    llvm::outs() << "\n";
+    if (Logger::isDebugEnabled()) {
+      std::string s;
+      llvm::raw_string_ostream rso(s);
+      CondV->print(rso);
+      LOG_DEBUG() << "CondV: " << rso.str() << "\n";
+    }
     if (CondV->getType()->isPointerTy()) {
       CondV = state.Builder->CreateLoad(
           llvm::Type::getInt1Ty(*state.TheContext), CondV, "cond");
@@ -1771,4 +1819,30 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
   }
 
   return {outval, outtype};
+}
+
+bool CallExprAST::writesTo(const std::string &varName) const {
+  for (const auto &out : OutArgs) {
+    if (auto *varExpr = dynamic_cast<VariableExprAST *>(out.get())) {
+      if (varExpr->getName() == varName)
+        return true;
+    }
+  }
+  for (const auto &ext : ExternalArgs) {
+    if (auto *varExpr = dynamic_cast<VariableExprAST *>(ext.get())) {
+      if (varExpr->getName() == varName)
+        return true;
+    }
+  }
+  return false;
+}
+
+bool LLVMCommandAST::writesTo(const std::string &varName) const {
+  for (const auto &out : OutArgs) {
+    if (auto *varExpr = dynamic_cast<VariableExprAST *>(out.get())) {
+      if (varExpr->getName() == varName)
+        return true;
+    }
+  }
+  return false;
 }

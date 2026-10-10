@@ -69,6 +69,7 @@ public:
   std::vector<llvm::Type *> getUsedArgsTypes() const;
   const std::vector<PrototypeArg> &getInArgs() const { return InArgs; }
   const std::vector<PrototypeArg> &getOutArgs() const { return OutArgs; }
+  const std::vector<PrototypeArg> &getPropertyArgs() const { return PropertyArgs; }
   std::vector<PrototypeArg> getExternalArgs() const;
   std::vector<PrototypeArg> getInternalArgs() const;
 
@@ -133,6 +134,8 @@ public:
   std::pair<llvm::Value *, std::optional<llvm::Type *>>
   codegen(StrideCompiler &state) override;
 
+  bool writesTo(const std::string &varName) const override;
+
   CallableType callType;
   bool calleeNeedsState{false};
   ASTNode funcInstance{nullptr};
@@ -164,6 +167,8 @@ public:
 
   std::pair<llvm::Value *, std::optional<llvm::Type *>>
   codegen(StrideCompiler &state) override;
+
+  bool writesTo(const std::string &varName) const override;
 
   std::string command;
   std::vector<std::unique_ptr<ExprAST>> InArgs;

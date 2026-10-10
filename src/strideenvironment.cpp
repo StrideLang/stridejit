@@ -184,6 +184,7 @@ bool StrideEnvironment::generateIr(const std::vector<std::string> &paths,
     }
 
     prepareTree(tree);
+    m_trees.push_back(tree);
 
     // Each file is compiled in its isolated scope into the shared LLVM Module
     ScopeStack globalScope;
@@ -216,7 +217,11 @@ bool StrideEnvironment::generateIr(const std::vector<std::string> &paths,
     }
   }
 
-  optimizeModule();
+  if (emitAllFunctions) {
+    optimizeModule();
+  } else {
+    m_moduleOptimized = false;
+  }
   return true;
 }
 
@@ -245,17 +250,20 @@ bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
   if (!ASTFunctions::preprocess(root, &globalScope)) {
     return false;
   }
+  m_trees.push_back(root);
   StrideGenerator::compile(root, globalScope, mStrideEnv);
 
   if (emitAllFunctions) {
     generateAllRootFunctions(root);
+    optimizeModule();
+  } else {
+    m_moduleOptimized = false;
   }
-
-  optimizeModule();
   return true;
 }
 
 void StrideEnvironment::optimizeModule() {
+  m_moduleOptimized = true;
   if (m_optimizeCode) {
 #if LLVM_VERSION_MAJOR >= 17
     // New Pass Manager
@@ -280,7 +288,7 @@ void StrideEnvironment::optimizeModule() {
     // Legacy Pass Manager
     std::unique_ptr<llvm::legacy::FunctionPassManager> TheFPM;
     TheFPM = std::make_unique<llvm::legacy::FunctionPassManager>(
-        state.TheModule.get());
+        mStrideEnv.TheModule.get());
 
     { // Potential for loop vectorization?
       // From:
@@ -312,14 +320,16 @@ void StrideEnvironment::optimizeModule() {
 
     TheFPM->doInitialization();
 
-    for (auto &F : *state.TheModule) {
+    for (auto &F : *mStrideEnv.TheModule) {
       TheFPM->run(F);
     }
 #endif
   }
-  if (m_verbose) {
-    mStrideEnv.TheModule->print(llvm::outs(), nullptr);
-    llvm::outs() << "\n";
+  if (Logger::isDebugEnabled() && mStrideEnv.TheModule) {
+    std::string s;
+    llvm::raw_string_ostream rso(s);
+    mStrideEnv.TheModule->print(rso, nullptr);
+    LOG_DEBUG() << rso.str() << "\n";
   }
 }
 
@@ -332,7 +342,7 @@ bool StrideEnvironment::generateStandaloneFunction(std::string funcName,
     return false;
   }
 
-  optimizeModule();
+  m_moduleOptimized = false;
   return true;
 }
 
@@ -789,18 +799,34 @@ StrideEnvironment::getStateId(const std::string &stateName,
 std::optional<int32_t>
 StrideEnvironment::getTransitionId(const std::string &transitionName,
                                    const std::string &smName,
-                                   const std::string &domainName) const {
+                                   const std::string &domainName,
+                                   const std::string &stateName) const {
   for (const auto &smInfo : mStrideEnv.stateMachineInfos) {
     if (!domainName.empty() && smInfo.domainName != domainName)
       continue;
     if (!smName.empty() && smInfo.smName != smName)
       continue;
+    if (!stateName.empty()) {
+      auto itState =
+          smInfo.transitionIdsByStateAndName.find({stateName, transitionName});
+      if (itState != smInfo.transitionIdsByStateAndName.end()) {
+        return itState->second;
+      }
+    }
     auto it = smInfo.transitionIdsByName.find(transitionName);
     if (it != smInfo.transitionIdsByName.end()) {
       return it->second;
     }
   }
   return std::nullopt;
+}
+
+std::optional<int32_t>
+StrideEnvironment::getTransitionIdForState(const std::string &transitionName,
+                                           const std::string &stateName,
+                                           const std::string &smName,
+                                           const std::string &domainName) const {
+  return getTransitionId(transitionName, smName, domainName, stateName);
 }
 
 static void fillTypeInfo(llvm::Type *ty, const llvm::DataLayout *DL,
@@ -1104,6 +1130,9 @@ int32_t StrideEnvironment::invoke(const std::string &funcName,
 }
 
 bool StrideEnvironment::compileInMemory() {
+  if (m_optimizeCode && !m_moduleOptimized) {
+    optimizeModule();
+  }
   initializeJIT();
 
   auto JTMB = llvm::orc::JITTargetMachineBuilder::detectHost();
@@ -1175,6 +1204,9 @@ bool StrideEnvironment::compileInMemory() {
 #include "llvm/TargetParser/Host.h"
 
 bool StrideEnvironment::compileObjectToDisk(std::string path) {
+  if (m_optimizeCode && !m_moduleOptimized) {
+    optimizeModule();
+  }
   auto fspath = std::filesystem::path(path);
   if (!std::filesystem::exists(fspath)) {
     std::filesystem::create_directories(fspath);
@@ -1445,6 +1477,9 @@ bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
                                        const std::string &features,
                                        const std::string &relocModel,
                                        const std::string &codeModel) {
+  if (m_optimizeCode && !m_moduleOptimized) {
+    optimizeModule();
+  }
   llvm::InitializeAllTargetInfos();
   llvm::InitializeAllTargets();
   llvm::InitializeAllTargetMCs();
@@ -1571,22 +1606,65 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
   std::vector<std::string> domains;
   if (!domainName.empty()) {
     domains.push_back(domainName);
-  } else if (mStrideEnv.m_tree) {
-    for (const auto &node : mStrideEnv.m_tree->getChildren()) {
-      if (node->getNodeType() == AST::Declaration) {
-        auto decl = std::static_pointer_cast<DeclarationNode>(node);
-        if (decl->getObjectType() == "_domainDefinition") {
-          domains.push_back(decl->getName());
+  } else {
+    for (const auto &t : m_trees) {
+      if (!t) continue;
+      for (const auto &node : t->getChildren()) {
+        if (node->getNodeType() == AST::Declaration) {
+          auto decl = std::static_pointer_cast<DeclarationNode>(node);
+          std::string objType = decl->getObjectType();
+          std::string entType = decl->getEntityType();
+          if (objType == "_domainDefinition" || entType == "_domainDefinition" ||
+              objType == "domain" || entType == "domain") {
+            if (std::find(domains.begin(), domains.end(), decl->getName()) ==
+                domains.end()) {
+              domains.push_back(decl->getName());
+            }
+          }
+        }
+      }
+    }
+    if (mStrideEnv.m_tree) {
+      for (const auto &node : mStrideEnv.m_tree->getChildren()) {
+        if (node->getNodeType() == AST::Declaration) {
+          auto decl = std::static_pointer_cast<DeclarationNode>(node);
+          std::string objType = decl->getObjectType();
+          std::string entType = decl->getEntityType();
+          if (objType == "_domainDefinition" || entType == "_domainDefinition" ||
+              objType == "domain" || entType == "domain") {
+            if (std::find(domains.begin(), domains.end(), decl->getName()) ==
+                domains.end()) {
+              domains.push_back(decl->getName());
+            }
+          }
         }
       }
     }
     // Fallback: search function protos for <domain>_process
-    if (domains.empty()) {
-      for (const auto &protoPair : mStrideEnv.FunctionProtos) {
-        const std::string &fname = protoPair.first;
+    for (const auto &protoPair : mStrideEnv.FunctionProtos) {
+      const std::string &fname = protoPair.first;
+      if (fname.find("_invoker") != std::string::npos)
+        continue;
+      size_t pos = fname.find("_process");
+      if (pos != std::string::npos) {
+        std::string dom = fname.substr(0, pos);
+        if (std::find(domains.begin(), domains.end(), dom) == domains.end()) {
+          domains.push_back(dom);
+        }
+      }
+    }
+    // Fallback 2: search LLVM Module for any <domain>_process
+    if (mStrideEnv.TheModule) {
+      for (const auto &F : mStrideEnv.TheModule->functions()) {
+        std::string fname = F.getName().str();
+        if (fname.find("_invoker") != std::string::npos || fname.rfind("llvm.", 0) == 0)
+          continue;
         size_t pos = fname.find("_process");
         if (pos != std::string::npos) {
-          domains.push_back(fname.substr(0, pos));
+          std::string dom = fname.substr(0, pos);
+          if (std::find(domains.begin(), domains.end(), dom) == domains.end()) {
+            domains.push_back(dom);
+          }
         }
       }
     }
@@ -1597,7 +1675,12 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
     std::string processFunc = dom + "_process";
 
     std::shared_ptr<DeclarationNode> domDecl;
-    if (mStrideEnv.m_tree) {
+    for (const auto &t : m_trees) {
+      if (!t) continue;
+      domDecl = ASTQuery::findDeclarationByName(dom, {}, t);
+      if (domDecl) break;
+    }
+    if (!domDecl && mStrideEnv.m_tree) {
       domDecl = ASTQuery::findDeclarationByName(dom, {}, mStrideEnv.m_tree);
     }
 
@@ -1615,6 +1698,7 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
 
     // 1. Emit init function prototype
     auto initIt = mStrideEnv.FunctionProtos.find(initFunc);
+    auto *initLlvm = mStrideEnv.TheModule ? mStrideEnv.TheModule->getFunction(initFunc) : nullptr;
     if (initIt != mStrideEnv.FunctionProtos.end()) {
       ss << "/**\n";
       ss << " * @brief Initializes or resets the " << dom << " domain state.\n";
@@ -1651,10 +1735,27 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
         }
         ss << ");\n\n";
       }
+    } else if (initLlvm) {
+      ss << "/**\n";
+      ss << " * @brief Initializes or resets the " << dom << " domain state.\n";
+      ss << " */\n";
+      if (initLlvm->arg_empty()) {
+        ss << "void " << initFunc << "(void);\n\n";
+      } else {
+        ss << "void " << initFunc << "(";
+        bool first = true;
+        for (const auto &arg : initLlvm->args()) {
+          if (!first) ss << ", ";
+          first = false;
+          ss << "void* " << arg.getName().str();
+        }
+        ss << ");\n\n";
+      }
     }
 
     // 2. Emit process function prototype
     auto procIt = mStrideEnv.FunctionProtos.find(processFunc);
+    auto *procLlvm = mStrideEnv.TheModule ? mStrideEnv.TheModule->getFunction(processFunc) : nullptr;
     if (procIt != mStrideEnv.FunctionProtos.end()) {
       const auto &proto = procIt->second;
       auto extArgs = proto->getExternalArgs();
@@ -1699,6 +1800,35 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
         }
       }
       ss << ");\n\n";
+    } else if (procLlvm) {
+      ss << "/**\n";
+      ss << " * @brief Executes one step of the " << dom << " domain.\n";
+      for (const auto &arg : procLlvm->args()) {
+        std::string argName = arg.getName().str();
+        bool isOut = (outputNames.count(argName) > 0);
+        ss << " * @param[" << (isOut ? "out" : "in") << "] " << argName << "\n";
+      }
+      ss << " */\n";
+
+      ss << "void " << processFunc << "(";
+      if (procLlvm->arg_empty()) {
+        ss << "void";
+      } else {
+        bool first = true;
+        for (const auto &arg : procLlvm->args()) {
+          if (!first) ss << ", ";
+          first = false;
+          std::string argName = arg.getName().str();
+          bool isOut = (outputNames.count(argName) > 0);
+          std::string typeName = "double";
+          if (isOut) {
+            ss << typeName << "* " << argName;
+          } else {
+            ss << "const " << typeName << "* " << argName;
+          }
+        }
+      }
+      ss << ");\n\n";
     }
   }
 
@@ -1716,23 +1846,6 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
     ss << " */\n";
     ss << "void " << fname << "(";
     bool first = true;
-    for (const auto &arg : proto->getInArgs()) {
-      if (!first)
-        ss << ", ";
-      first = false;
-      std::string typeName = "double";
-      if (arg.llvmType) {
-        if (arg.llvmType->isIntegerTy(1))
-          typeName = "bool";
-        else if (arg.llvmType->isIntegerTy(32))
-          typeName = "int32_t";
-        else if (arg.llvmType->isIntegerTy(64))
-          typeName = "int64_t";
-        else if (arg.llvmType->isFloatTy())
-          typeName = "float";
-      }
-      ss << "const " << typeName << "* " << arg.name;
-    }
     for (const auto &arg : proto->getOutArgs()) {
       if (!first)
         ss << ", ";
@@ -1747,8 +1860,92 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
           typeName = "int64_t";
         else if (arg.llvmType->isFloatTy())
           typeName = "float";
+        else if (arg.llvmType->isDoubleTy())
+          typeName = "double";
       }
       ss << typeName << "* " << arg.name;
+    }
+    for (const auto &arg : proto->getInArgs()) {
+      if (!first)
+        ss << ", ";
+      first = false;
+      std::string typeName = "double";
+      if (arg.llvmType) {
+        if (arg.llvmType->isIntegerTy(1))
+          typeName = "bool";
+        else if (arg.llvmType->isIntegerTy(32))
+          typeName = "int32_t";
+        else if (arg.llvmType->isIntegerTy(64))
+          typeName = "int64_t";
+        else if (arg.llvmType->isFloatTy())
+          typeName = "float";
+        else if (arg.llvmType->isDoubleTy())
+          typeName = "double";
+      }
+      ss << "const " << typeName << "* " << arg.name;
+    }
+    for (const auto &arg : proto->getPropertyArgs()) {
+      if (!first)
+        ss << ", ";
+      first = false;
+      std::string typeName = "double";
+      if (arg.llvmType) {
+        if (arg.llvmType->isIntegerTy(1))
+          typeName = "bool";
+        else if (arg.llvmType->isIntegerTy(32))
+          typeName = "int32_t";
+        else if (arg.llvmType->isIntegerTy(64))
+          typeName = "int64_t";
+        else if (arg.llvmType->isFloatTy())
+          typeName = "float";
+        else if (arg.llvmType->isDoubleTy())
+          typeName = "double";
+      }
+      ss << "const " << typeName << "* " << arg.name;
+    }
+    for (const auto &arg : proto->getInternalArgs()) {
+      if (!first)
+        ss << ", ";
+      first = false;
+      ss << "void* " << arg.name;
+    }
+    for (const auto &arg : proto->getExternalArgs()) {
+      if (!first)
+        ss << ", ";
+      first = false;
+      std::string typeName = "double";
+      if (arg.llvmType) {
+        if (arg.llvmType->isIntegerTy(1))
+          typeName = "bool";
+        else if (arg.llvmType->isIntegerTy(32))
+          typeName = "int32_t";
+        else if (arg.llvmType->isIntegerTy(64))
+          typeName = "int64_t";
+        else if (arg.llvmType->isFloatTy())
+          typeName = "float";
+        else if (arg.llvmType->isDoubleTy())
+          typeName = "double";
+      }
+      ss << typeName << "* " << arg.name;
+    }
+    for (const auto &arg : proto->getUsedPortProperties()) {
+      if (!first)
+        ss << ", ";
+      first = false;
+      std::string typeName = "double";
+      if (arg.llvmType) {
+        if (arg.llvmType->isIntegerTy(1))
+          typeName = "bool";
+        else if (arg.llvmType->isIntegerTy(32))
+          typeName = "int32_t";
+        else if (arg.llvmType->isIntegerTy(64))
+          typeName = "int64_t";
+        else if (arg.llvmType->isFloatTy())
+          typeName = "float";
+        else if (arg.llvmType->isDoubleTy())
+          typeName = "double";
+      }
+      ss << typeName << " " << arg.name;
     }
     if (first) {
       ss << "void";

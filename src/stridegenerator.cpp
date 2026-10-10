@@ -47,7 +47,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
     // Find domain and insert inputs and output to tree.
     auto domainDecl = ASTQuery::findDeclarationByName(domainName, scope, tree);
     if (domainDecl) {
-      LOG_INFO() << " Found domain declaration for " << domainName << std::endl;
+      LOG_DEBUG() << " Found domain declaration for " << domainName << std::endl;
       auto smContexts =
           StateMachine::collectStateMachines(domainDecl, scope, tree);
 
@@ -56,6 +56,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
         smInfo.domainName = domainName;
         smInfo.smName = smCtx.name;
         for (const auto &fs : smCtx.flattenedStates) {
+          std::string stateName = fs.stateDecl ? fs.stateDecl->getName() : "";
           if (fs.stateDecl) {
             smInfo.stateIdsByName[fs.stateDecl->getName()] = fs.id;
           }
@@ -63,6 +64,11 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
             if (t.transitionDecl) {
               if (!t.transitionDecl->getName().empty()) {
                 smInfo.transitionIdsByName[t.transitionDecl->getName()] = t.id;
+                if (!stateName.empty()) {
+                  smInfo.transitionIdsByStateAndName[{stateName,
+                                                      t.transitionDecl->getName()}] =
+                      t.id;
+                }
               }
               auto labelProp = t.transitionDecl->getPropertyValue("label");
               if (labelProp && labelProp->getNodeType() == AST::String) {
@@ -71,6 +77,10 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
                         ->getStringValue();
                 if (!labelStr.empty()) {
                   smInfo.transitionIdsByName[labelStr] = t.id;
+                  if (!stateName.empty()) {
+                    smInfo.transitionIdsByStateAndName[{stateName, labelStr}] =
+                        t.id;
+                  }
                 }
               }
             }
@@ -1464,7 +1474,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               std::vector<llvm::Type *>{}, state.getName());
           newExternCall->callType = CallableType::External;
           generated[domainName].expr.push_back(std::move(newExternCall));
-          LOG_INFO() << "Using external function:" << externFunc->name
+          LOG_DEBUG() << "Using external function:" << externFunc->name
                      << std::endl;
         } else {
           auto newCall = std::make_unique<LLVMCommandAST>(
@@ -1569,7 +1579,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
             }
             if (funcDecl->getEntityType() == "module" ||
                 funcDecl->getObjectType() == "module") {
-              LOG_INFO() << "Module instance:" << std::endl;
+              LOG_DEBUG() << "Module instance:" << std::endl;
               for (const auto &blockNode : blocks) {
                 if (blockNode->getNodeType() == AST::Declaration ||
                     blockNode->getNodeType() == AST::ArrayDeclaration ||
@@ -1826,7 +1836,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
 
   llvm::Function *TheFunction = state.getFunctionInModule(funcName);
   if (TheFunction) {
-    LOG_INFO() << " Function already defined: " << funcName << std::endl;
+    LOG_DEBUG() << " Function already defined: " << funcName << std::endl;
     return nullptr;
   }
 
@@ -2022,19 +2032,23 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
   } else if (funcDecl->getEntityType() == "loop" ||
              funcDecl->getObjectType() == "loop") {
     newfunc->callType = CallableType::Loop;
-    auto terminateWhenNode = funcDecl->getPropertyValue("terminateWhen");
-    if (terminateWhenNode) {
-      if (terminateWhenNode->getNodeType() == AST::Entity ||
-          terminateWhenNode->getNodeType() == AST::Block) {
-        newfunc->terminateWhenName =
-            std::static_pointer_cast<EntityNode>(terminateWhenNode)->getName();
-      }
-    }
   } else if (funcDecl->getEntityType() == "platformModule" ||
              funcDecl->getObjectType() == "platformModule") {
     newfunc->callType = CallableType::External;
   } else {
     LOG_ERROR() << "Callable type unsuported" << std::endl;
+  }
+
+  auto terminateWhenNode = funcDecl->getPropertyValue("terminateWhen");
+  if (terminateWhenNode) {
+    if (terminateWhenNode->getNodeType() == AST::Entity ||
+        terminateWhenNode->getNodeType() == AST::Block) {
+      newfunc->terminateWhenName =
+          std::static_pointer_cast<EntityNode>(terminateWhenNode)->getName();
+    } else if (terminateWhenNode->getNodeType() == AST::String) {
+      newfunc->terminateWhenName =
+          std::static_pointer_cast<ValueNode>(terminateWhenNode)->getStringValue();
+    }
   }
   return newfunc;
 }
@@ -2100,7 +2114,7 @@ void StrideGenerator::generatePlatformFunctionSignature(
       atName =
           "@" + std::static_pointer_cast<ValueNode>(atNode)->getStringValue();
     }
-    LOG_INFO() << "Loaded platform module: " << decl->getName() << atName
+    LOG_DEBUG() << "Loaded platform module: " << decl->getName() << atName
                << std::endl;
   }
 }

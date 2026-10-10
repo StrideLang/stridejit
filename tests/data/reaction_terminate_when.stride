@@ -1,0 +1,24 @@
+_domainDefinition TestDomain {
+    framework: _JitFramework
+    rate: -1
+    inputs: []
+    outputs: [
+        signal Out { domain: TestDomain type: _IntType }
+        switch Done { domain: TestDomain default: off }
+    ]
+    domainFunctionCode: ''
+}
+
+reaction ReactionTerminateWhen {
+    terminateWhen: Done
+    streams: [
+        1 >> Out;
+        off >> Done;
+        2 >> Out;
+        on >> Done;
+        3 >> Out;
+    ]
+    domain: TestDomain
+}
+
+on >> ReactionTerminateWhen();

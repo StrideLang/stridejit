@@ -25,6 +25,8 @@ public:
   virtual std::pair<llvm::Value *, std::optional<llvm::Type *>>
   codegen(StrideCompiler &state) = 0;
 
+  virtual bool writesTo(const std::string &varName) const { return false; }
+
   std::string typecast;
 };
 } // namespace strd

@@ -165,6 +165,8 @@ public:
     std::string smName;
     std::map<std::string, int32_t> stateIdsByName;
     std::map<std::string, int32_t> transitionIdsByName;
+    std::map<std::pair<std::string, std::string>, int32_t>
+        transitionIdsByStateAndName;
   };
   std::vector<StateMachineInfo> stateMachineInfos;
 

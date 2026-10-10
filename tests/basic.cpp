@@ -633,6 +633,31 @@ TEST(JIT, ReactionCondition) {
   EXPECT_EQ(Out, 3);
 }
 
+TEST(JIT, ReactionTerminateWhen) {
+  strd::StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                               "reaction_terminate_when.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  auto statePtr = strenv.allocateSharedState("TestDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+
+  strenv.invoke("TestDomain_process", args);
+  auto Out = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                        "TestDomain")
+                 .value_or(0);
+  EXPECT_EQ(Out, 2);
+
+  auto Done = strenv.getStateVar<bool>(statePtr.get(), "Done", std::nullopt,
+                                       "TestDomain")
+                  .value_or(false);
+  EXPECT_TRUE(Done);
+}
+
 TEST(JIT, Reset) {
 
   strd::StrideEnvironment strenv;
@@ -998,6 +1023,49 @@ TEST(JIT, FunctionStandaloneReactionSimple) {
   auto *Entry = EntrySym->toPtr<void (*)(...)>();
   Entry(&out);
   EXPECT_FLOAT_EQ(out, 4.0);
+}
+
+TEST(JIT, FunctionStandaloneReactionTerminateWhen) {
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                              "reaction_terminate_when.stride");
+  EXPECT_NE(tree, nullptr);
+
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+  strenv.mStrideEnv.m_intanceTree =
+      strd::CodeAnalysis::getStateStructInformation({}, tree);
+
+  strd::ScopeStack scope;
+  auto funcDecl = strd::ASTQuery::findDeclarationByName(
+      "ReactionTerminateWhen", scope, tree);
+  EXPECT_NE(funcDecl, nullptr);
+
+  auto func = strd::StrideGenerator::createFunctionDeclaration(
+      funcDecl, nullptr, tree, &scope, strenv.mStrideEnv);
+  EXPECT_NE(func, nullptr);
+
+  auto *v = func->codegen(strenv.mStrideEnv);
+  EXPECT_NE(v, nullptr);
+
+  auto *llvmFunc = llvm::dyn_cast<llvm::Function>(v);
+  EXPECT_NE(llvmFunc, nullptr);
+  EXPECT_FALSE(llvmFunc->isDeclaration());
+
+  auto ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("ReactionTerminateWhen");
+  EXPECT_TRUE(static_cast<bool>(EntrySym));
+
+  int32_t out = 0;
+  bool done = false;
+
+  auto *Entry = EntrySym->toPtr<void (*)(int32_t*, bool*)>();
+  Entry(&out, &done);
+  EXPECT_EQ(out, 2);
+  EXPECT_TRUE(done);
 }
 
 TEST(JIT, FunctionStandaloneLoopSimple) {

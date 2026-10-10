@@ -91,6 +91,8 @@ public:
 
   std::pair<llvm::Value *, std::optional<llvm::Type *>>
   codegen(StrideCompiler &state) override;
+
+  bool writesTo(const std::string &varName) const override;
 };
 } // namespace strd
 
