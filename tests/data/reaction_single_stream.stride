@@ -1,0 +1,21 @@
+_domainDefinition TestDomain {
+    framework: _JitFramework
+    rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+    ]
+    outputs: [
+        signal Out { domain: TestDomain type: _RealType}
+    ]
+    domainFunctionCode: ''
+}
+
+reaction Reaction { 
+    streams: [
+        Out + 3.0 >> Out;
+    ]
+    domain: TestDomain
+}
+
+Reaction();

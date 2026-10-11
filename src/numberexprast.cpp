@@ -45,6 +45,7 @@ IntExprAST::codegen(StrideCompiler &state) {
   return {nullptr, nullptr};
 }
 
+
 std::vector<std::variant<size_t, std::string>>
 VariableExprAST::getIndeces() const {
   return Indeces;

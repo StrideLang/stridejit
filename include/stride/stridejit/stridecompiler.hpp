@@ -12,6 +12,8 @@
 #include "stride/parser/declarationnode.h"
 #include "stride/parser/functionnode.h"
 #include "stride/stridejit/functionast.hpp"
+#include "stride/utils/logger.h"
+#include "llvm/Support/raw_ostream.h"
 
 // #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/IRBuilder.h"
@@ -105,13 +107,39 @@ public:
   std::string getName();
 
   std::unique_ptr<ExprAST> LogError(const char *Str) {
-    fprintf(stderr, "Error: %s\n", Str);
+    LOG_ERROR() << "Error: " << Str << std::endl;
     return nullptr;
   }
 
   llvm::Value *LogErrorV(const char *Str) {
     LogError(Str);
     return nullptr;
+  }
+
+  template <typename T>
+  static void dumpLLVM(const T *val, const std::string &prefix = "") {
+    if (Logger::isDebugEnabled() && val) {
+      std::string s;
+      llvm::raw_string_ostream rso(s);
+      if (!prefix.empty()) {
+        rso << prefix;
+      }
+      val->print(rso);
+      LOG_DEBUG() << rso.str() << "\n";
+    }
+  }
+
+  template <typename T>
+  static void dumpLLVM(const T &val, const std::string &prefix = "") {
+    if (Logger::isDebugEnabled()) {
+      std::string s;
+      llvm::raw_string_ostream rso(s);
+      if (!prefix.empty()) {
+        rso << prefix;
+      }
+      val.print(rso);
+      LOG_DEBUG() << rso.str() << "\n";
+    }
   }
 
   void setConfiguration(StrideConfig option, bool enable = true);

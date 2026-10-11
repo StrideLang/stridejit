@@ -121,6 +121,9 @@ llvm::AllocaInst *
 StrideCompiler::CreateEntryBlockAlloca(llvm::Function *TheFunction,
                                        llvm::StringRef VarName,
                                        llvm::Type *dataType) {
+  if (!dataType || dataType->isVoidTy()) {
+    dataType = llvm::Type::getDoubleTy(*TheContext);
+  }
   llvm::IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
                          TheFunction->getEntryBlock().begin());
   auto *Alloca = TmpB.CreateAlloca(dataType, nullptr, VarName);
@@ -132,13 +135,14 @@ llvm::AllocaInst *
 StrideCompiler::CreateEntryBlockAllocaArray(llvm::Function *TheFunction,
                                             llvm::StringRef VarName,
                                             llvm::Type *dataType, size_t size) {
-
+  if (!dataType || dataType->isVoidTy()) {
+    dataType = llvm::Type::getDoubleTy(*TheContext);
+  }
   llvm::ArrayType *arrayTy = llvm::ArrayType::get(dataType, size);
   llvm::IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
                          TheFunction->getEntryBlock().begin());
 
   llvm::AllocaInst *arrayPtr = TmpB.CreateAlloca(arrayTy, nullptr, VarName);
-  // auto *Alloca = TmpB.CreateAlloca(dataType, nullptr, VarName);
   pointerElementTypes[arrayPtr] = dataType;
   return arrayPtr;
 }
@@ -146,13 +150,14 @@ StrideCompiler::CreateEntryBlockAllocaArray(llvm::Function *TheFunction,
 llvm::AllocaInst *StrideCompiler::CreateEntryBlockAllocaArrayConst(
     llvm::Function *TheFunction, llvm::StringRef VarName, llvm::Type *dataType,
     size_t size) {
-
+  if (!dataType || dataType->isVoidTy()) {
+    dataType = llvm::Type::getDoubleTy(*TheContext);
+  }
   llvm::ArrayType *arrayTy = llvm::ArrayType::get(dataType, size);
   llvm::IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
                          TheFunction->getEntryBlock().begin());
 
   llvm::AllocaInst *arrayPtr = TmpB.CreateAlloca(arrayTy, nullptr, VarName);
-  // auto *Alloca = TmpB.CreateAlloca(dataType, nullptr, VarName);
   pointerElementTypes[arrayPtr] = dataType;
   return arrayPtr;
 }
@@ -258,7 +263,11 @@ StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl) {
   if (decl->getEntityType() == "reaction" || decl->getObjectType() == "reaction") {
     return typesMap["_SwitchType"];
   }
-  return typesMap[type];
+  if (!type.empty() && typesMap.find(type) != typesMap.end() &&
+      !typesMap[type]->isVoidTy()) {
+    return typesMap[type];
+  }
+  return typesMap["_RealType"];
 }
 
 llvm::Type *StrideCompiler::getLLVMTypeForCodegenBlock(
@@ -312,7 +321,11 @@ llvm::Type *StrideCompiler::getLLVMTypeForCodegenBlock(
   if (decl->getEntityType() == "reaction" || decl->getObjectType() == "reaction") {
     return typesMap["_SwitchType"];
   }
-  return typesMap[type];
+  if (!type.empty() && typesMap.find(type) != typesMap.end() &&
+      !typesMap[type]->isVoidTy()) {
+    return typesMap[type];
+  }
+  return typesMap["_RealType"];
 }
 
 void StrideCompiler::pushName(std::string name) {
@@ -486,15 +499,17 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
     for (const auto &var : nodeTree.persistent) {
       std::string varName = ASTQuery::getNodeName(var.first);
       llvm::Type *varType = nullptr;
-      if (typesMap.find(var.second) != typesMap.end()) {
+      if (!var.second.empty() && typesMap.find(var.second) != typesMap.end() &&
+          !typesMap[var.second]->isVoidTy()) {
         varType = typesMap[var.second];
-      } else if (var.first->getNodeType() == AST::Declaration ||
-                 var.first->getNodeType() == AST::ArrayDeclaration ||
-                 var.first->getNodeType() == AST::BundleDeclaration) {
+      } else if (var.first &&
+                 (var.first->getNodeType() == AST::Declaration ||
+                  var.first->getNodeType() == AST::ArrayDeclaration ||
+                  var.first->getNodeType() == AST::BundleDeclaration)) {
         varType = getLLVMType(
             std::static_pointer_cast<DeclarationNode>(var.first));
       }
-      if (!varType) {
+      if (!varType || varType->isVoidTy()) {
         varType = llvm::Type::getDoubleTy(*TheContext);
       }
       info.varIndices[varName] = static_cast<unsigned>(fieldTypes.size());

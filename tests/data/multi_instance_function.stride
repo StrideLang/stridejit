@@ -1,0 +1,58 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+        switch InA[3] { domain: RootDomain default: off }
+        switch InB[3] { domain: RootDomain default: off }
+        switch InScalar { domain: RootDomain default: off }
+        switch InE1 { domain: RootDomain default: off }
+        switch InE2 { domain: RootDomain default: off }
+        switch InE3 { domain: RootDomain default: off }
+        switch InE4 { domain: RootDomain default: off }
+        switch InE5 { domain: RootDomain default: off }
+        switch InE6 { domain: RootDomain default: off }
+    ]
+    outputs: [
+        switch OutAndBundle[3] { domain: RootDomain default: off }
+        switch OutOrScalarBroadcast[3] { domain: RootDomain default: off }
+        switch OutNotBundle[3] { domain: RootDomain default: off }
+        signal OutLiteralAdd[3] { domain: RootDomain default: 0 type: _IntType }
+        signal OutLiteralBroadcast[3] { domain: RootDomain default: 0 type: _IntType }
+        switch OutE1 { domain: RootDomain default: off }
+        switch OutE2 { domain: RootDomain default: off }
+        switch OutE3 { domain: RootDomain default: off }
+        switch OutEScalar1 { domain: RootDomain default: off }
+        switch OutEScalar2 { domain: RootDomain default: off }
+        switch OutEScalar3 { domain: RootDomain default: off }
+    ]
+	domainFunctionCode: ''
+}
+
+module Add {
+    ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
+    blocks: [ signal Input[2] { type: _IntType domain: OutputPort.domain } signal Output { type: _IntType domain: OutputPort.domain } ]
+    streams: [ Input[0] + Input[1] >> Output; ]
+}
+
+# 1. Bundle to Bundle
+[ InA[0:2], InB[0:2] ] >> And[]() >> OutAndBundle[0:2];
+
+# 2. Bundle with Scalar Broadcast
+[ InA[0:2], InScalar ] >> Or[]() >> OutOrScalarBroadcast[0:2];
+
+# 3. Unary Bundle Function
+InA[0:2] >> Not[]() >> OutNotBundle[0:2];
+
+# 4. List of Literals
+[ [10, 20, 30], [1, 2, 3] ] >> Add[]() >> OutLiteralAdd[0:2];
+
+# 5. List of Literals with Scalar Broadcast
+[ [10, 20, 30], 5 ] >> Add[]() >> OutLiteralBroadcast[0:2];
+
+# 6. List of Entities
+[ [InE1, InE2, InE3], [InE4, InE5, InE6] ] >> And[]() >> [ OutE1, OutE2, OutE3 ];
+
+# 7. List of Entities with Scalar Broadcast
+[ [InE1, InE2, InE3], InScalar ] >> Or[]() >> [ OutEScalar1, OutEScalar2, OutEScalar3 ];

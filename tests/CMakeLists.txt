@@ -28,6 +28,7 @@ if (STRIDEJIT_BUILD_TESTS)
       nested_function_tests.cpp
       statemachine_tests.cpp
       logical_comparisons_tests.cpp
+      multi_instance_function_tests.cpp
       function_test_runner_tests.cpp
       # error_tests.cpp
     )

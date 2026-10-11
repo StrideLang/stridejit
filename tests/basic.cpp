@@ -587,6 +587,24 @@ TEST(JIT, Reaction) {
   EXPECT_EQ(Out, 3);
 }
 
+TEST(JIT, ReactionSingleStream) {
+
+  strd::StrideEnvironment strenv;
+
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "reaction_single_stream.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  auto statePtr = strenv.allocateSharedState("TestDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+
+  strenv.invoke("TestDomain_process", args);
+  auto Out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "TestDomain").value_or(0.0);
+  EXPECT_EQ(Out, 3);
+}
+
 TEST(JIT, IntegerType) {
   // Depends on external function and reactions
 

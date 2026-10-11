@@ -1067,18 +1067,25 @@ void StrideGenerator::collectInputArgs(
       auto *v = dynamic_cast<ListExprAST *>(exprs.back().get());
       auto listNodes = prevList->getChildren();
       auto nodeIt = listNodes.begin();
-      if (v->getType() == ListExprAST::Type::MUTABLE_CONSISTENT) {
+      if (v->getType() == ListExprAST::Type::MUTABLE_CONSISTENT ||
+          v->getType() == ListExprAST::Type::IMMUTABLE_CONSISTENT) {
         for (auto elemExpr = v->elements().begin();
              elemExpr != v->elements().end(); elemExpr++) {
           args.MainIn.args.emplace_back(std::move(*elemExpr));
+          ASTNode currentChildNode = (nodeIt != listNodes.end()) ? *nodeIt : nullptr;
+          if (nodeIt != listNodes.end()) {
+            nodeIt++;
+          }
           std::string typeStr;
-          auto typecastNode = (*nodeIt)->getCompilerProperty("typecast");
-          if (typecastNode && typecastNode->getNodeType() == AST::String) {
-            typeStr = std::static_pointer_cast<ValueNode>(typecastNode)
-                          ->getStringValue();
-          } else {
-            typeStr =
-                CodeAnalysis::resolveNodeOutDataType(*nodeIt, scope, tree);
+          if (currentChildNode) {
+            auto typecastNode = currentChildNode->getCompilerProperty("typecast");
+            if (typecastNode && typecastNode->getNodeType() == AST::String) {
+              typeStr = std::static_pointer_cast<ValueNode>(typecastNode)
+                            ->getStringValue();
+            } else {
+              typeStr =
+                  CodeAnalysis::resolveNodeOutDataType(currentChildNode, scope, tree);
+            }
           }
           if (!typeStr.empty()) {
             if (typeStr == "_IntType") {
@@ -1091,23 +1098,23 @@ void StrideGenerator::collectInputArgs(
               args.MainIn.argTypes.push_back(
                   llvm::Type::getDoubleTy(*state.TheContext));
             }
-          } else {
+          } else if (currentChildNode) {
             auto elemDecl = ASTQuery::findDeclarationByName(
-                ASTQuery::getNodeName(*nodeIt), scope, tree);
+                ASTQuery::getNodeName(currentChildNode), scope, tree);
 
             if (elemDecl) {
               args.MainIn.argTypes.push_back(
                   state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
-            } else if ((*nodeIt)->getNodeType() == AST::Int) {
+            } else if (currentChildNode->getNodeType() == AST::Int) {
               // TODO get types from framework
               args.MainIn.argTypes.push_back(
                   llvm::Type::getInt32Ty(*state.TheContext));
-            } else if ((*nodeIt)->getNodeType() == AST::Real) {
+            } else if (currentChildNode->getNodeType() == AST::Real) {
               args.MainIn.argTypes.push_back(
                   llvm::Type::getDoubleTy(*state.TheContext));
-            } else if ((*nodeIt)->getNodeType() == AST::MemberAccess ||
-                       (*nodeIt)->getNodeType() == AST::PortProperty) {
-              auto pp = std::static_pointer_cast<MemberAccessNode>(*nodeIt);
+            } else if (currentChildNode->getNodeType() == AST::MemberAccess ||
+                       currentChildNode->getNodeType() == AST::PortProperty) {
+              auto pp = std::static_pointer_cast<MemberAccessNode>(currentChildNode);
               if (pp->getPropertyName() == "size") {
                 args.MainIn.argTypes.push_back(
                     llvm::Type::getInt32Ty(*state.TheContext));
@@ -1126,38 +1133,13 @@ void StrideGenerator::collectInputArgs(
               // implemented
               args.MainIn.argTypes.push_back(
                   state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
-              LOG_ERROR() << "Unsupported type for: " << (*nodeIt)->toText()
+              LOG_ERROR() << "Unsupported type for: " << currentChildNode->toText()
                           << std::endl;
             }
-          }
-          nodeIt++;
-        }
-      } else if (v->getType() == ListExprAST::Type::IMMUTABLE_CONSISTENT) {
-        args.MainIn.args.emplace_back(std::move(exprs.back()));
-        std::string typeStr;
-        auto typecastNode = (*nodeIt)->getCompilerProperty("typecast");
-        if (typecastNode && typecastNode->getNodeType() == AST::String) {
-          typeStr = std::static_pointer_cast<ValueNode>(typecastNode)
-                        ->getStringValue();
-        } else {
-          typeStr = CodeAnalysis::resolveNodeOutDataType(*nodeIt, scope, tree);
-        }
-        if (!typeStr.empty()) {
-          if (typeStr == "_IntType") {
-            args.MainIn.argTypes.push_back(
-                llvm::Type::getInt32Ty(*state.TheContext));
-          } else if (typeStr == "_SwitchType") {
-            args.MainIn.argTypes.push_back(
-                llvm::Type::getInt1Ty(*state.TheContext));
           } else {
             args.MainIn.argTypes.push_back(
                 llvm::Type::getDoubleTy(*state.TheContext));
           }
-        } else {
-          auto elemDecl = ASTQuery::findDeclarationByName(
-              ASTQuery::getNodeName(*nodeIt), scope, tree);
-          args.MainIn.argTypes.push_back(
-              state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
         }
       } else {
         // Not supported

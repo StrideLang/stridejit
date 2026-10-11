@@ -451,7 +451,7 @@ std::pair<llvm::Value *, std::optional<llvm::Type *>>
 BoolExprAST::codegen(StrideCompiler &state) {
   return {
       llvm::ConstantInt::get(*state.TheContext, llvm::APInt(1, Val ? 1 : 0)),
-      std::nullopt};
+      llvm::Type::getInt1Ty(*state.TheContext)};
 }
 
 std::pair<llvm::Value *, std::optional<llvm::Type *>>

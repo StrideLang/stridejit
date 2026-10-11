@@ -844,7 +844,11 @@ llvm::Value *func(llvm::Value *value, std::optional<llvm::Type *> type,
     ArgsV = state.Builder->CreateLoad(type.value(), value, "");
   }
   if (!value->getType()->isPointerTy() && arg->getType()->isPointerTy()) {
-    ArgsV = state.Builder->CreateAlloca(value->getType(), nullptr,
+    llvm::Type *allocTy = value->getType();
+    if (!allocTy || allocTy->isVoidTy()) {
+      allocTy = llvm::Type::getDoubleTy(*state.TheContext);
+    }
+    ArgsV = state.Builder->CreateAlloca(allocTy, nullptr,
                                         "LiteralValTemp");
     state.Builder->CreateStore(value, ArgsV);
   }
@@ -1117,7 +1121,16 @@ CallExprAST::codegen(StrideCompiler &state) {
 
     if (CallArgs.size() > outArgCount + 1) {
       size_t arraySize = CallArgs.size() - outArgCount;
-      llvm::Type *elemType = InArgsDataType[0];
+      llvm::Type *elemType =
+          (!InArgsDataType.empty() && InArgsDataType[0] &&
+           !InArgsDataType[0]->isVoidTy())
+              ? InArgsDataType[0]
+              : ((outArgCount < CallArgs.size() &&
+                  CallArgs[outArgCount].second.has_value() &&
+                  CallArgs[outArgCount].second.value() &&
+                  !CallArgs[outArgCount].second.value()->isVoidTy())
+                     ? CallArgs[outArgCount].second.value()
+                     : llvm::Type::getInt32Ty(*state.TheContext));
 
       llvm::Value *arraySizeValue = state.Builder->getInt32(arraySize);
       llvm::AllocaInst *arrayAlloc = state.Builder->CreateAlloca(
@@ -1389,10 +1402,10 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
       }
     }
     if (val->getType()->isPointerTy()) {
-      if (!elemType.has_value()) {
-        return {nullptr, std::nullopt};
-      }
-      val = state.Builder->CreateLoad(elemType.value(), val, "");
+      llvm::Type *loadTy = (elemType.has_value() && elemType.value() && !elemType.value()->isVoidTy())
+                               ? elemType.value()
+                               : llvm::Type::getDoubleTy(*state.TheContext);
+      val = state.Builder->CreateLoad(loadTy, val, "");
     }
     return {val, elemType};
   };
