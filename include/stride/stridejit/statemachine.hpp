@@ -29,6 +29,11 @@ struct Transition {
   int targetStateId;
   bool triggerOnGuard = false;
 
+  bool isGenerator = false;
+  std::string generatorVar;
+  int64_t rangeStart = 0;
+  int64_t rangeEnd = 0;
+
   std::vector<std::unique_ptr<ExprAST>> guardCode;
   std::vector<std::unique_ptr<ExprAST>> onTransitionCode;
 };
@@ -60,6 +65,7 @@ struct FlattenedState {
 enum class StateMachineField {
   ActiveStateId,
   TransitionRequestId,
+  TransitionRequestArg,
   IsEntered,
   HistoryStateId
 };
@@ -80,6 +86,7 @@ public:
   int initialStateId;
   std::string activeStateVarName;
   std::string transitionRequestVarName;
+  std::string transitionRequestArgVarName;
   std::string isEnteredVarName;
 
   static std::string getFieldSuffix(StateMachineField field);

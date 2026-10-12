@@ -616,6 +616,9 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
         auto registerVarDeclAsDynamicField =
             [&](const std::shared_ptr<DeclarationNode> &varDecl) {
               llvm::Type *varType = state.getLLVMType(varDecl);
+              if (!varType || varType->isVoidTy() || !varType->isSized()) {
+                varType = llvm::Type::getDoubleTy(*state.TheContext);
+              }
               if (varDecl->getNodeType() == AST::ArrayDeclaration ||
                   varDecl->getNodeType() == AST::BundleDeclaration) {
                 int size = ASTQuery::getBlockDeclaredSize(varDecl, scope, tree);
@@ -723,6 +726,13 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
               llvm::Type::getInt32Ty(*state.TheContext),
               llvm::ConstantInt::get(llvm::Type::getInt32Ty(*state.TheContext),
                                      0));
+          if (!smCtx.transitionRequestArgVarName.empty()) {
+            state.addDynamicDomainField(
+                node, smCtx.transitionRequestArgVarName,
+                llvm::Type::getInt32Ty(*state.TheContext),
+                llvm::ConstantInt::get(
+                    llvm::Type::getInt32Ty(*state.TheContext), 0));
+          }
           state.addDynamicDomainField(
               node, smCtx.isEnteredVarName,
               llvm::Type::getInt1Ty(*state.TheContext),
@@ -1349,6 +1359,31 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       // Function
       auto func = std::static_pointer_cast<FunctionNode>(current);
       auto decls = ASTQuery::findAllDeclarations(func->getName(), scope, tree);
+      {
+        // A function call can only resolve to a callable declaration. Other
+        // declarations may share the name (e.g. a named generator transition
+        // `transition Place_X[Index in 0:8]` calling `action Place_X`).
+        auto isCallableDecl = [](const std::shared_ptr<DeclarationNode> &d) {
+          if (!d)
+            return false;
+          for (const auto &t : {d->getEntityType(), d->getObjectType()}) {
+            if (t == "module" || t == "reaction" || t == "action" ||
+                t == "loop" || t == "platformModule" || t == "function") {
+              return true;
+            }
+          }
+          return false;
+        };
+        decltype(decls) callableDecls;
+        for (const auto &d : decls) {
+          if (isCallableDecl(d)) {
+            callableDecls.push_back(d);
+          }
+        }
+        if (!callableDecls.empty()) {
+          decls = std::move(callableDecls);
+        }
+      }
       auto funcDecl =
           CodeAnalysis::matchDefinitionToTypes(decls, func, scope, tree);
       if (!funcDecl) {
@@ -1468,8 +1503,8 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
           generated[domainName].expr.push_back(std::move(newCall));
         }
       } else { // is not external function
-        auto funcDecl =
-            ASTQuery::findDeclarationByName(func->getName(), scope, tree);
+        // Reuse the callable declaration matched above. Re-looking it up by
+        // name could return a same-named non-callable (e.g. a transition).
         if (funcDecl) {
           // --------------------- Function declaration -----------------------
           // Can we unify this parameter definition wiht argument preparation
@@ -2076,6 +2111,18 @@ void StrideGenerator::generatePlatformFunctionSignature(
     } else {
       retType = state.typesMap[""];
     }
+
+    if (!retType) {
+      LOG_ERROR() << "Cannot register platform function " << decl->getName()
+                  << " due to unmapped return type" << std::endl;
+      return;
+    }
+    if (parameters.size() != inputList->getChildren().size()) {
+      LOG_ERROR() << "Cannot register platform function " << decl->getName()
+                  << " due to unmapped parameter type" << std::endl;
+      return;
+    }
+
     // Always store the function signature, as there may be multiple overloads
     // (e.g. Greater@Int_Bool, Greater@Double_Bool)
     auto name =

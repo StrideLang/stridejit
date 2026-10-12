@@ -1295,6 +1295,27 @@ CallExprAST::codegen(StrideCompiler &state) {
     for (const auto &p : CallArgs) {
       CallArgsValues.push_back(p.first);
     }
+    if (CallArgsValues.size() != CalleeF->getFunctionType()->getNumParams() &&
+        !CalleeF->getFunctionType()->isVarArg()) {
+      LOG_ERROR() << "CallExprAST signature mismatch for " << Callee
+                  << ": expected " << CalleeF->getFunctionType()->getNumParams()
+                  << " params, got " << CallArgsValues.size() << " args!"
+                  << std::endl;
+      std::string funcStr;
+      llvm::raw_string_ostream rso(funcStr);
+      CalleeF->print(rso);
+      LOG_ERROR() << "CalleeF:\n" << rso.str() << std::endl;
+      for (size_t i = 0; i < CallArgsValues.size(); ++i) {
+        std::string argStr;
+        llvm::raw_string_ostream argRso(argStr);
+        if (CallArgsValues[i]) {
+          CallArgsValues[i]->print(argRso);
+        } else {
+          argRso << "null";
+        }
+        LOG_ERROR() << "  arg[" << i << "]: " << argRso.str() << std::endl;
+      }
+    }
     call =
         state.Builder->CreateCall(CalleeF, CallArgsValues, CalleeF->getName());
   }

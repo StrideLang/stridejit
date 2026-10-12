@@ -80,6 +80,8 @@ std::string StateMachine::getFieldSuffix(StateMachineField field) {
     return "_active_state_id";
   case StateMachineField::TransitionRequestId:
     return "_transition_request_id";
+  case StateMachineField::TransitionRequestArg:
+    return "_transition_request_arg";
   case StateMachineField::IsEntered:
     return "_is_entered";
   case StateMachineField::HistoryStateId:
@@ -167,6 +169,8 @@ StateMachine::processStateMachine(std::shared_ptr<BlockNode> child,
         StateMachineField::ActiveStateId, prefix, smName);
     sm.transitionRequestVarName = StateMachine::getVariableName(
         StateMachineField::TransitionRequestId, prefix, smName);
+    sm.transitionRequestArgVarName = StateMachine::getVariableName(
+        StateMachineField::TransitionRequestArg, prefix, smName);
     sm.isEnteredVarName = StateMachine::getVariableName(
         StateMachineField::IsEntered, prefix, smName);
 
@@ -215,6 +219,31 @@ StateMachine::processStateMachine(std::shared_ptr<BlockNode> child,
                   auto valNode = std::static_pointer_cast<ValueNode>(trigProp);
                   if (valNode->getSwitchValue()) {
                     t.triggerOnGuard = true;
+                  }
+                }
+
+                auto isGenProp = tDecl->getCompilerProperty("_isGenerator");
+                if (isGenProp && isGenProp->getNodeType() == AST::Switch &&
+                    std::static_pointer_cast<ValueNode>(isGenProp)->getSwitchValue()) {
+                  t.isGenerator = true;
+                  auto varProp = tDecl->getCompilerProperty("_generatorVar");
+                  if (varProp && varProp->getNodeType() == AST::String) {
+                    t.generatorVar =
+                        std::static_pointer_cast<ValueNode>(varProp)->getStringValue();
+                  }
+                  auto rangeProp = tDecl->getCompilerProperty("_generatorRange");
+                  if (rangeProp && rangeProp->getNodeType() == AST::Range) {
+                    auto rNode = std::static_pointer_cast<RangeNode>(rangeProp);
+                    if (rNode->startIndex()->getNodeType() == AST::Int) {
+                      t.rangeStart = std::static_pointer_cast<ValueNode>(
+                                         rNode->startIndex())
+                                         ->getIntValue();
+                    }
+                    if (rNode->endIndex()->getNodeType() == AST::Int) {
+                      t.rangeEnd = std::static_pointer_cast<ValueNode>(
+                                       rNode->endIndex())
+                                       ->getIntValue();
+                    }
                   }
                 }
 
@@ -414,6 +443,23 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
           state.Builder->CreateLoad(state.Builder->getInt32Ty(), reqVarPtr);
     }
 
+    llvm::Value *reqArgVarPtr = nullptr;
+    if (!smContext.transitionRequestArgVarName.empty()) {
+      auto reqArgVarIt =
+          state.NamedValues.find(smContext.transitionRequestArgVarName);
+      if (reqArgVarIt != state.NamedValues.end()) {
+        reqArgVarPtr = reqArgVarIt->second.first;
+      } else {
+        reqArgVarPtr = state.TheModule->getNamedGlobal(
+            smContext.transitionRequestArgVarName);
+      }
+    }
+    llvm::Value *reqArgVal = nullptr;
+    if (reqArgVarPtr) {
+      reqArgVal =
+          state.Builder->CreateLoad(state.Builder->getInt32Ty(), reqArgVarPtr);
+    }
+
     llvm::BasicBlock *processBB = llvm::BasicBlock::Create(
         *state.TheContext, "state_" + std::to_string(fs.id) + "_process", func,
         endBB);
@@ -458,6 +504,22 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
         guardVal = state.Builder->CreateICmpEQ(reqVal, idVal);
       }
 
+      // If transition is a generator, also bound-check reqArgVal in range [rangeStart, rangeEnd]
+      if (t.isGenerator && reqArgVal) {
+        auto *geStart = state.Builder->CreateICmpSGE(
+            reqArgVal, state.Builder->getInt32(t.rangeStart));
+        auto *leEnd = state.Builder->CreateICmpSLE(
+            reqArgVal, state.Builder->getInt32(t.rangeEnd));
+        auto *inRange = state.Builder->CreateAnd(geStart, leEnd);
+        guardVal = state.Builder->CreateAnd(guardVal, inRange);
+
+        // Temporarily bind generator variable in state.NamedValues so guardCode can evaluate with reqArgVal
+        if (!t.generatorVar.empty()) {
+          state.NamedValues[t.generatorVar] = {reqArgVal,
+                                               state.Builder->getInt32Ty()};
+        }
+      }
+
       if (!t.guardCode.empty()) {
         auto *varExpr =
             dynamic_cast<VariableExprAST *>(t.guardCode.back().get());
@@ -476,14 +538,18 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
               }
               const std::string *strIdx = std::get_if<std::string>(&idx);
               if (strIdx) {
-                auto it = state.NamedValues.find(*strIdx);
-                if (it != state.NamedValues.end()) {
-                  llvm::Value *indexVal = it->second.first;
-                  if (indexVal->getType()->isPointerTy()) {
-                    indexVal = state.Builder->CreateLoad(
-                        it->second.second.value(), indexVal, *strIdx);
+                if (t.isGenerator && *strIdx == t.generatorVar && reqArgVal) {
+                  idxList.push_back(reqArgVal);
+                } else {
+                  auto it = state.NamedValues.find(*strIdx);
+                  if (it != state.NamedValues.end()) {
+                    llvm::Value *indexVal = it->second.first;
+                    if (indexVal->getType()->isPointerTy()) {
+                      indexVal = state.Builder->CreateLoad(
+                          it->second.second.value(), indexVal, *strIdx);
+                    }
+                    idxList.push_back(indexVal);
                   }
-                  idxList.push_back(indexVal);
                 }
               }
             }
@@ -573,6 +639,11 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
         }
       }
 
+      if (t.isGenerator && !t.generatorVar.empty() && reqArgVal) {
+        state.NamedValues[t.generatorVar] = {reqArgVal,
+                                             state.Builder->getInt32Ty()};
+      }
+
       for (auto &expr : t.onTransitionCode) {
         expr->codegen(state);
       }
@@ -605,6 +676,9 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
       state.Builder->CreateStore(finalTargetIdVal, activeStatePtr);
       if (reqVarPtr) {
         state.Builder->CreateStore(state.Builder->getInt32(0), reqVarPtr);
+      }
+      if (reqArgVarPtr) {
+        state.Builder->CreateStore(state.Builder->getInt32(0), reqArgVarPtr);
       }
 
       for (const auto &s : smContext.flattenedStates) {

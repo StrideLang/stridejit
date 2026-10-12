@@ -140,10 +140,12 @@ public:
 
   bool requestTransition(void *statePtr, int32_t transitionId,
                          const std::string &smName = "",
-                         const std::string &domainName = "");
+                         const std::string &domainName = "",
+                         std::optional<int32_t> transitionArg = std::nullopt);
   bool requestTransition(const std::shared_ptr<void> &statePtr,
                          int32_t transitionId, const std::string &smName = "",
-                         const std::string &domainName = "");
+                         const std::string &domainName = "",
+                         std::optional<int32_t> transitionArg = std::nullopt);
 
   std::optional<int32_t>
   getTransitionRequestId(const void *statePtr, const std::string &smName = "",

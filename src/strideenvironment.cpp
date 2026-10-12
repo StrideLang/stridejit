@@ -230,6 +230,8 @@ bool StrideEnvironment::generateIr(const std::vector<std::string> &paths,
 }
 
 bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
+  initializeJIT();
+
   ScopeStack globalScope;
   {
     globalScope.push_back({nullptr, {}});
@@ -703,7 +705,8 @@ StrideEnvironment::getActiveStateId(const std::shared_ptr<void> &statePtr,
 
 bool StrideEnvironment::requestTransition(void *statePtr, int32_t transitionId,
                                           const std::string &smName,
-                                          const std::string &domainName) {
+                                          const std::string &domainName,
+                                          std::optional<int32_t> transitionArg) {
   if (!statePtr) {
     return false;
   }
@@ -721,14 +724,26 @@ bool StrideEnvironment::requestTransition(void *statePtr, int32_t transitionId,
   uint64_t offset = info->fieldOffsets[*fieldIdxOpt];
   char *bytePtr = static_cast<char *>(statePtr) + offset;
   *reinterpret_cast<int32_t *>(bytePtr) = transitionId;
+
+  if (transitionArg.has_value()) {
+    auto argFieldIdxOpt = findFieldByFunctionality(
+        *info, StateMachineField::TransitionRequestArg, smName);
+    if (argFieldIdxOpt && *argFieldIdxOpt < info->fieldOffsets.size()) {
+      uint64_t argOffset = info->fieldOffsets[*argFieldIdxOpt];
+      char *argBytePtr = static_cast<char *>(statePtr) + argOffset;
+      *reinterpret_cast<int32_t *>(argBytePtr) = transitionArg.value();
+    }
+  }
   return true;
 }
 
 bool StrideEnvironment::requestTransition(const std::shared_ptr<void> &statePtr,
                                           int32_t transitionId,
                                           const std::string &smName,
-                                          const std::string &domainName) {
-  return requestTransition(statePtr.get(), transitionId, smName, domainName);
+                                          const std::string &domainName,
+                                          std::optional<int32_t> transitionArg) {
+  return requestTransition(statePtr.get(), transitionId, smName, domainName,
+                           transitionArg);
 }
 
 std::optional<int32_t>

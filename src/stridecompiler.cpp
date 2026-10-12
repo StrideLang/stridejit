@@ -48,6 +48,7 @@ StrideCompiler::StrideCompiler() {
   typesMap["_FloatType"] = llvm::Type::getFloatTy(*TheContext);
   typesMap["_IntType"] = llvm::Type::getInt32Ty(*TheContext);
   typesMap["_SwitchType"] = llvm::Type::getInt1Ty(*TheContext);
+  typesMap["_StringType"] = llvm::PointerType::get(*TheContext, 0);
 
   typesMap[""] = llvm::Type::getVoidTy(*TheContext);
 }
@@ -605,7 +606,8 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
           }
         }
       }
-      if (childIt != stateStructMap.end() && childIt->second.structType) {
+      if (childIt != stateStructMap.end() && childIt->second.structType &&
+          childIt->second.structType->isSized()) {
         info.childIndices[child.instance] =
             static_cast<unsigned>(fieldTypes.size());
         fieldTypes.push_back(childIt->second.structType);
@@ -622,21 +624,51 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
     std::string name = nodeTree.instance
                            ? ASTQuery::getNodeName(nodeTree.instance)
                            : "anon";
+
+    // Validate all fieldTypes are valid and sized
+    for (size_t i = 0; i < fieldTypes.size(); ++i) {
+      if (!fieldTypes[i] || fieldTypes[i]->isVoidTy() || !fieldTypes[i]->isSized()) {
+        LOG_ERROR() << "buildNodeState: fieldType at index " << i
+                    << " in struct." << name << "_state is invalid or unsized! Type ptr: "
+                    << fieldTypes[i] << " Replacing with double."
+                    << std::endl;
+        fieldTypes[i] = llvm::Type::getDoubleTy(*TheContext);
+        defaultFieldValues[i] = llvm::Constant::getNullValue(fieldTypes[i]);
+      }
+    }
+
     info.structType = llvm::StructType::create(
         *TheContext, "struct." + name + "_state");
     info.structType->setBody(fieldTypes);
+
     info.defaultConstant =
         llvm::ConstantStruct::get(info.structType, defaultFieldValues);
 
     const auto &DL = TheModule->getDataLayout();
-    const auto *structLayout = DL.getStructLayout(info.structType);
-    info.allocSize = DL.getTypeAllocSize(info.structType);
-    info.fieldOffsets.resize(fieldTypes.size());
-    info.fieldAllocSizes.resize(fieldTypes.size());
-    for (size_t i = 0; i < fieldTypes.size(); ++i) {
-      info.fieldOffsets[i] =
-          structLayout->getElementOffset(static_cast<unsigned>(i));
-      info.fieldAllocSizes[i] = DL.getTypeAllocSize(fieldTypes[i]);
+    if (info.structType->isSized()) {
+      const auto *structLayout = DL.getStructLayout(info.structType);
+      info.allocSize = DL.getTypeAllocSize(info.structType);
+      info.fieldOffsets.resize(fieldTypes.size());
+      info.fieldAllocSizes.resize(fieldTypes.size());
+      for (size_t i = 0; i < fieldTypes.size(); ++i) {
+        info.fieldOffsets[i] =
+            structLayout->getElementOffset(static_cast<unsigned>(i));
+        info.fieldAllocSizes[i] = DL.getTypeAllocSize(fieldTypes[i]);
+      }
+    } else {
+      LOG_ERROR() << "buildNodeState: struct." << name
+                  << "_state is unsized! Calculating fallback field offsets."
+                  << std::endl;
+      uint64_t currentOffset = 0;
+      info.fieldOffsets.resize(fieldTypes.size());
+      info.fieldAllocSizes.resize(fieldTypes.size());
+      for (size_t i = 0; i < fieldTypes.size(); ++i) {
+        uint64_t sz = fieldTypes[i]->isSized() ? DL.getTypeAllocSize(fieldTypes[i]) : 8;
+        info.fieldOffsets[i] = currentOffset;
+        info.fieldAllocSizes[i] = sz;
+        currentOffset += sz;
+      }
+      info.allocSize = currentOffset;
     }
 
     stateStructMap[nodeTree.instance] = info;
