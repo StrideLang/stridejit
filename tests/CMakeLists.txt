@@ -73,5 +73,20 @@ if (STRIDEJIT_BUILD_TESTS)
           TIMEOUT 30
         )
       endforeach()
+
+      if (STRIDEROOT AND EXISTS "${STRIDEROOT}/library/1.0/tests")
+        file(GLOB STRIDE_LIB_TEST_FILES CONFIGURE_DEPENDS "${STRIDEROOT}/library/1.0/tests/*Test.stride")
+        foreach(LIB_TEST_FILE ${STRIDE_LIB_TEST_FILES})
+          get_filename_component(LIB_TEST_NAME ${LIB_TEST_FILE} NAME_WE)
+          add_test(
+            NAME "stridetest.library.${LIB_TEST_NAME}"
+            COMMAND stridetest "${LIB_TEST_FILE}" --root "${STRIDEROOT}"
+          )
+          set_tests_properties("stridetest.library.${LIB_TEST_NAME}" PROPERTIES
+            LABELS "StrideLibrary"
+            TIMEOUT 30
+          )
+        endforeach()
+      endif()
     endif()
 endif()
