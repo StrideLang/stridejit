@@ -108,27 +108,27 @@ std::string SignalStreamVector::formatValue(size_t tick) const {
     if (tick >= size()) return "<out-of-bounds>";
     if (tick < tickValues.size() && tickValues[tick].size() > 1) {
         std::ostringstream ss;
-        ss << "[";
+        ss << std::boolalpha << "[";
         for (size_t i = 0; i < tickValues[tick].size(); ++i) {
             if (i > 0) ss << ", ";
-            std::visit([&](auto&& v) { ss << v; }, tickValues[tick][i]);
+            std::visit([&](auto&& v) { ss << std::boolalpha << v; }, tickValues[tick][i]);
         }
         ss << "]";
         return ss.str();
     }
     if (!isArrayPort && tick < values.size()) {
         std::ostringstream ss;
-        std::visit([&](auto&& v) { ss << v; }, values[tick]);
+        std::visit([&](auto&& v) { ss << std::boolalpha << v; }, values[tick]);
         return ss.str();
     }
     if (tick < tickValues.size() && !tickValues[tick].empty()) {
         std::ostringstream ss;
-        std::visit([&](auto&& v) { ss << v; }, tickValues[tick][0]);
+        std::visit([&](auto&& v) { ss << std::boolalpha << v; }, tickValues[tick][0]);
         return ss.str();
     }
     if (tick < values.size()) {
         std::ostringstream ss;
-        std::visit([&](auto&& v) { ss << v; }, values[tick]);
+        std::visit([&](auto&& v) { ss << std::boolalpha << v; }, values[tick]);
         return ss.str();
     }
     return "<out-of-bounds>";

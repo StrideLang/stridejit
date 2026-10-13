@@ -263,8 +263,16 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                         } else if (valStream && !valStream->values.empty()) {
                             arrSize = valStream->values.size();
                         }
-                        argBuffers[i].doubleVec.assign(arrSize, 0.0);
-                        argPtrs[i] = argBuffers[i].doubleVec.data();
+                        if (info.type == DataType::INT32) {
+                            argBuffers[i].int32Vec.assign(arrSize, 0);
+                            argPtrs[i] = argBuffers[i].int32Vec.data();
+                        } else if (info.type == DataType::BOOL) {
+                            argBuffers[i].boolVec.assign(arrSize, 0);
+                            argPtrs[i] = argBuffers[i].boolVec.data();
+                        } else {
+                            argBuffers[i].doubleVec.assign(arrSize, 0.0);
+                            argPtrs[i] = argBuffers[i].doubleVec.data();
+                        }
                     } else {
                         argBuffers[i].scalarDouble = 0.0;
                         argBuffers[i].scalarInt32 = 0;
@@ -297,6 +305,12 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                                 argBuffers[i].int32Vec[k] = toInt32Val(curVals[k]);
                             }
                             argPtrs[i] = argBuffers[i].int32Vec.data();
+                        } else if (info.type == DataType::BOOL) {
+                            argBuffers[i].boolVec.resize(arrSize, 0);
+                            for (size_t k = 0; k < curVals.size(); ++k) {
+                                argBuffers[i].boolVec[k] = toBoolVal(curVals[k]) ? 1 : 0;
+                            }
+                            argPtrs[i] = argBuffers[i].boolVec.data();
                         } else {
                             argBuffers[i].doubleVec.resize(arrSize, 0.0);
                             for (size_t k = 0; k < curVals.size(); ++k) {
@@ -374,8 +388,16 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                     if (argIdx < m_argInfos.size()) {
                         if (valStream.isArrayPort) {
                             std::vector<SignalScalarValue> actualVec;
-                            actualVec.reserve(argBuffers[argIdx].doubleVec.size());
-                            for (double d : argBuffers[argIdx].doubleVec) actualVec.push_back(d);
+                            if (m_argInfos[argIdx].type == DataType::INT32) {
+                                actualVec.reserve(argBuffers[argIdx].int32Vec.size());
+                                for (auto v : argBuffers[argIdx].int32Vec) actualVec.push_back(v);
+                            } else if (m_argInfos[argIdx].type == DataType::BOOL) {
+                                actualVec.reserve(argBuffers[argIdx].boolVec.size());
+                                for (auto v : argBuffers[argIdx].boolVec) actualVec.push_back(v != 0);
+                            } else {
+                                actualVec.reserve(argBuffers[argIdx].doubleVec.size());
+                                for (double d : argBuffers[argIdx].doubleVec) actualVec.push_back(d);
+                            }
                             matched = valStream.matches(actualVec, t);
                         } else {
                             if (m_argInfos[argIdx].type == DataType::INT32) {
@@ -403,9 +425,21 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                         ss << "\n  Actual:   ";
                         if (valStream.isArrayPort && argIdx < m_argInfos.size()) {
                             ss << "[";
-                            for (size_t k = 0; k < argBuffers[argIdx].doubleVec.size(); ++k) {
-                                if (k > 0) ss << ", ";
-                                ss << argBuffers[argIdx].doubleVec[k];
+                            if (m_argInfos[argIdx].type == DataType::INT32) {
+                                for (size_t k = 0; k < argBuffers[argIdx].int32Vec.size(); ++k) {
+                                    if (k > 0) ss << ", ";
+                                    ss << argBuffers[argIdx].int32Vec[k];
+                                }
+                            } else if (m_argInfos[argIdx].type == DataType::BOOL) {
+                                for (size_t k = 0; k < argBuffers[argIdx].boolVec.size(); ++k) {
+                                    if (k > 0) ss << ", ";
+                                    ss << (argBuffers[argIdx].boolVec[k] ? "true" : "false");
+                                }
+                            } else {
+                                for (size_t k = 0; k < argBuffers[argIdx].doubleVec.size(); ++k) {
+                                    if (k > 0) ss << ", ";
+                                    ss << argBuffers[argIdx].doubleVec[k];
+                                }
                             }
                             ss << "]";
                         } else {
