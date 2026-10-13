@@ -171,9 +171,11 @@ int main(int argc, char *argv[]) {
         for (const auto &spec : specs) {
           std::string procName = spec.functionName + "_process";
           auto entrySym = strenv.getFunction(procName);
+          std::string targetFuncName = procName;
           if (!entrySym) {
             llvm::consumeError(entrySym.takeError());
             entrySym = strenv.getFunction(spec.functionName);
+            targetFuncName = spec.functionName;
           }
 
           FunctionTestSpec runSpec = spec;
@@ -185,7 +187,8 @@ int main(int argc, char *argv[]) {
           if (!entrySym) {
             TestRunResult res;
             res.passed = false;
-            res.errorMessage = "Could not find entry function: " + procName;
+            res.errorMessage = "Could not find entry function: " + procName +
+                               " or " + spec.functionName;
             reporter.addResult(runSpec, res);
             continue;
           }
@@ -193,8 +196,27 @@ int main(int argc, char *argv[]) {
           void *fnPtr = reinterpret_cast<void *>(entrySym->getValue());
           FunctionTestRunner runner(fnPtr);
 
+          auto invokerSym = strenv.getFunction(targetFuncName + "_invoker");
+          if (!invokerSym) {
+            llvm::consumeError(invokerSym.takeError());
+            invokerSym = strenv.getFunction(spec.functionName + "_invoker");
+          }
+          if (invokerSym) {
+            runner.setInvokerFunction(
+                reinterpret_cast<void *>(invokerSym->getValue()));
+          }
+
+          auto argInfos = strenv.getFunctionArgs(targetFuncName);
+          if (argInfos.empty()) {
+            argInfos = strenv.getFunctionArgs(spec.functionName);
+          }
+          runner.setFunctionArgs(argInfos);
+
           std::shared_ptr<void> state =
               strenv.allocateSharedState(spec.functionName);
+          if (!state && targetFuncName != spec.functionName) {
+            state = strenv.allocateSharedState(targetFuncName);
+          }
           if (state) {
             runner.setStatePointer(state.get());
             runner.setStateAccessor(

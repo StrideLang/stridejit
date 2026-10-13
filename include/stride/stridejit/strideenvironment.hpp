@@ -25,7 +25,7 @@ struct StrideExternalVariable {
 };
 
 struct FunctionArgInfo {
-  enum class Role { Output, Input, State, External, MemberAccess };
+  enum class Role { Output, Input, Property, State, External, MemberAccess };
 
   std::string name;
   Role role{Role::Input};
@@ -47,7 +47,7 @@ struct FunctionArgInfo {
   // If the array has an undetermined size (dynamic), this returns 0.
   size_t getArraySize() const { return count; }
 
-  int32_t portPropertyValue{0};
+  int32_t propertyValue{0};
 };
 
 class InvokerParameterList {

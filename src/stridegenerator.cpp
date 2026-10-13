@@ -414,20 +414,20 @@ std::unique_ptr<ExprAST> StrideGenerator::createExpr(ASTNode node) {
     setTypeCastMetadata(node, V.get());
     return V;
   } else if (node->getNodeType() == AST::Array) {
-    auto bundleNode = std::static_pointer_cast<ArrayNode>(node);
+    auto arrayNode = std::static_pointer_cast<ArrayNode>(node);
 
     std::vector<std::variant<size_t, std::string>> indeces;
-    for (const auto &idx : bundleNode->index()->getChildren()) {
+    for (const auto &idx : arrayNode->index()->getChildren()) {
       if (idx->getNodeType() == AST::Entity) {
         indeces.push_back(std::static_pointer_cast<EntityNode>(idx)->getName());
       } else if (idx->getNodeType() == AST::Int) {
         indeces.push_back(
             (size_t)std::static_pointer_cast<ValueNode>(idx)->getIntValue());
       } else {
-        LOG_ERROR() << "Unsupported node type for bundle index.";
+        LOG_ERROR() << "Unsupported node type for array index.";
       }
     }
-    auto V = std::make_unique<VariableExprAST>(bundleNode->getName(), indeces);
+    auto V = std::make_unique<VariableExprAST>(arrayNode->getName(), indeces);
     setTypeCastMetadata(node, V.get());
     return V;
   } else if (node->getNodeType() == AST::Real) {
@@ -1274,7 +1274,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                current->getNodeType() == AST::Array) {
       // -------------------------------------------------------------
       // Entity / Array
-      auto block = createExpr(current);
+      auto entityExpr = createExpr(current);
       auto decl = ASTQuery::findDeclarationByName(
           ASTQuery::getNodeName(current), scope, tree);
       if (current->getNodeType() == AST::Array) {
@@ -1321,16 +1321,16 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         // Connect to previous function
         if (!processPreviousFunction(
                 std::static_pointer_cast<FunctionNode>(prev), decl,
-                std::move(block), generated, domainName, scope, tree, state)) {
+                std::move(entityExpr), generated, domainName, scope, tree, state)) {
           continue;
         }
       } else if (generated[domainName].expr.size() > 0) {
         // Connect to previous stream node
         generated[domainName].expr.back() = std::make_unique<BinaryExprAST>(
-            '=', std::move(block),
+            '=', std::move(entityExpr),
             std::move(generated[domainName].expr.back()));
       } else {
-        generated[domainName].expr.push_back(std::move(block));
+        generated[domainName].expr.push_back(std::move(entityExpr));
       }
     } else if (current->getNodeType() == AST::Function) {
       // -------------------------------------------------------------
@@ -1559,13 +1559,50 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               if (ppNode->getPropertyName() == "size") {
                 auto size = CodeAnalysis::evaluateSizeMemberAccess(
                     ppNode->getEntity(), innerScope, funcDecl, func, tree);
-                // TODO determine integer type for size from platform
-                // definition.
-                PortPropArgs.push_back(std::make_unique<IntExprAST>(size, 32));
+                if (size > 0) {
+                  PortPropArgs.push_back(std::make_unique<IntExprAST>(size, 32));
+                } else {
+                  std::unique_ptr<ExprAST> dynamicSizeExpr;
+                  auto inBlockNode = func ? func->getCompilerProperty("inputBlock") : nullptr;
+                  if (!inBlockNode && func) {
+                    inBlockNode = func->getCompilerProperty("mainInput");
+                  }
+                  if (inBlockNode) {
+                    std::string inName = ASTQuery::getNodeName(inBlockNode);
+                    auto inDecl = ASTQuery::findDeclarationByName(inName, scope, tree);
+                    if (inDecl && inDecl->getNodeType() == AST::ArrayDeclaration) {
+                      auto *arrNode = static_cast<ArrayNode *>(inDecl->getArrayIndex().get());
+                      if (arrNode && arrNode->index()) {
+                        auto idxChildren = arrNode->index()->getChildren();
+                        if (!idxChildren.empty()) {
+                          auto firstIdx = idxChildren[0];
+                          if (firstIdx->getNodeType() == AST::MemberAccess) {
+                            auto pp = std::static_pointer_cast<MemberAccessNode>(firstIdx);
+                            dynamicSizeExpr = std::make_unique<MemberAccessAST>(
+                                pp->getEntity(), pp->getPropertyName());
+                          } else if (firstIdx->getNodeType() == AST::Entity) {
+                            dynamicSizeExpr = std::make_unique<VariableExprAST>(
+                                std::static_pointer_cast<EntityNode>(firstIdx)->getName());
+                          }
+                        }
+                      }
+                    }
+                  }
+                  if (!dynamicSizeExpr) {
+                    dynamicSizeExpr = std::make_unique<MemberAccessAST>(
+                        ppNode->getEntity(), ppNode->getPropertyName());
+                  }
+                  PortPropArgs.push_back(std::move(dynamicSizeExpr));
+                }
               } else if (ppNode->getPropertyName() == "rate") {
                 auto rate = CodeAnalysis::evaluateRateMemberAccess(
                     ppNode->getEntity(), innerScope, funcDecl, func, tree);
-                PortPropArgs.push_back(std::make_unique<RealExprAST>(rate));
+                if (rate > 0) {
+                  PortPropArgs.push_back(std::make_unique<RealExprAST>(rate));
+                } else {
+                  PortPropArgs.push_back(std::make_unique<MemberAccessAST>(
+                      ppNode->getEntity(), ppNode->getPropertyName()));
+                }
               }
             }
             if (funcDecl->getEntityType() == "module") {
@@ -1710,10 +1747,10 @@ bool StrideGenerator::resolveIOParamsFromDefinition(
       if (portTypeStr == "mainInputPort" || portTypeStr == "mainOutputPort" ||
           portTypeStr == "propertyInputPort" ||
           portTypeStr == "propertyOutputPort") {
-        auto blockNode = portDecl->getPropertyValue("block");
-        if (blockNode && blockNode->getNodeType() == AST::Entity) {
+        auto portEntityNode = portDecl->getPropertyValue("block");
+        if (portEntityNode && portEntityNode->getNodeType() == AST::Entity) {
           auto blockName =
-              std::static_pointer_cast<EntityNode>(blockNode)->getName();
+              std::static_pointer_cast<EntityNode>(portEntityNode)->getName();
           auto blockDeclNode =
               ASTQuery::findDeclarationByName(blockName, functionScope, tree);
           if (!blockDeclNode) {
@@ -1758,10 +1795,10 @@ bool StrideGenerator::resolveIOParamsFromDefinition(
   if (ioParamsResolved) {
     auto usedBlocks = CodeAnalysis::getUsedEntitiesInStreams(funcDecl);
     std::vector<std::string> seen;
-    for (const auto &block : usedBlocks) {
+    for (const auto &entity : usedBlocks) {
       std::shared_ptr<DeclarationNode> outBlockDecl;
       CodeAnalysis::NodeRole role = CodeAnalysis::determineNodeRole(
-          block, funcDecl, functionScope, tree, outBlockDecl);
+          entity, funcDecl, functionScope, tree, outBlockDecl);
       if (role == CodeAnalysis::NodeRole::Internal ||
           role == CodeAnalysis::NodeRole::Persistent ||
           role == CodeAnalysis::NodeRole::External) {

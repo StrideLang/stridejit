@@ -24,11 +24,14 @@ enum class AssertionKind {
 struct SignalStreamVector {
     std::string portName;
     std::vector<SignalScalarValue> values;
+    std::vector<std::vector<SignalScalarValue>> tickValues;
+    bool isArrayPort{false};
     double epsilon{1e-6};
     AssertionKind kind{AssertionKind::Equal};
 
     size_t size() const;
     bool matches(const SignalScalarValue& actual, size_t tick) const;
+    bool matches(const std::vector<SignalScalarValue>& actual, size_t tick) const;
     std::string formatValue(size_t tick) const;
     std::string formatCondition(size_t tick) const;
 };

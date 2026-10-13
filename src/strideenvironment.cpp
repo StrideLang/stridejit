@@ -93,7 +93,10 @@ void StrideEnvironment::prepareTree(ASTNode tree) {
     tree->addChild(systemNode);
   }
 
-  CodeResolver resolver(tree, ASTFunctions::getDefaultStrideRoot(),
+  CodeResolver resolver(tree,
+                        !m_strideRoot.empty()
+                            ? m_strideRoot
+                            : ASTFunctions::getDefaultStrideRoot(),
                         SystemConfiguration());
   resolver.process();
 }
@@ -111,8 +114,8 @@ bool StrideEnvironment::generateAllRootFunctions(ASTNode root) {
       auto decl = std::static_pointer_cast<DeclarationNode>(child);
       std::string entType = decl->getEntityType();
 
-      if (entType == "module" || entType == "reaction" ||
-          entType == "action" || entType == "function") {
+      if (entType == "module" || entType == "reaction" || entType == "action" ||
+          entType == "function" || entType == "loop") {
         if (entType == "domain" || entType == "_domainDefinition" ||
             entType == "platformModule") {
           continue;
@@ -696,10 +699,9 @@ StrideEnvironment::getActiveStateId(const std::shared_ptr<void> &statePtr,
   return getActiveStateId(statePtr.get(), smName, domainName);
 }
 
-bool StrideEnvironment::requestTransition(void *statePtr, int32_t transitionId,
-                                          const std::string &smName,
-                                          const std::string &domainName,
-                                          std::optional<int32_t> transitionArg) {
+bool StrideEnvironment::requestTransition(
+    void *statePtr, int32_t transitionId, const std::string &smName,
+    const std::string &domainName, std::optional<int32_t> transitionArg) {
   if (!statePtr) {
     return false;
   }
@@ -730,11 +732,10 @@ bool StrideEnvironment::requestTransition(void *statePtr, int32_t transitionId,
   return true;
 }
 
-bool StrideEnvironment::requestTransition(const std::shared_ptr<void> &statePtr,
-                                          int32_t transitionId,
-                                          const std::string &smName,
-                                          const std::string &domainName,
-                                          std::optional<int32_t> transitionArg) {
+bool StrideEnvironment::requestTransition(
+    const std::shared_ptr<void> &statePtr, int32_t transitionId,
+    const std::string &smName, const std::string &domainName,
+    std::optional<int32_t> transitionArg) {
   return requestTransition(statePtr.get(), transitionId, smName, domainName,
                            transitionArg);
 }
@@ -808,11 +809,9 @@ StrideEnvironment::getStateId(const std::string &stateName,
   return std::nullopt;
 }
 
-std::optional<int32_t>
-StrideEnvironment::getTransitionId(const std::string &transitionName,
-                                   const std::string &smName,
-                                   const std::string &domainName,
-                                   const std::string &stateName) const {
+std::optional<int32_t> StrideEnvironment::getTransitionId(
+    const std::string &transitionName, const std::string &smName,
+    const std::string &domainName, const std::string &stateName) const {
   for (const auto &smInfo : mStrideEnv.stateMachineInfos) {
     if (!domainName.empty() && smInfo.domainName != domainName)
       continue;
@@ -833,11 +832,9 @@ StrideEnvironment::getTransitionId(const std::string &transitionName,
   return std::nullopt;
 }
 
-std::optional<int32_t>
-StrideEnvironment::getTransitionIdForState(const std::string &transitionName,
-                                           const std::string &stateName,
-                                           const std::string &smName,
-                                           const std::string &domainName) const {
+std::optional<int32_t> StrideEnvironment::getTransitionIdForState(
+    const std::string &transitionName, const std::string &stateName,
+    const std::string &smName, const std::string &domainName) const {
   return getTransitionId(transitionName, smName, domainName, stateName);
 }
 
@@ -886,15 +883,42 @@ StrideEnvironment::getFunctionArgs(const std::string &funcName) const {
   std::vector<FunctionArgInfo> result;
   auto it = mStrideEnv.FunctionProtos.find(funcName);
   if (it == mStrideEnv.FunctionProtos.end()) {
+    it = mStrideEnv.FunctionProtos.find(funcName + "_process");
+  }
+  if (it == mStrideEnv.FunctionProtos.end() && funcName.size() > 8 &&
+      funcName.substr(funcName.size() - 8) == "_process") {
+    it =
+        mStrideEnv.FunctionProtos.find(funcName.substr(0, funcName.size() - 8));
+  }
+  if (it == mStrideEnv.FunctionProtos.end()) {
     return result;
   }
   const auto *DL = getDataLayout();
   const auto &proto = it->second;
 
-  assert(mStrideEnv.m_tree);
-  auto funcDecl =
-      ASTQuery::findDeclarationByName(funcName, {}, mStrideEnv.m_tree);
-  assert(funcDecl);
+  std::string baseDeclName = funcName;
+  if (baseDeclName.size() > 8 &&
+      baseDeclName.substr(baseDeclName.size() - 8) == "_process") {
+    baseDeclName = baseDeclName.substr(0, baseDeclName.size() - 8);
+  } else if (baseDeclName.size() > 5 &&
+             baseDeclName.substr(baseDeclName.size() - 5) == "_init") {
+    baseDeclName = baseDeclName.substr(0, baseDeclName.size() - 5);
+  }
+
+  std::shared_ptr<DeclarationNode> funcDecl;
+  for (const auto &t : m_trees) {
+    if (!t) {
+      continue;
+    }
+    funcDecl = ASTQuery::findDeclarationByName(baseDeclName, {}, t);
+    if (funcDecl) {
+      break;
+    }
+  }
+  if (!funcDecl && mStrideEnv.m_tree) {
+    funcDecl =
+        ASTQuery::findDeclarationByName(baseDeclName, {}, mStrideEnv.m_tree);
+  }
 
   auto makeArgInfo = [&](const PrototypeArg &arg, FunctionArgInfo::Role role,
                          bool isPtr) {
@@ -907,23 +931,26 @@ StrideEnvironment::getFunctionArgs(const std::string &funcName) const {
 
     fillTypeInfo(arg.llvmType, DL, info.type, info.typeName, info.elementSize);
 
-    auto blockDecl = ASTQuery::findDeclarationByName(
-        arg.name,
-        {{funcDecl, funcDecl->getPropertyValue("blocks")->getChildren()}},
-        nullptr);
+    auto blocksVal = funcDecl ? funcDecl->getPropertyValue("blocks") : nullptr;
+    auto blockDecl =
+        (funcDecl && blocksVal)
+            ? ASTQuery::findDeclarationByName(
+                  arg.name, {{funcDecl, blocksVal->getChildren()}}, nullptr)
+            : nullptr;
     info.count = 1;
     if (blockDecl) {
-      int sz = ASTQuery::getEntityDeclaredSize(blockDecl, {}, mStrideEnv.m_tree);
+      int sz =
+          ASTQuery::getEntityDeclaredSize(blockDecl, {}, mStrideEnv.m_tree);
       if (sz > 0) {
         info.count = static_cast<size_t>(sz);
       } else {
         info.count = 0; // Undetermined dynamic size
         if (blockDecl->getNodeType() == AST::ArrayDeclaration) {
           // FIXME this should be calculated much earlier than here!
-          auto bundle = blockDecl->getArrayIndex();
-          if (bundle && bundle->index() &&
-              !bundle->index()->getChildren().empty()) {
-            auto firstIdx = bundle->index()->getChildren()[0];
+          auto arrayNode = blockDecl->getArrayIndex();
+          if (arrayNode && arrayNode->index() &&
+              !arrayNode->index()->getChildren().empty()) {
+            auto firstIdx = arrayNode->index()->getChildren()[0];
             if (firstIdx->getNodeType() == AST::MemberAccess) {
               auto pp = std::static_pointer_cast<MemberAccessNode>(firstIdx);
               info.sizeProperty = pp->getEntity() + "_" + pp->getPropertyName();
@@ -942,18 +969,27 @@ StrideEnvironment::getFunctionArgs(const std::string &funcName) const {
   for (const auto &arg : proto->getInArgs()) {
     result.push_back(makeArgInfo(arg, FunctionArgInfo::Role::Input, true));
   }
-  if (hasState(funcName)) {
+  for (const auto &arg : proto->getPropertyArgs()) {
+    result.push_back(makeArgInfo(arg, FunctionArgInfo::Role::Property, true));
+  }
+  if (hasState(funcName) || hasState(baseDeclName)) {
     FunctionArgInfo info;
     info.name = "__state";
     info.role = FunctionArgInfo::Role::State;
     info.type = DataType::STATE;
-    info.typeName = "struct." + funcName + "_state";
+    info.typeName = "struct." + baseDeclName + "_state";
     info.isPointer = true;
     info.count = 1;
-    info.elementSize = getStateSize(funcName);
+    info.elementSize = getStateSize(baseDeclName);
+    if (info.elementSize == 0) {
+      info.elementSize = getStateSize(funcName);
+    }
     info.totalBytes = info.elementSize;
 
-    const auto *stateInfo = mStrideEnv.getStateStructInfo(funcName);
+    const auto *stateInfo = mStrideEnv.getStateStructInfo(baseDeclName);
+    if (!stateInfo || !stateInfo->structType) {
+      stateInfo = mStrideEnv.getStateStructInfo(funcName);
+    }
     if (stateInfo && stateInfo->structType) {
       info.llvmType =
           llvm::PointerType::get(stateInfo->structType->getContext(), 0);
@@ -1054,8 +1090,8 @@ bool InvokerParameterList::setProperty(const std::string &name, int32_t value) {
   }
   // Store the value locally inside the FunctionArgInfo struct so its address is
   // stable
-  m_argInfos[it->second].portPropertyValue = value;
-  m_args[it->second] = &m_argInfos[it->second].portPropertyValue;
+  m_argInfos[it->second].propertyValue = value;
+  m_args[it->second] = &m_argInfos[it->second].propertyValue;
   return true;
 }
 
@@ -1361,8 +1397,8 @@ bool StrideEnvironment::generateCompiledObject(std::string path,
   mStrideEnv.TheModule->setTargetTriple(triple);
 #else
   auto TargetMachine =
-      Target->createTargetMachine(triple.str(), CPU, Features, opt, RM, std::nullopt,
-                                  llvm::CodeGenOptLevel::Default);
+      Target->createTargetMachine(triple.str(), CPU, Features, opt, RM,
+                                  std::nullopt, llvm::CodeGenOptLevel::Default);
   mStrideEnv.TheModule->setDataLayout(TargetMachine->createDataLayout());
   mStrideEnv.TheModule->setTargetTriple(triple.str());
 #endif
@@ -1567,8 +1603,8 @@ bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
                                   cm, llvm::CodeGenOptLevel::Default);
 #else
   auto targetMachine =
-      target->createTargetMachine(theTriple.str(), targetCPU, targetFeatures, opt, rm,
-                                  cm, llvm::CodeGenOptLevel::Default);
+      target->createTargetMachine(theTriple.str(), targetCPU, targetFeatures,
+                                  opt, rm, cm, llvm::CodeGenOptLevel::Default);
 #endif
 
   if (!targetMachine) {
@@ -1648,7 +1684,8 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
     domains.push_back(domainName);
   } else {
     for (const auto &t : m_trees) {
-      if (!t) continue;
+      if (!t)
+        continue;
       for (const auto &node : t->getChildren()) {
         if (node->getNodeType() == AST::Declaration) {
           auto decl = std::static_pointer_cast<DeclarationNode>(node);
@@ -1693,7 +1730,8 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
     if (mStrideEnv.TheModule) {
       for (const auto &F : mStrideEnv.TheModule->functions()) {
         std::string fname = F.getName().str();
-        if (fname.find("_invoker") != std::string::npos || fname.rfind("llvm.", 0) == 0)
+        if (fname.find("_invoker") != std::string::npos ||
+            fname.rfind("llvm.", 0) == 0)
           continue;
         size_t pos = fname.find("_process");
         if (pos != std::string::npos) {
@@ -1712,9 +1750,11 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
 
     std::shared_ptr<DeclarationNode> domDecl;
     for (const auto &t : m_trees) {
-      if (!t) continue;
+      if (!t)
+        continue;
       domDecl = ASTQuery::findDeclarationByName(dom, {}, t);
-      if (domDecl) break;
+      if (domDecl)
+        break;
     }
     if (!domDecl && mStrideEnv.m_tree) {
       domDecl = ASTQuery::findDeclarationByName(dom, {}, mStrideEnv.m_tree);
@@ -1734,7 +1774,9 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
 
     // 1. Emit init function prototype
     auto initIt = mStrideEnv.FunctionProtos.find(initFunc);
-    auto *initLlvm = mStrideEnv.TheModule ? mStrideEnv.TheModule->getFunction(initFunc) : nullptr;
+    auto *initLlvm = mStrideEnv.TheModule
+                         ? mStrideEnv.TheModule->getFunction(initFunc)
+                         : nullptr;
     if (initIt != mStrideEnv.FunctionProtos.end()) {
       ss << "/**\n";
       ss << " * @brief Initializes or resets the " << dom << " domain state.\n";
@@ -1781,7 +1823,8 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
         ss << "void " << initFunc << "(";
         bool first = true;
         for (const auto &arg : initLlvm->args()) {
-          if (!first) ss << ", ";
+          if (!first)
+            ss << ", ";
           first = false;
           ss << "void* " << arg.getName().str();
         }
@@ -1791,7 +1834,9 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
 
     // 2. Emit process function prototype
     auto procIt = mStrideEnv.FunctionProtos.find(processFunc);
-    auto *procLlvm = mStrideEnv.TheModule ? mStrideEnv.TheModule->getFunction(processFunc) : nullptr;
+    auto *procLlvm = mStrideEnv.TheModule
+                         ? mStrideEnv.TheModule->getFunction(processFunc)
+                         : nullptr;
     if (procIt != mStrideEnv.FunctionProtos.end()) {
       const auto &proto = procIt->second;
       auto extArgs = proto->getExternalArgs();
@@ -1852,7 +1897,8 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
       } else {
         bool first = true;
         for (const auto &arg : procLlvm->args()) {
-          if (!first) ss << ", ";
+          if (!first)
+            ss << ", ";
           first = false;
           std::string argName = arg.getName().str();
           bool isOut = (outputNames.count(argName) > 0);

@@ -181,7 +181,7 @@ private:
   std::string substituteTokens(const std::string &processingTemplate,
                                const std::vector<std::string> &inTokens,
                                const std::vector<std::string> &outTokens = {},
-                               const std::string &bundleIndexStr = "0");
+                               const std::string &arrayIndexStr = "0");
 };
 
 } // namespace strd

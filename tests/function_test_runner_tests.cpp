@@ -178,6 +178,9 @@ TEST(StrideTestRunner, FailureDiagnostics) {
 
   // Modify expected value at tick 2 to intentionally trigger a failure
   specs[0].validateStreams[0].values[2] = 99.0;
+  if (specs[0].validateStreams[0].tickValues.size() > 2) {
+    specs[0].validateStreams[0].tickValues[2] = {99.0};
+  }
 
   FunctionTestRunner runner(reinterpret_cast<void *>(&mock_passthru_process));
   auto result = runner.runTest(specs[0]);

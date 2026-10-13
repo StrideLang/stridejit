@@ -32,6 +32,9 @@ inline bool toBool(const SignalScalarValue& v) {
 } // namespace
 
 size_t SignalStreamVector::size() const {
+    if (!tickValues.empty()) {
+        return tickValues.size();
+    }
     return values.size();
 }
 
@@ -43,8 +46,16 @@ bool SignalStreamVector::matches(const SignalScalarValue& actual, size_t tick) c
         return toBool(actual) == false;
     }
 
-    if (tick >= values.size()) return false;
-    const auto& expected = values[tick];
+    SignalScalarValue expected;
+    if (!isArrayPort && tick < values.size()) {
+        expected = values[tick];
+    } else if (tick < tickValues.size() && !tickValues[tick].empty()) {
+        expected = tickValues[tick][0];
+    } else if (tick < values.size()) {
+        expected = values[tick];
+    } else {
+        return false;
+    }
 
     switch (kind) {
         case AssertionKind::Equal:
@@ -79,11 +90,48 @@ bool SignalStreamVector::matches(const SignalScalarValue& actual, size_t tick) c
     }
 }
 
+bool SignalStreamVector::matches(const std::vector<SignalScalarValue>& actual, size_t tick) const {
+    if (tick >= tickValues.size()) return false;
+    const auto& expected = tickValues[tick];
+    if (actual.size() != expected.size()) return false;
+    for (size_t i = 0; i < actual.size(); ++i) {
+        SignalStreamVector elemStream;
+        elemStream.kind = kind;
+        elemStream.epsilon = epsilon;
+        elemStream.values = {expected[i]};
+        if (!elemStream.matches(actual[i], 0)) return false;
+    }
+    return true;
+}
+
 std::string SignalStreamVector::formatValue(size_t tick) const {
-    if (tick >= values.size()) return "<out-of-bounds>";
-    std::ostringstream ss;
-    std::visit([&](auto&& v) { ss << v; }, values[tick]);
-    return ss.str();
+    if (tick >= size()) return "<out-of-bounds>";
+    if (tick < tickValues.size() && tickValues[tick].size() > 1) {
+        std::ostringstream ss;
+        ss << "[";
+        for (size_t i = 0; i < tickValues[tick].size(); ++i) {
+            if (i > 0) ss << ", ";
+            std::visit([&](auto&& v) { ss << v; }, tickValues[tick][i]);
+        }
+        ss << "]";
+        return ss.str();
+    }
+    if (!isArrayPort && tick < values.size()) {
+        std::ostringstream ss;
+        std::visit([&](auto&& v) { ss << v; }, values[tick]);
+        return ss.str();
+    }
+    if (tick < tickValues.size() && !tickValues[tick].empty()) {
+        std::ostringstream ss;
+        std::visit([&](auto&& v) { ss << v; }, tickValues[tick][0]);
+        return ss.str();
+    }
+    if (tick < values.size()) {
+        std::ostringstream ss;
+        std::visit([&](auto&& v) { ss << v; }, values[tick]);
+        return ss.str();
+    }
+    return "<out-of-bounds>";
 }
 
 std::string SignalStreamVector::formatCondition(size_t tick) const {

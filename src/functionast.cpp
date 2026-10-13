@@ -123,7 +123,7 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
         int size = ASTQuery::getEntityDeclaredSize(decl, {}, nullptr);
         llvm::Type *type = state.getLLVMType(decl);
 
-        // TODO support non-literal bundle sizes. We need to have the tree here,
+        // TODO support non-literal array sizes. We need to have the tree here,
         // or have previously passed the size so that we know it here.
         llvm::AllocaInst *alloca =
             state.CreateEntryBlockAllocaArray(TheFunction, varName, type, size);
@@ -1223,6 +1223,12 @@ CallExprAST::codegen(StrideCompiler &state) {
 
   for (unsigned i = 0, e = PortPropArgs.size(); i != e; ++i) {
     auto [value, type] = PortPropArgs[i]->codegen(state);
+    if (value && value->getType()->isPointerTy()) {
+      llvm::Type *elemTy = type.has_value()
+                               ? type.value()
+                               : llvm::Type::getInt32Ty(*state.TheContext);
+      value = state.Builder->CreateLoad(elemTy, value, "port_prop_val");
+    }
     CallArgs.push_back({std::move(value), type});
   }
 
@@ -1336,7 +1342,7 @@ std::string
 LLVMCommandAST::substituteTokens(const std::string &processingTemplate,
                                  const std::vector<std::string> &inTokens,
                                  const std::vector<std::string> &outTokens,
-                                 const std::string &bundleIndexStr) {
+                                 const std::string &arrayIndexStr) {
   std::string result = processingTemplate;
 
   auto replaceAll = [](std::string &str, const std::string &from,
@@ -1350,9 +1356,12 @@ LLVMCommandAST::substituteTokens(const std::string &processingTemplate,
     }
   };
 
-  replaceAll(result, "%%bundle_index%%", bundleIndexStr);
-  replaceAll(result, "%bundle_index%", bundleIndexStr);
-  replaceAll(result, "bundle_index", bundleIndexStr);
+  replaceAll(result, "%%array_index%%", arrayIndexStr);
+  replaceAll(result, "%array_index%", arrayIndexStr);
+  replaceAll(result, "array_index", arrayIndexStr);
+  replaceAll(result, "%%bundle_index%%", arrayIndexStr);
+  replaceAll(result, "%bundle_index%", arrayIndexStr);
+  replaceAll(result, "bundle_index", arrayIndexStr);
 
   for (size_t i = 0; i < outTokens.size(); ++i) {
     replaceAll(result, "%%outtokens:" + std::to_string(i) + "%%", outTokens[i]);
@@ -1530,9 +1539,9 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
     outTokens.push_back("%res");
   }
 
-  std::string bundleIndexStr = "0";
+  std::string arrayIndexStr = "0";
   std::string substituted =
-      substituteTokens(command, inTokens, outTokens, bundleIndexStr);
+      substituteTokens(command, inTokens, outTokens, arrayIndexStr);
   LOG_INFO() << "Substituted LLVM IR text: " << substituted << std::endl;
 
   // Dispatch: llvm:: prefix means a native LLVM IR instruction.
@@ -1592,40 +1601,112 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
       return nullptr;
     };
 
-    size_t comma = instr.find(',');
-    if (comma != std::string::npos) {
-      std::string op1Str = instr.substr(0, comma);
-      size_t lastSpace = op1Str.find_last_of(" \t");
-      if (lastSpace != std::string::npos) {
-        op1Str = op1Str.substr(lastSpace + 1);
+    if (instr.rfind("select", 0) == 0) {
+      size_t firstComma = instr.find(',');
+      size_t secondComma =
+          (firstComma != std::string::npos) ? instr.find(',', firstComma + 1) : std::string::npos;
+      std::string op0Str, op1Str, op2Str;
+      if (firstComma != std::string::npos && secondComma != std::string::npos) {
+        op0Str = instr.substr(0, firstComma);
+        size_t lastSpace = op0Str.find_last_of(" \t");
+        if (lastSpace != std::string::npos) {
+          op0Str = op0Str.substr(lastSpace + 1);
+        }
+        op1Str = instr.substr(firstComma + 1, secondComma - firstComma - 1);
+        op1Str.erase(0, op1Str.find_first_not_of(" \t"));
+        op1Str.erase(op1Str.find_last_not_of(" \t\r\n") + 1);
+
+        op2Str = instr.substr(secondComma + 1);
+        op2Str.erase(0, op2Str.find_first_not_of(" \t"));
+        op2Str.erase(op2Str.find_last_not_of(" \t\r\n") + 1);
       }
 
-      std::string op2Str = instr.substr(comma + 1);
-      op2Str.erase(0, op2Str.find_first_not_of(" \t"));
-      op2Str.erase(op2Str.find_last_not_of(" \t\r\n") + 1);
+      llvm::Value *cond = resolveOperand(op0Str);
+      llvm::Value *trueVal = resolveOperand(op1Str);
+      llvm::Value *falseVal = resolveOperand(op2Str);
 
-      lhs = resolveOperand(op1Str);
-      rhs = resolveOperand(op2Str);
+      if (!cond && CallArgs.size() > 0)
+        cond = CallArgs[0].first;
+      if (!trueVal && CallArgs.size() > 1)
+        trueVal = CallArgs[1].first;
+      if (!falseVal && CallArgs.size() > 2)
+        falseVal = CallArgs[2].first;
 
-      if (!rhs && lhs) {
-        rhs = parseLiteral(op2Str, lhs->getType());
-      }
-      if (!lhs && rhs) {
-        lhs = parseLiteral(op1Str, rhs->getType());
+      if (!trueVal && falseVal)
+        trueVal = parseLiteral(op1Str, falseVal->getType());
+      if (!falseVal && trueVal)
+        falseVal = parseLiteral(op2Str, trueVal->getType());
+
+      if (cond && trueVal && falseVal) {
+        if (cond->getType()->isIntegerTy() && !cond->getType()->isIntegerTy(1)) {
+          cond = state.Builder->CreateICmpNE(
+              cond, llvm::ConstantInt::get(cond->getType(), 0), "tobool");
+        } else if (cond->getType()->isDoubleTy()) {
+          cond = state.Builder->CreateFCmpONE(
+              cond, llvm::ConstantFP::get(cond->getType(), 0.0), "tobool");
+        }
+
+        if (trueVal->getType() != falseVal->getType()) {
+          if (trueVal->getType()->isDoubleTy() &&
+              falseVal->getType()->isIntegerTy()) {
+            falseVal = state.Builder->CreateSIToFP(
+                falseVal, llvm::Type::getDoubleTy(*state.TheContext), "sitofp");
+          } else if (trueVal->getType()->isIntegerTy() &&
+                     falseVal->getType()->isDoubleTy()) {
+            trueVal = state.Builder->CreateSIToFP(
+                trueVal, llvm::Type::getDoubleTy(*state.TheContext), "sitofp");
+          } else if (trueVal->getType()->isIntegerTy() &&
+                     falseVal->getType()->isIntegerTy()) {
+            unsigned tBits = trueVal->getType()->getIntegerBitWidth();
+            unsigned fBits = falseVal->getType()->getIntegerBitWidth();
+            if (tBits < fBits) {
+              trueVal = state.Builder->CreateIntCast(
+                  trueVal, falseVal->getType(), true, "intcast");
+            } else if (fBits < tBits) {
+              falseVal = state.Builder->CreateIntCast(
+                  falseVal, trueVal->getType(), true, "intcast");
+            }
+          }
+        }
+
+        outval = state.Builder->CreateSelect(cond, trueVal, falseVal, "seltmp");
+        outtype = trueVal->getType();
       }
     } else {
-      size_t lastSpace = instr.find_last_of(" \t");
-      if (lastSpace != std::string::npos) {
-        std::string opStr = instr.substr(lastSpace + 1);
-        lhs = resolveOperand(opStr);
-      }
-      if (!lhs) {
-        lhs = CallArgs.size() > 0 ? CallArgs[0].first : nullptr;
-      }
-      rhs = CallArgs.size() > 1 ? CallArgs[1].first : nullptr;
-    }
+      size_t comma = instr.find(',');
+      if (comma != std::string::npos) {
+        std::string op1Str = instr.substr(0, comma);
+        size_t lastSpace = op1Str.find_last_of(" \t");
+        if (lastSpace != std::string::npos) {
+          op1Str = op1Str.substr(lastSpace + 1);
+        }
 
-    if (instr.rfind("icmp sgt", 0) == 0) {
+        std::string op2Str = instr.substr(comma + 1);
+        op2Str.erase(0, op2Str.find_first_not_of(" \t"));
+        op2Str.erase(op2Str.find_last_not_of(" \t\r\n") + 1);
+
+        lhs = resolveOperand(op1Str);
+        rhs = resolveOperand(op2Str);
+
+        if (!rhs && lhs) {
+          rhs = parseLiteral(op2Str, lhs->getType());
+        }
+        if (!lhs && rhs) {
+          lhs = parseLiteral(op1Str, rhs->getType());
+        }
+      } else {
+        size_t lastSpace = instr.find_last_of(" \t");
+        if (lastSpace != std::string::npos) {
+          std::string opStr = instr.substr(lastSpace + 1);
+          lhs = resolveOperand(opStr);
+        }
+        if (!lhs) {
+          lhs = CallArgs.size() > 0 ? CallArgs[0].first : nullptr;
+        }
+        rhs = CallArgs.size() > 1 ? CallArgs[1].first : nullptr;
+      }
+
+      if (instr.rfind("icmp sgt", 0) == 0) {
       outval = state.Builder->CreateICmpSGT(lhs, rhs);
       outtype = llvm::Type::getInt1Ty(*state.TheContext);
     } else if (instr.rfind("icmp sge", 0) == 0) {
@@ -1741,6 +1822,7 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
                   << std::endl;
       assert(0 == 1);
     }
+  }
 
   } else if (substituted.find('@') != std::string::npos) {
     // External C function call: "@funcName"

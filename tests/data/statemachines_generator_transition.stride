@@ -1,0 +1,51 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    stateMachines: [MyStateMachine]
+    inputs: []
+    outputs: []
+	domainFunctionCode: ''
+}
+
+switch GuardArr[4] { default: off domain: RootDomain }
+signal ActionOutput { domain: RootDomain type: _IntType default: 0 }
+signal ActionIndex { domain: RootDomain type: _IntType default: -1 }
+signal State2Entered { domain: RootDomain type: _IntType default: 0 }
+
+reaction RecordReaction {
+    ports: [
+        propertyInputPort LocPort { name: "loc" block: Loc }
+    ]
+    blocks: [
+        signal Loc { type: _IntType }
+    ]
+    streams: [
+        Loc >> ActionIndex;
+        99 >> ActionOutput;
+    ]
+    domain: RootDomain
+}
+
+state State1 {
+    transitions: [
+        transition PlaceMarker[Index in 0:3] {
+            label: "PlaceMarker"
+            guard: GuardArr[Index]
+            onTransition: [ on >> RecordReaction(loc: Index); ]
+            targetState: State2
+        }
+    ]
+}
+
+state State2 {
+    onEntry: [
+        1 >> State2Entered;
+    ]
+}
+
+state MyStateMachine {
+    initialState: State1
+    states: [State1, State2]
+}

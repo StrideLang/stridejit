@@ -331,6 +331,26 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       RType = R->getType();
     }
 
+    if ((*LType)->isDoubleTy() && (*RType)->isIntegerTy()) {
+      R = state.Builder->CreateSIToFP(
+          R, llvm::Type::getDoubleTy(*state.TheContext), "sitofp");
+      RType = llvm::Type::getDoubleTy(*state.TheContext);
+    } else if ((*LType)->isIntegerTy() && (*RType)->isDoubleTy()) {
+      L = state.Builder->CreateSIToFP(
+          L, llvm::Type::getDoubleTy(*state.TheContext), "sitofp");
+      LType = llvm::Type::getDoubleTy(*state.TheContext);
+    } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
+      unsigned lBits = (*LType)->getIntegerBitWidth();
+      unsigned rBits = (*RType)->getIntegerBitWidth();
+      if (lBits < rBits) {
+        L = state.Builder->CreateIntCast(L, *RType, true, "intcast");
+        LType = RType;
+      } else if (rBits < lBits) {
+        R = state.Builder->CreateIntCast(R, *LType, true, "intcast");
+        RType = LType;
+      }
+    }
+
     llvm::Value *Val{nullptr};
     std::optional<llvm::Type *> Type;
     switch (Op) {
@@ -340,7 +360,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         Type = llvm::Type::getDoubleTy(*state.TheContext);
       } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
         Val = state.Builder->CreateAdd(L, R, "addtmp");
-        Type = llvm::Type::getInt32Ty(*state.TheContext);
+        Type = *LType;
       }
       break;
     }
@@ -350,7 +370,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         Type = llvm::Type::getDoubleTy(*state.TheContext);
       } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
         Val = state.Builder->CreateSub(L, R, "subtmp");
-        Type = llvm::Type::getInt32Ty(*state.TheContext);
+        Type = *LType;
       }
       break;
     }
@@ -360,7 +380,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         Type = llvm::Type::getDoubleTy(*state.TheContext);
       } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
         Val = state.Builder->CreateMul(L, R, "multmp");
-        Type = llvm::Type::getInt32Ty(*state.TheContext);
+        Type = *LType;
       }
       break;
     }
@@ -370,7 +390,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         Type = llvm::Type::getDoubleTy(*state.TheContext);
       } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
         Val = state.Builder->CreateSDiv(L, R, "divtmp");
-        Type = llvm::Type::getInt32Ty(*state.TheContext);
+        Type = *LType;
       }
       break;
     }
@@ -457,20 +477,42 @@ BoolExprAST::codegen(StrideCompiler &state) {
 std::pair<llvm::Value *, std::optional<llvm::Type *>>
 MemberAccessAST::codegen(StrideCompiler &state) {
   // TODO mangle port property names to avoid clashes
-  std::string portToken = Name + "_" + Property;
+  std::string portToken = Name.empty() ? Property : (Name + "_" + Property);
   if (state.NamedValues.find(portToken) == state.NamedValues.end()) {
-    return {
-        state.LogErrorV(("Unknown port property name: " + portToken).c_str()),
-        std::nullopt};
+    if (!Name.empty() && state.NamedValues.find(Property) != state.NamedValues.end()) {
+      portToken = Property;
+    } else {
+      bool found = false;
+      for (const auto &kv : state.NamedValues) {
+        if (kv.first.size() > Property.size() + 1 &&
+            kv.first.rfind("_" + Property) == kv.first.size() - Property.size() - 1) {
+          portToken = kv.first;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        return {
+            state.LogErrorV(("Unknown port property name: " + portToken).c_str()),
+            std::nullopt};
+      }
+    }
   }
   auto [V, VType] = state.NamedValues[portToken];
+  if (V && V->getType()->isPointerTy()) {
+    llvm::Type *elemTy = VType.has_value() ? VType.value()
+                                           : llvm::Type::getInt32Ty(*state.TheContext);
+    V = state.Builder->CreateLoad(elemTy, V, portToken);
+  }
   if (typecast.size() > 0) {
     if (V->getType()->isIntegerTy() && typecast == "_RealType") {
       V = state.Builder->CreateSIToFP(
           V, llvm::Type::getDoubleTy(*state.TheContext));
+      VType = llvm::Type::getDoubleTy(*state.TheContext);
     } else if (V->getType()->isDoubleTy() && typecast == "_IntType") {
       V = state.Builder->CreateFPToSI(
           V, llvm::Type::getInt32Ty(*state.TheContext));
+      VType = llvm::Type::getInt32Ty(*state.TheContext);
     }
   }
   return {V, VType};

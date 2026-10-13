@@ -10,6 +10,7 @@
 #include "stride/testing/testspec.hpp"
 #include "stride/testing/dynamicloader.hpp"
 #include "stride/testing/perfanalyzer.hpp"
+#include "stride/stridejit/strideenvironment.hpp"
 
 namespace strd::test {
 
@@ -39,15 +40,23 @@ public:
 
     void setStateAccessor(StateAccessor accessor) { m_stateAccessor = std::move(accessor); }
 
+    void setFunctionArgs(std::vector<FunctionArgInfo> args) { m_argInfos = std::move(args); }
+    const std::vector<FunctionArgInfo>& getFunctionArgs() const { return m_argInfos; }
+
+    void setInvokerFunction(void* invokerFn) { m_invokerPointer = invokerFn; }
+    void* getInvokerFunction() const { return m_invokerPointer; }
+
     TestRunResult runTest(const FunctionTestSpec& spec);
     TestRunResult runTestWithFunction(const FunctionTestSpec& spec, void* processFn);
 
 private:
     std::unique_ptr<DynamicLoader> m_loader;
     void* m_directFunctionPointer{nullptr};
+    void* m_invokerPointer{nullptr};
     void* m_statePtr{nullptr};
     std::optional<StateAccessor> m_stateAccessor;
     std::string m_directErrorMsg;
+    std::vector<FunctionArgInfo> m_argInfos;
 };
 
 } // namespace strd::test

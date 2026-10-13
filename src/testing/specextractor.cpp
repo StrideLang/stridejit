@@ -1,5 +1,6 @@
 #include "stride/testing/specextractor.hpp"
 #include "stride/parser/declarationnode.h"
+#include "stride/parser/expressionnode.h"
 #include "stride/parser/functionnode.h"
 #include "stride/parser/listnode.h"
 #include "stride/parser/propertynode.h"
@@ -75,6 +76,38 @@ inline void extractValuesFromNode(const ASTNode &node,
     }
     return;
   }
+  if (node->getNodeType() == AST::Expression) {
+    auto expr = std::static_pointer_cast<ExpressionNode>(node);
+    if (expr->getExpressionType() == ExpressionNode::UnaryMinus) {
+      std::vector<SignalScalarValue> innerVals;
+      extractValuesFromNode(expr->getValue(), innerVals);
+      for (auto &v : innerVals) {
+        std::visit(
+            [](auto &&arg) {
+              using T = std::decay_t<decltype(arg)>;
+              if constexpr (std::is_same_v<T, double> ||
+                            std::is_same_v<T, int32_t> ||
+                            std::is_same_v<T, int64_t>) {
+                arg = -arg;
+              }
+            },
+            v);
+        values.push_back(v);
+      }
+      return;
+    } else if (expr->getExpressionType() == ExpressionNode::LogicalNot) {
+      std::vector<SignalScalarValue> innerVals;
+      extractValuesFromNode(expr->getValue(), innerVals);
+      for (auto &v : innerVals) {
+        if (std::holds_alternative<bool>(v)) {
+          values.push_back(!std::get<bool>(v));
+        } else {
+          values.push_back(v);
+        }
+      }
+      return;
+    }
+  }
   auto itemVal = findValueNode(node);
   if (itemVal) {
     if (itemVal->getNodeType() == AST::Real) {
@@ -92,60 +125,133 @@ void extractNodeInfo(const ASTNode &elem, SignalStreamVector &streamVec) {
     return;
 
   if (elem->getNodeType() == AST::List) {
+    bool hasNonValue = false;
     for (const auto &item : elem->getChildren()) {
       if (!item)
         continue;
-      if (item->getNodeType() == AST::List) {
-        extractValuesFromNode(item, streamVec.values);
+      if (item->getNodeType() == AST::Declaration ||
+          item->getNodeType() == AST::Function) {
+        hasNonValue = true;
+        break;
+      }
+      auto itemVal = findValueNode(item);
+      if (!itemVal && item->getNodeType() != AST::List) {
+        hasNonValue = true;
+        break;
+      }
+    }
+
+    if (!hasNonValue) {
+      // Pure values list (e.g. prepare streams like [ [ 1.0, 2.0 ] ] or [ 1.0, 2.0 ])
+      bool anyChildIsList = false;
+      for (const auto &item : elem->getChildren()) {
+        if (item && item->getNodeType() == AST::List) {
+          anyChildIsList = true;
+          break;
+        }
+      }
+
+      if (anyChildIsList) {
+        streamVec.isArrayPort = true;
+        for (const auto &item : elem->getChildren()) {
+          std::vector<SignalScalarValue> tickVals;
+          extractValuesFromNode(item, tickVals);
+          streamVec.tickValues.push_back(tickVals);
+          if (streamVec.values.empty()) {
+            streamVec.values = tickVals;
+          }
+        }
       } else {
-        auto itemVal = findValueNode(item);
-        if (itemVal && (item->getNodeType() == AST::Real ||
-                        item->getNodeType() == AST::Int ||
-                        item->getNodeType() == AST::Switch)) {
-          if (itemVal->getNodeType() == AST::Real) {
-            streamVec.values.push_back(itemVal->getRealValue());
-          } else if (itemVal->getNodeType() == AST::Int) {
-            streamVec.values.push_back(
-                static_cast<int32_t>(itemVal->getIntValue()));
-          } else if (itemVal->getNodeType() == AST::Switch) {
-            streamVec.values.push_back(itemVal->getSwitchValue());
+        streamVec.isArrayPort = false;
+        for (const auto &item : elem->getChildren()) {
+          std::vector<SignalScalarValue> vals;
+          extractValuesFromNode(item, vals);
+          if (!vals.empty()) {
+            streamVec.values.push_back(vals[0]);
+            streamVec.tickValues.push_back({vals[0]});
           }
-        } else if (item->getNodeType() == AST::Declaration) {
-          auto declSub = std::static_pointer_cast<DeclarationNode>(item);
-          auto kindOpt = parseAssertionKind(declSub->getEntityType());
-          if (!kindOpt.has_value()) {
-            kindOpt = parseAssertionKind(declSub->getName());
+        }
+      }
+    } else {
+      // Mixed list (e.g. [ Output, [ 10.0 ] ] in validate)
+      for (const auto &item : elem->getChildren()) {
+        if (!item)
+          continue;
+        if (item->getNodeType() == AST::List) {
+          bool innerHasList = false;
+          for (const auto &c : item->getChildren()) {
+            if (c && c->getNodeType() == AST::List) {
+              innerHasList = true;
+              break;
+            }
           }
-          if (kindOpt.has_value()) {
-            streamVec.kind = kindOpt.value();
-            auto epsProp = declSub->getPropertyValue("epsilon");
-            auto epsVal = findValueNode(epsProp);
-            if (epsVal) {
-              streamVec.epsilon = epsVal->getRealValue();
+
+          if (innerHasList) {
+            streamVec.isArrayPort = true;
+            for (const auto &c : item->getChildren()) {
+              std::vector<SignalScalarValue> tickVals;
+              extractValuesFromNode(c, tickVals);
+              streamVec.tickValues.push_back(tickVals);
+              if (streamVec.values.empty()) {
+                streamVec.values = tickVals;
+              }
             }
           } else {
-            streamVec.portName = declSub->getName();
-          }
-        } else if (item->getNodeType() == AST::Function) {
-          auto funcNode = std::static_pointer_cast<FunctionNode>(item);
-          auto kindOpt = parseAssertionKind(funcNode->getName());
-          if (kindOpt.has_value()) {
-            streamVec.kind = kindOpt.value();
-            auto epsProp = funcNode->getPropertyValue("epsilon");
-            auto epsVal = findValueNode(epsProp);
-            if (epsVal) {
-              streamVec.epsilon = epsVal->getRealValue();
+            streamVec.isArrayPort = false;
+            for (const auto &c : item->getChildren()) {
+              std::vector<SignalScalarValue> vals;
+              extractValuesFromNode(c, vals);
+              if (!vals.empty()) {
+                streamVec.values.push_back(vals[0]);
+                streamVec.tickValues.push_back({vals[0]});
+              }
             }
-          } else {
-            streamVec.portName = funcNode->getName();
           }
         } else {
-          std::string nodeName = ASTQuery::getNodeName(item);
-          auto kindOpt = parseAssertionKind(nodeName);
-          if (kindOpt.has_value()) {
-            streamVec.kind = kindOpt.value();
-          } else if (!nodeName.empty()) {
-            streamVec.portName = nodeName;
+          std::vector<SignalScalarValue> itemVals;
+          extractValuesFromNode(item, itemVals);
+          if (!itemVals.empty()) {
+            for (const auto &v : itemVals) {
+              streamVec.values.push_back(v);
+              streamVec.tickValues.push_back({v});
+            }
+          } else if (item->getNodeType() == AST::Declaration) {
+            auto declSub = std::static_pointer_cast<DeclarationNode>(item);
+            auto kindOpt = parseAssertionKind(declSub->getEntityType());
+            if (!kindOpt.has_value()) {
+              kindOpt = parseAssertionKind(declSub->getName());
+            }
+            if (kindOpt.has_value()) {
+              streamVec.kind = kindOpt.value();
+              auto epsProp = declSub->getPropertyValue("epsilon");
+              auto epsVal = findValueNode(epsProp);
+              if (epsVal) {
+                streamVec.epsilon = epsVal->getRealValue();
+              }
+            } else {
+              streamVec.portName = declSub->getName();
+            }
+          } else if (item->getNodeType() == AST::Function) {
+            auto funcNode = std::static_pointer_cast<FunctionNode>(item);
+            auto kindOpt = parseAssertionKind(funcNode->getName());
+            if (kindOpt.has_value()) {
+              streamVec.kind = kindOpt.value();
+              auto epsProp = funcNode->getPropertyValue("epsilon");
+              auto epsVal = findValueNode(epsProp);
+              if (epsVal) {
+                streamVec.epsilon = epsVal->getRealValue();
+              }
+            } else {
+              streamVec.portName = funcNode->getName();
+            }
+          } else {
+            std::string nodeName = ASTQuery::getNodeName(item);
+            auto kindOpt = parseAssertionKind(nodeName);
+            if (kindOpt.has_value()) {
+              streamVec.kind = kindOpt.value();
+            } else if (!nodeName.empty()) {
+              streamVec.portName = nodeName;
+            }
           }
         }
       }
@@ -180,22 +286,22 @@ void extractNodeInfo(const ASTNode &elem, SignalStreamVector &streamVec) {
     } else {
       streamVec.portName = funcNode->getName();
     }
-  } else if (isValueNodeType(elem->getNodeType())) {
-    auto valNode = std::static_pointer_cast<ValueNode>(elem);
-    if (elem->getNodeType() == AST::Real) {
-      streamVec.values.push_back(valNode->getRealValue());
-    } else if (elem->getNodeType() == AST::Int) {
-      streamVec.values.push_back(static_cast<int32_t>(valNode->getIntValue()));
-    } else if (elem->getNodeType() == AST::Switch) {
-      streamVec.values.push_back(valNode->getSwitchValue());
-    }
   } else {
-    std::string nodeName = ASTQuery::getNodeName(elem);
-    auto kindOpt = parseAssertionKind(nodeName);
-    if (kindOpt.has_value()) {
-      streamVec.kind = kindOpt.value();
-    } else if (!nodeName.empty()) {
-      streamVec.portName = nodeName;
+    std::vector<SignalScalarValue> itemVals;
+    extractValuesFromNode(elem, itemVals);
+    if (!itemVals.empty()) {
+      for (const auto &v : itemVals) {
+        streamVec.values.push_back(v);
+        streamVec.tickValues.push_back({v});
+      }
+    } else {
+      std::string nodeName = ASTQuery::getNodeName(elem);
+      auto kindOpt = parseAssertionKind(nodeName);
+      if (kindOpt.has_value()) {
+        streamVec.kind = kindOpt.value();
+      } else if (!nodeName.empty()) {
+        streamVec.portName = nodeName;
+      }
     }
   }
 }
@@ -279,9 +385,12 @@ FunctionTestSpec SpecExtractor::extractSingleTest(const ASTNode &testNode) {
     spec.testName = ASTQuery::getNodeName(testNode);
   }
 
-  // Calculate total ticks (max tick count across prepare streams)
+  // Calculate total ticks (max tick count across prepare streams and validate streams)
   size_t maxTicks = 1;
   for (const auto &st : spec.prepareStreams) {
+    maxTicks = std::max(maxTicks, st.size());
+  }
+  for (const auto &st : spec.validateStreams) {
     maxTicks = std::max(maxTicks, st.size());
   }
   spec.tickCount = maxTicks;
