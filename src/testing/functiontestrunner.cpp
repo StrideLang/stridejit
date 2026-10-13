@@ -347,11 +347,26 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                         } else {
                             argPtrs[i] = &argBuffers[i].scalarDouble;
                         }
-
-                        if (m_stateAccessor.has_value() && m_statePtr && prepStream) {
-                            m_stateAccessor->setVar(m_statePtr, prepStream->portName, argBuffers[i].scalarDouble);
-                        }
                     }
+                }
+            }
+
+            for (const auto& prepStream : spec.prepareStreams) {
+                bool isArg = false;
+                for (const auto& info : m_argInfos) {
+                    if (info.name == prepStream.portName) {
+                        isArg = true;
+                        break;
+                    }
+                }
+                if (!isArg && m_stateAccessor.has_value() && m_statePtr) {
+                    SignalScalarValue val = 0.0;
+                    if (t < prepStream.tickValues.size() && !prepStream.tickValues[t].empty()) {
+                        val = prepStream.tickValues[t][0];
+                    } else if (t < prepStream.values.size()) {
+                        val = prepStream.values[t];
+                    }
+                    m_stateAccessor->setVar(m_statePtr, prepStream.portName, toDoubleVal(val));
                 }
             }
         };
@@ -406,9 +421,6 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                                 actualScalar = (argBuffers[argIdx].scalarBool != 0);
                             } else {
                                 actualScalar = argBuffers[argIdx].scalarDouble;
-                            }
-                            if (m_stateAccessor.has_value() && m_statePtr) {
-                                actualScalar = m_stateAccessor->getVar(m_statePtr, valStream.portName);
                             }
                             matched = valStream.matches(actualScalar, t);
                         }

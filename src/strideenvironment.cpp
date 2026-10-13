@@ -1529,6 +1529,56 @@ template bool StrideEnvironment::setStateVar<uint32_t>(void *,
                                                        std::optional<int>,
                                                        const std::string &);
 
+template std::optional<int8_t>
+StrideEnvironment::getStateVar<int8_t>(const void *, const std::string &,
+                                       std::optional<int>,
+                                       const std::string &) const;
+template bool StrideEnvironment::setStateVar<int8_t>(void *,
+                                                     const std::string &,
+                                                     int8_t,
+                                                     std::optional<int>,
+                                                     const std::string &);
+
+template std::optional<uint8_t>
+StrideEnvironment::getStateVar<uint8_t>(const void *, const std::string &,
+                                        std::optional<int>,
+                                        const std::string &) const;
+template bool StrideEnvironment::setStateVar<uint8_t>(void *,
+                                                      const std::string &,
+                                                      uint8_t,
+                                                      std::optional<int>,
+                                                      const std::string &);
+
+template std::optional<int16_t>
+StrideEnvironment::getStateVar<int16_t>(const void *, const std::string &,
+                                        std::optional<int>,
+                                        const std::string &) const;
+template bool StrideEnvironment::setStateVar<int16_t>(void *,
+                                                      const std::string &,
+                                                      int16_t,
+                                                      std::optional<int>,
+                                                      const std::string &);
+
+template std::optional<uint16_t>
+StrideEnvironment::getStateVar<uint16_t>(const void *, const std::string &,
+                                         std::optional<int>,
+                                         const std::string &) const;
+template bool StrideEnvironment::setStateVar<uint16_t>(void *,
+                                                       const std::string &,
+                                                       uint16_t,
+                                                       std::optional<int>,
+                                                       const std::string &);
+
+template std::optional<uint64_t>
+StrideEnvironment::getStateVar<uint64_t>(const void *, const std::string &,
+                                         std::optional<int>,
+                                         const std::string &) const;
+template bool StrideEnvironment::setStateVar<uint64_t>(void *,
+                                                       const std::string &,
+                                                       uint64_t,
+                                                       std::optional<int>,
+                                                       const std::string &);
+
 bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
                                        const std::string &targetTriple,
                                        const std::string &cpu,
