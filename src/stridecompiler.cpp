@@ -3,7 +3,6 @@
 #include <iostream>
 
 #include "stride/parser/entitynode.h"
-#include "stride/parser/blocknode.h"
 #include "stride/parser/memberaccessnode.h"
 #include "stride/parser/arraynode.h"
 #include "stride/stridejit/stridecompiler.hpp"
@@ -171,9 +170,8 @@ void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
   }
   fullName += globalDecl->getName();
   llvm::Type *Type = getLLVMType(globalDecl);
-  if (globalDecl->getNodeType() == AST::ArrayDeclaration ||
-      globalDecl->getNodeType() == AST::BundleDeclaration) {
-    int size = ASTQuery::getBlockDeclaredSize(globalDecl, {}, nullptr);
+  if (globalDecl->getNodeType() == AST::ArrayDeclaration) {
+    int size = ASTQuery::getEntityDeclaredSize(globalDecl, {}, nullptr);
     if (size > 0) {
       Type = llvm::ArrayType::get(Type, size);
     } else {
@@ -247,21 +245,19 @@ StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl) {
   if (!decl) {
     return typesMap[""];
   }
-  if (decl->getEntityType() == "switch" || decl->getObjectType() == "switch" ||
-      decl->getEntityType() == "trigger" || decl->getObjectType() == "trigger") {
+  if (decl->getEntityType() == "switch" || decl->getEntityType() == "trigger") {
     return typesMap["_SwitchType"];
   }
   auto typePropNode = decl->getPropertyValue("type");
   std::string type = "_RealType";
   if (typePropNode) {
-    if (typePropNode->getNodeType() == strd::AST::Entity ||
-        typePropNode->getNodeType() == strd::AST::Block) {
+    if (typePropNode->getNodeType() == strd::AST::Entity) {
       type = std::static_pointer_cast<strd::EntityNode>(typePropNode)->getName();
     } else {
       LOG_INFO() << " : unsupported type" << std::endl;
     }
   }
-  if (decl->getEntityType() == "reaction" || decl->getObjectType() == "reaction") {
+  if (decl->getEntityType() == "reaction") {
     return typesMap["_SwitchType"];
   }
   if (!type.empty() && typesMap.find(type) != typesMap.end() &&
@@ -271,35 +267,31 @@ StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl) {
   return typesMap["_RealType"];
 }
 
-llvm::Type *StrideCompiler::getLLVMTypeForCodegenBlock(
+llvm::Type *StrideCompiler::getLLVMTypeForCodegenEntity(
     std::shared_ptr<DeclarationNode> decl,
     std::shared_ptr<DeclarationNode> funcDecl,
     std::shared_ptr<FunctionNode> functionInstance) {
   if (!decl) {
     return typesMap[""];
   }
-  if (decl->getEntityType() == "switch" || decl->getObjectType() == "switch" ||
-      decl->getEntityType() == "trigger" || decl->getObjectType() == "trigger") {
+  if (decl->getEntityType() == "switch" || decl->getEntityType() == "trigger") {
     return typesMap["_SwitchType"];
   }
   auto typePropNode = decl->getPropertyValue("type");
   std::string type = "_RealType";
   if (typePropNode) {
-    if (typePropNode->getNodeType() == strd::AST::Entity ||
-        typePropNode->getNodeType() == strd::AST::Block) {
+    if (typePropNode->getNodeType() == strd::AST::Entity) {
       type = std::static_pointer_cast<strd::EntityNode>(typePropNode)->getName();
-    } else if (typePropNode->getNodeType() == strd::AST::MemberAccess ||
-               typePropNode->getNodeType() == strd::AST::PortProperty) {
+    } else if (typePropNode->getNodeType() == strd::AST::MemberAccess) {
       auto typeProp =
           std::static_pointer_cast<strd::MemberAccessNode>(typePropNode);
-      if (funcDecl->getEntityType() == "platformModule" ||
-          funcDecl->getObjectType() == "platformModule") {
+      if (funcDecl->getEntityType() == "platformModule") {
         auto inputBlock = funcDecl->getCompilerProperty("inputBlock");
         if (inputBlock) {
         }
       }
       auto inputPortBlock =
-          strd::ASTQuery::getModuleMainInputPortBlock(funcDecl);
+          strd::ASTQuery::getModuleMainInputPort(funcDecl);
       if (inputPortBlock && typeProp &&
           inputPortBlock->getName() == typeProp->getEntity()) {
         if (typeProp->getPropertyName() != "type") {
@@ -319,7 +311,7 @@ llvm::Type *StrideCompiler::getLLVMTypeForCodegenBlock(
       LOG_INFO() << " : unsupported type" << std::endl;
     }
   }
-  if (decl->getEntityType() == "reaction" || decl->getObjectType() == "reaction") {
+  if (decl->getEntityType() == "reaction") {
     return typesMap["_SwitchType"];
   }
   if (!type.empty() && typesMap.find(type) != typesMap.end() &&
@@ -366,16 +358,15 @@ bool StrideCompiler::isModuleNode(ASTNode node) const {
     return false;
   }
   if (node->getNodeType() == AST::Declaration ||
-      node->getNodeType() == AST::ArrayDeclaration ||
-      node->getNodeType() == AST::BundleDeclaration) {
+      node->getNodeType() == AST::ArrayDeclaration) {
     auto decl = std::static_pointer_cast<DeclarationNode>(node);
-    return decl->getEntityType() == "module" || decl->getObjectType() == "module";
+    return decl->getEntityType() == "module";
   }
   if (m_tree) {
     auto decl = ASTQuery::findDeclarationByName(ASTQuery::getNodeName(node), {},
                                                  m_tree);
     if (decl) {
-      return decl->getEntityType() == "module" || decl->getObjectType() == "module";
+      return decl->getEntityType() == "module";
     }
   }
   return false;
@@ -505,8 +496,7 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
         varType = typesMap[var.second];
       } else if (var.first &&
                  (var.first->getNodeType() == AST::Declaration ||
-                  var.first->getNodeType() == AST::ArrayDeclaration ||
-                  var.first->getNodeType() == AST::BundleDeclaration)) {
+                  var.first->getNodeType() == AST::ArrayDeclaration)) {
         varType = getLLVMType(
             std::static_pointer_cast<DeclarationNode>(var.first));
       }
@@ -518,8 +508,7 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
 
       llvm::Constant *defaultVal = nullptr;
       if (var.first->getNodeType() == AST::Declaration ||
-          var.first->getNodeType() == AST::ArrayDeclaration ||
-          var.first->getNodeType() == AST::BundleDeclaration) {
+          var.first->getNodeType() == AST::ArrayDeclaration) {
         auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
         auto defaultNode = decl->getPropertyValue("default");
         if (defaultNode) {
@@ -679,8 +668,7 @@ void StrideCompiler::buildStateStructTypes(const CodeAnalysis::TypeTree &tree,
                                            ScopeStack &scope, ASTNode root) {
   if (tree.instance &&
       (tree.instance->getNodeType() == AST::Declaration ||
-       tree.instance->getNodeType() == AST::ArrayDeclaration ||
-       tree.instance->getNodeType() == AST::BundleDeclaration)) {
+       tree.instance->getNodeType() == AST::ArrayDeclaration)) {
     auto decl = std::static_pointer_cast<DeclarationNode>(tree.instance);
     if (!ASTQuery::isDomainDefinition(
             ASTQuery::findTypeDeclaration(decl, ScopeStack(), root), scope,
@@ -696,8 +684,7 @@ void StrideCompiler::buildStateStructTypes(const CodeAnalysis::TypeTree &tree,
   for (const auto &node : tree.nodes) {
     if (node.instance &&
         (node.instance->getNodeType() == AST::Declaration ||
-         node.instance->getNodeType() == AST::ArrayDeclaration ||
-         node.instance->getNodeType() == AST::BundleDeclaration)) {
+         node.instance->getNodeType() == AST::ArrayDeclaration)) {
       auto decl = std::static_pointer_cast<DeclarationNode>(node.instance);
       if (ASTQuery::isDomainDefinition(
               ASTQuery::findTypeDeclaration(decl, ScopeStack(), root), scope,

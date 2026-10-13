@@ -28,7 +28,7 @@
 #include "stride/stridejit/stridecompiler.hpp"
 
 #include "stride/parser/ast.h"
-#include "stride/parser/blocknode.h"
+#include "stride/parser/entitynode.h"
 #include "stride/parser/valuenode.h"
 
 #include "stride/utils/astquery.h"
@@ -95,8 +95,8 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
           }
           state.Builder->CreateStore(val, alloca);
         } else if (defaultNode->getNodeType() == AST::Real) {
-          double realVal = std::static_pointer_cast<ValueNode>(defaultNode)
-                               ->getRealValue();
+          double realVal =
+              std::static_pointer_cast<ValueNode>(defaultNode)->getRealValue();
           llvm::Value *val = nullptr;
           if (type->isIntegerTy()) {
             val = llvm::ConstantInt::get(type, static_cast<int64_t>(realVal));
@@ -105,8 +105,8 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
           }
           state.Builder->CreateStore(val, alloca);
         } else if (defaultNode->getNodeType() == AST::Switch) {
-          bool switchVal =
-              std::static_pointer_cast<ValueNode>(defaultNode)->getSwitchValue();
+          bool switchVal = std::static_pointer_cast<ValueNode>(defaultNode)
+                               ->getSwitchValue();
           llvm::Value *val = nullptr;
           if (type->isFloatingPointTy()) {
             val = llvm::ConstantFP::get(type, switchVal ? 1.0 : 0.0);
@@ -118,10 +118,9 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
           LOG_ERROR() << "ERROR: type not supported for default" << std::endl;
           assert(0 == 1);
         }
-      } else if (decl->getNodeType() == AST::ArrayDeclaration ||
-                 decl->getNodeType() == AST::BundleDeclaration) {
+      } else if (decl->getNodeType() == AST::ArrayDeclaration) {
         llvm::Type *Int32Ty = state.Builder->getInt32Ty();
-        int size = ASTQuery::getBlockDeclaredSize(decl, {}, nullptr);
+        int size = ASTQuery::getEntityDeclaredSize(decl, {}, nullptr);
         llvm::Type *type = state.getLLVMType(decl);
 
         // TODO support non-literal bundle sizes. We need to have the tree here,
@@ -300,7 +299,8 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
       LOG_DEBUG() << rso.str() << "\n";
     }
   }
-  if (Proto && state.FunctionProtos.find(protoName) == state.FunctionProtos.end()) {
+  if (Proto &&
+      state.FunctionProtos.find(protoName) == state.FunctionProtos.end()) {
     state.FunctionProtos[protoName] = std::move(Proto);
   }
   // If this is an operator, install it.
@@ -443,8 +443,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
       for (const auto &decl : internalVariables) {
         llvm::Type *type;
         llvm::Value *defaultValue = nullptr;
-        if (decl->getEntityType() == "signal" ||
-            decl->getObjectType() == "signal") {
+        if (decl->getEntityType() == "signal") {
           //  Local signals in loops are reset on every trigger, so they are
           //  allocated and set to their default value
           auto defaultNode = decl->getPropertyValue("default");
@@ -454,15 +453,13 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
             continue;
           }
           auto typeNode = decl->getPropertyValue("type");
-          if (typeNode && (typeNode->getNodeType() == AST::Entity ||
-                           typeNode->getNodeType() == AST::Block)) {
+          if (typeNode && typeNode->getNodeType() == AST::Entity) {
             auto typeBlockName =
                 std::static_pointer_cast<EntityNode>(typeNode)->getName();
             if (state.typesMap.find(typeBlockName) != state.typesMap.end()) {
               type = state.typesMap[typeBlockName];
             } else {
-              LOG_ERROR() << "Unknown type " << typeBlockName
-                          << " . Falling back on double" << std::endl;
+              LOG_ERROR() << "Unknown type " << typeBlockName << std::endl;
             }
             if (typeBlockName == "_RealType") {
               double val =
@@ -499,10 +496,10 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
               LOG_ERROR() << "Unsupported type. Falling back on double"
                           << std::endl;
               assert(0 == 1);
-              type = llvm::Type::getDoubleTy(*state.TheContext);
-              defaultValue = llvm::ConstantFP::get(
-                  llvm::Type::getDoubleTy(*state.TheContext),
-                  llvm::APFloat(0.0));
+              // type = llvm::Type::getDoubleTy(*state.TheContext);
+              // defaultValue = llvm::ConstantFP::get(
+              //     llvm::Type::getDoubleTy(*state.TheContext),
+              //     llvm::APFloat(0.0));
             }
           } else {
             LOG_ERROR() << "Unsupported type. Falling back on double"
@@ -523,9 +520,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
           state.NamedValues[VarName] = {Variable, type};
 
         } else if (decl->getEntityType() == "switch" ||
-                   decl->getObjectType() == "switch" ||
-                   decl->getEntityType() == "trigger" ||
-                   decl->getObjectType() == "trigger") {
+                   decl->getEntityType() == "trigger") {
           //  Local switches in loops are reset on every trigger, so they are
           //  allocated and set to their default value
           type = state.typesMap["_SwitchType"];
@@ -543,8 +538,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
           } else {
             LOG_ERROR() << "No default for switch" << std::endl;
           }
-        } else if (decl->getEntityType() == "iterator" ||
-                   decl->getObjectType() == "iterator") {
+        } else if (decl->getEntityType() == "iterator") {
           LOG_INFO() << "iterator" << std::endl;
           auto startNode = decl->getPropertyValue("default");
           auto limitNode = decl->getPropertyValue("limit");
@@ -580,7 +574,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
         state.NamedValues[VarName] = {Variable, type};
       }
 
-      for (const auto &portPropArg : P.getUsedPortProperties()) {
+      for (const auto &portPropArg : P.getUsedMemberAccesses()) {
         // state.NamedValues[externalArg.name] = {externalArg,
         // externalArg.llvmType};
       }
@@ -717,7 +711,7 @@ std::vector<PrototypeArg> PrototypeAST::getInternalArgs() const {
   return InternalPersistentArgs;
 }
 
-std::vector<PrototypeArg> PrototypeAST::getUsedPortProperties() const {
+std::vector<PrototypeArg> PrototypeAST::getUsedMemberAccesses() const {
   return UsedPortProperties;
 }
 
@@ -848,8 +842,7 @@ llvm::Value *func(llvm::Value *value, std::optional<llvm::Type *> type,
     if (!allocTy || allocTy->isVoidTy()) {
       allocTy = llvm::Type::getDoubleTy(*state.TheContext);
     }
-    ArgsV = state.Builder->CreateAlloca(allocTy, nullptr,
-                                        "LiteralValTemp");
+    ArgsV = state.Builder->CreateAlloca(allocTy, nullptr, "LiteralValTemp");
     state.Builder->CreateStore(value, ArgsV);
   }
   //    value->print(llvm::outs());
@@ -881,12 +874,11 @@ void processArgGroup(
             !state.globalExists(varName)) {
           llvm::Function *TheFunction =
               state.Builder->GetInsertBlock()->getParent();
-          llvm::Type *elemTy =
-              llvm::Type::getInt32Ty(*state.TheContext);
+          llvm::Type *elemTy = llvm::Type::getInt32Ty(*state.TheContext);
           llvm::AllocaInst *tempAlloc = state.CreateEntryBlockAlloca(
               TheFunction, varName + "_tmp", elemTy);
-          state.Builder->CreateStore(
-              llvm::Constant::getNullValue(elemTy), tempAlloc);
+          state.Builder->CreateStore(llvm::Constant::getNullValue(elemTy),
+                                     tempAlloc);
           if (tempOuts) {
             tempOuts->push_back({varName, tempAlloc, elemTy});
           }
@@ -908,8 +900,8 @@ void processArgGroup(
                                : llvm::Type::getInt32Ty(*state.TheContext);
       llvm::AllocaInst *tempAlloc =
           state.CreateEntryBlockAlloca(TheFunction, varName + "_tmp", elemTy);
-      state.Builder->CreateStore(
-          llvm::Constant::getNullValue(elemTy), tempAlloc);
+      state.Builder->CreateStore(llvm::Constant::getNullValue(elemTy),
+                                 tempAlloc);
       if (tempOuts && varExpr) {
         tempOuts->push_back({varExpr->getName(), tempAlloc, elemTy});
       }
@@ -928,7 +920,7 @@ void processArgGroup(
       for (const auto &expr : list->elements()) {
         auto [val, elemType] = expr->codegen(state);
         if (auto *varExpr = dynamic_cast<VariableExprAST *>(expr.get())) {
-          auto indeces = varExpr->getIndeces();
+          auto indeces = varExpr->getIndices();
           if (!indeces.empty() && val->getType()->isPointerTy()) {
             std::vector<llvm::Value *> idxList;
             auto idx = indeces[0];
@@ -987,7 +979,7 @@ void processArgGroup(
     } else {
       llvm::Value *newArgVal = nullptr;
       if (auto varExpr = dynamic_cast<VariableExprAST *>(ArgGroup[i].get())) {
-        auto indeces = varExpr->getIndeces();
+        auto indeces = varExpr->getIndices();
         if (indeces.size() > 0) {
           // FIXME support ranges
           std::vector<llvm::Value *> idxList;
@@ -1024,7 +1016,8 @@ void processArgGroup(
           }
           llvm::Type *gepElemType = type.value();
           if (gepElemType->isArrayTy()) {
-            gepElemType = static_cast<llvm::ArrayType *>(gepElemType)->getElementType();
+            gepElemType =
+                static_cast<llvm::ArrayType *>(gepElemType)->getElementType();
           }
           auto *GEP = state.Builder->CreateGEP(gepElemType, value, idxList);
           value = GEP;
@@ -1389,7 +1382,7 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
                         std::optional<llvm::Type *> elemType)
       -> std::pair<llvm::Value *, std::optional<llvm::Type *>> {
     if (auto *varExpr = dynamic_cast<VariableExprAST *>(expr)) {
-      auto indeces = varExpr->getIndeces();
+      auto indeces = varExpr->getIndices();
       if (!indeces.empty() && val->getType()->isPointerTy()) {
         std::vector<llvm::Value *> idxList;
         auto idx = indeces[0];
@@ -1423,7 +1416,8 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
       }
     }
     if (val->getType()->isPointerTy()) {
-      llvm::Type *loadTy = (elemType.has_value() && elemType.value() && !elemType.value()->isVoidTy())
+      llvm::Type *loadTy = (elemType.has_value() && elemType.value() &&
+                            !elemType.value()->isVoidTy())
                                ? elemType.value()
                                : llvm::Type::getDoubleTy(*state.TheContext);
       val = state.Builder->CreateLoad(loadTy, val, "");

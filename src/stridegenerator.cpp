@@ -22,9 +22,9 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
                               StrideCompiler &state) {
   for (const auto &node : tree->getChildren()) {
     if (node->getNodeType() == AST::Declaration ||
-        node->getNodeType() == AST::BundleDeclaration) {
+        node->getNodeType() == AST::ArrayDeclaration) {
       auto decl = std::static_pointer_cast<DeclarationNode>(node);
-      if (decl->getObjectType() == "platformModule") {
+      if (decl->getEntityType() == "platformModule") {
         StrideGenerator::generatePlatformFunctionSignature(
             decl, scope.back().second, state);
       }
@@ -107,7 +107,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
         for (const auto &externalInput :
              domainExternalInputNode->getChildren()) {
           if (externalInput->getNodeType() == AST::Declaration ||
-              externalInput->getNodeType() == AST::BundleDeclaration) {
+              externalInput->getNodeType() == AST::ArrayDeclaration) {
             auto decl =
                 std::static_pointer_cast<DeclarationNode>(externalInput);
             ExternalArgs.push_back({decl->getName(), state.getLLVMType(decl),
@@ -129,7 +129,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
         for (const auto &externalOutput :
              domainExternalOutputNode->getChildren()) {
           if (externalOutput->getNodeType() == AST::Declaration ||
-              externalOutput->getNodeType() == AST::BundleDeclaration) {
+              externalOutput->getNodeType() == AST::ArrayDeclaration) {
             auto decl =
                 std::static_pointer_cast<DeclarationNode>(externalOutput);
             ExternalArgs.push_back({decl->getName(), state.getLLVMType(decl),
@@ -227,8 +227,8 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
           auto defaultValueNode = decl->getPropertyValue("default");
           if (!defaultValueNode)
             return;
-          if (decl->getObjectType() == "switch" ||
-              decl->getObjectType() == "trigger") {
+          if (decl->getEntityType() == "switch" ||
+              decl->getEntityType() == "trigger") {
             if (defaultValueNode->getNodeType() == AST::Switch) {
               auto varInit = std::make_unique<BinaryExprAST>(
                   '=', std::make_unique<VariableExprAST>(decl->getName()),
@@ -240,7 +240,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
               LOG_ERROR() << "Unsupported type for switch default: "
                           << defaultValueNode->toText() << std::endl;
             }
-          } else if (decl->getObjectType() == "signal") {
+          } else if (decl->getEntityType() == "signal") {
             llvm::Type *llvmType = state.getLLVMType(decl);
             std::unique_ptr<ExprAST> valExpr;
             if (defaultValueNode->getNodeType() == AST::Real) {
@@ -290,7 +290,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
       for (const auto &smCtx : smContexts) {
         for (const auto &fs : smCtx.flattenedStates) {
           if (fs.stateDecl) {
-            auto blocks = ASTQuery::getStateMachineBlocks(fs.stateDecl);
+            auto blocks = ASTQuery::getStateMachineEntities(fs.stateDecl);
             for (const auto &blockNode : blocks) {
               if (blockNode->getNodeType() == AST::Declaration) {
                 addDeclToResetBody(
@@ -304,18 +304,18 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
 
     for (const auto &node : tree->getChildren()) {
       if (node->getNodeType() == AST::Declaration ||
-          node->getNodeType() == AST::BundleDeclaration) {
+          node->getNodeType() == AST::ArrayDeclaration) {
         auto decl = std::static_pointer_cast<DeclarationNode>(node);
         auto domainNode = decl->getPropertyValue("domain");
         auto defaultValueNode = decl->getPropertyValue("default");
         if (defaultValueNode && domainNode &&
-            domainNode->getNodeType() == AST::Block) {
+            domainNode->getNodeType() == AST::Entity) {
           if (ASTQuery::getNodeName(domainNode) == domainName) {
             if (node->getNodeType() == AST::Declaration) {
               addDeclToResetBody(decl);
-            } else if (node->getNodeType() == AST::BundleDeclaration) {
+            } else if (node->getNodeType() == AST::ArrayDeclaration) {
               std::vector<LangError> errors;
-              int size = ASTQuery::getBlockDeclaredSize(
+              int size = ASTQuery::getEntityDeclaredSize(
                   std::static_pointer_cast<DeclarationNode>(node), scope, tree,
                   &errors);
               std::vector<ASTNode> defaultValues;
@@ -408,19 +408,17 @@ std::unique_ptr<ExprAST> StrideGenerator::createExpr(ASTNode node) {
   if (!node) {
     return nullptr;
   }
-  if (node->getNodeType() == AST::Block || node->getNodeType() == AST::Entity) {
+  if (node->getNodeType() == AST::Entity) {
     std::unique_ptr<ExprAST> V = std::make_unique<VariableExprAST>(
         std::static_pointer_cast<EntityNode>(node)->getName());
     setTypeCastMetadata(node, V.get());
     return V;
-  } else if (node->getNodeType() == AST::Bundle ||
-             node->getNodeType() == AST::Array) {
+  } else if (node->getNodeType() == AST::Array) {
     auto bundleNode = std::static_pointer_cast<ArrayNode>(node);
 
     std::vector<std::variant<size_t, std::string>> indeces;
     for (const auto &idx : bundleNode->index()->getChildren()) {
-      if (idx->getNodeType() == AST::Block ||
-          idx->getNodeType() == AST::Entity) {
+      if (idx->getNodeType() == AST::Entity) {
         indeces.push_back(std::static_pointer_cast<EntityNode>(idx)->getName());
       } else if (idx->getNodeType() == AST::Int) {
         indeces.push_back(
@@ -486,10 +484,10 @@ std::unique_ptr<ExprAST> StrideGenerator::createExpr(ASTNode node) {
   } else if (node->getNodeType() == AST::String) {
     auto list = std::make_unique<ListExprAST>(node->getChildren());
     return list;
-  } else if (node->getNodeType() == AST::PortProperty) {
-    auto pp = std::static_pointer_cast<PortPropertyNode>(node);
+  } else if (node->getNodeType() == AST::MemberAccess) {
+    auto pp = std::static_pointer_cast<MemberAccessNode>(node);
     auto V =
-        std::make_unique<PortPropertyAST>(pp->getName(), pp->getPortName());
+        std::make_unique<MemberAccessAST>(pp->getEntity(), pp->getPropertyName());
     setTypeCastMetadata(node, V.get());
     return V;
   }
@@ -527,7 +525,7 @@ void StrideGenerator::processStateStreams(
     ScopeStack scope, ASTNode tree, StrideCompiler &state,
     const std::string &domainName) {
   // 1. Get state's local blocks and push to scope
-  std::vector<ASTNode> blocks = ASTQuery::getStateMachineBlocks(stateNode);
+  std::vector<ASTNode> blocks = ASTQuery::getStateMachineEntities(stateNode);
   scope.push_back({stateNode, blocks});
 
   // 2. Evaluate streams and track them in the state machine structs
@@ -559,9 +557,7 @@ void StrideGenerator::processStateStreams(
         if (t.transitionDecl) {
           auto guardProp = t.transitionDecl->getPropertyValue("guard");
           if (guardProp) {
-            if (guardProp->getNodeType() == AST::Block ||
-                guardProp->getNodeType() == AST::Entity ||
-                guardProp->getNodeType() == AST::Bundle ||
+            if (guardProp->getNodeType() == AST::Entity ||
                 guardProp->getNodeType() == AST::Array) {
               t.guardCode.push_back(createExpr(guardProp));
             } else if (guardProp->getNodeType() == AST::None) {
@@ -584,8 +580,7 @@ void StrideGenerator::processStateStreams(
   auto statesProp = stateNode->getPropertyValue("states");
   if (statesProp && statesProp->getNodeType() == AST::List) {
     for (const auto &child : statesProp->getChildren()) {
-      if (child->getNodeType() == AST::Entity ||
-          child->getNodeType() == AST::Block) {
+      if (child->getNodeType() == AST::Entity) {
         auto childName = std::static_pointer_cast<EntityNode>(child)->getName();
         auto childDecl =
             ASTQuery::findDeclarationByName(childName, scope, tree);
@@ -619,9 +614,8 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
               if (!varType || varType->isVoidTy() || !varType->isSized()) {
                 varType = llvm::Type::getDoubleTy(*state.TheContext);
               }
-              if (varDecl->getNodeType() == AST::ArrayDeclaration ||
-                  varDecl->getNodeType() == AST::BundleDeclaration) {
-                int size = ASTQuery::getBlockDeclaredSize(varDecl, scope, tree);
+              if (varDecl->getNodeType() == AST::ArrayDeclaration) {
+                int size = ASTQuery::getEntityDeclaredSize(varDecl, scope, tree);
                 if (size > 0) {
                   varType = llvm::ArrayType::get(varType, size);
                 }
@@ -747,14 +741,13 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
                       llvm::Type::getInt32Ty(*state.TheContext), 0));
             }
             if (fs.stateDecl) {
-              auto blocks = ASTQuery::getStateMachineBlocks(fs.stateDecl);
+              auto blocks = ASTQuery::getStateMachineEntities(fs.stateDecl);
               for (const auto &blockNode : blocks) {
                 if (blockNode->getNodeType() == AST::Declaration ||
-                    blockNode->getNodeType() == AST::ArrayDeclaration ||
-                    blockNode->getNodeType() == AST::BundleDeclaration) {
+                    blockNode->getNodeType() == AST::ArrayDeclaration) {
                   auto varDecl =
                       std::static_pointer_cast<DeclarationNode>(blockNode);
-                  std::string objType = varDecl->getObjectType();
+                  std::string objType = varDecl->getEntityType();
                   if (objType == "switch" || objType == "signal" ||
                       objType == "trigger" || objType == "constant") {
                     registerVarDeclAsDynamicField(varDecl);
@@ -768,16 +761,14 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
         // 2. Add domain-level signals, switches, triggers, and guards
         for (const auto &childNode : tree->getChildren()) {
           if (childNode->getNodeType() == AST::Declaration ||
-              childNode->getNodeType() == AST::ArrayDeclaration ||
-              childNode->getNodeType() == AST::BundleDeclaration) {
+              childNode->getNodeType() == AST::ArrayDeclaration) {
             auto varDecl = std::static_pointer_cast<DeclarationNode>(childNode);
-            std::string objType = varDecl->getObjectType();
+            std::string objType = varDecl->getEntityType();
             if (objType == "switch" || objType == "signal" ||
                 objType == "trigger" || objType == "constant") {
               auto domainProp = varDecl->getPropertyValue("domain");
               bool belongsToDomain = false;
-              if (domainProp && (domainProp->getNodeType() == AST::Entity ||
-                                 domainProp->getNodeType() == AST::Block)) {
+              if (domainProp && domainProp->getNodeType() == AST::Entity) {
                 belongsToDomain =
                     (ASTQuery::getNodeName(domainProp) == domainName);
               } else if (!domainProp) {
@@ -818,14 +809,13 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
       //          true);
       //      state.Builder->CreateRet(RetVal);
     } else if (node->getNodeType() == AST::Declaration ||
-               node->getNodeType() == AST::ArrayDeclaration ||
-               node->getNodeType() == AST::BundleDeclaration) {
+               node->getNodeType() == AST::ArrayDeclaration) {
       auto decl = std::static_pointer_cast<DeclarationNode>(node);
-      if (decl->getObjectType() == "_domainDefinition" ||
-          decl->getObjectType() == "gameDefinition") {
+      if (decl->getEntityType() == "_domainDefinition" ||
+          decl->getEntityType() == "gameDefinition") {
         generatedIRCode.domainGeneratedCode[decl->getName()];
       }
-      if (decl->getObjectType() == "signal" ||
+      if (decl->getEntityType() == "signal" ||
           ASTQuery::isConstant(decl, scope, tree)) {
         auto *type = state.getLLVMType(decl);
 
@@ -861,8 +851,8 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
         } else {
           assert(0 == 1);
         }
-      } else if (decl->getObjectType() == "switch" ||
-                 decl->getObjectType() == "trigger") {
+      } else if (decl->getEntityType() == "switch" ||
+                 decl->getEntityType() == "trigger") {
         bool inDynamicDomain = false;
         for (const auto &pair : state.dynamicDomainFields) {
           for (const auto &field : pair.second) {
@@ -931,8 +921,7 @@ bool StrideGenerator::processPreviousFunction(
     llvm::Type *outType = nullptr;
     if (outputsNode && outputsNode->getChildren().size() > 0) {
       auto outputTypeNode = outputsNode->getChildren()[0];
-      if (outputTypeNode && (outputTypeNode->getNodeType() == AST::Entity ||
-                             outputTypeNode->getNodeType() == AST::Block)) {
+      if (outputTypeNode && outputTypeNode->getNodeType() == AST::Entity) {
         auto outputType = std::static_pointer_cast<EntityNode>(outputTypeNode);
         if (state.typesMap.find(outputType->getName()) !=
             state.typesMap.end()) {
@@ -949,21 +938,19 @@ bool StrideGenerator::processPreviousFunction(
       }
     }
 
-    if (blockDecl->getObjectType() == "trigger") {
+    if (blockDecl->getEntityType() == "trigger") {
       std::vector<std::unique_ptr<ExprAST>> Expressions;
       auto triggerResetsNode = blockDecl->getCompilerProperty("triggerResets");
       if (triggerResetsNode) {
         for (const auto &node : triggerResetsNode->getChildren()) {
           if (node->getNodeType() == AST::Declaration ||
-              node->getNodeType() == AST::ArrayDeclaration ||
-              node->getNodeType() == AST::BundleDeclaration) {
+              node->getNodeType() == AST::ArrayDeclaration) {
             auto resetNodeDecl =
                 std::static_pointer_cast<DeclarationNode>(node);
             // TODO is this code duplicated?
-            if (resetNodeDecl->getObjectType() == "signal") {
+            if (resetNodeDecl->getEntityType() == "signal") {
               auto typeNode = resetNodeDecl->getPropertyValue("type");
-              if (typeNode && (typeNode->getNodeType() == AST::Entity ||
-                               typeNode->getNodeType() == AST::Block)) {
+              if (typeNode && typeNode->getNodeType() == AST::Entity) {
                 auto typeName =
                     std::static_pointer_cast<EntityNode>(typeNode)->getName();
                 auto defaultNode = resetNodeDecl->getPropertyValue("default");
@@ -999,8 +986,8 @@ bool StrideGenerator::processPreviousFunction(
                 assert(0 == 1);
               }
 
-            } else if (resetNodeDecl->getObjectType() == "switch" ||
-                       resetNodeDecl->getObjectType() == "trigger") {
+            } else if (resetNodeDecl->getEntityType() == "switch" ||
+                       resetNodeDecl->getEntityType() == "trigger") {
 
             } else {
               assert(0 == 1);
@@ -1114,7 +1101,7 @@ void StrideGenerator::collectInputArgs(
 
             if (elemDecl) {
               args.MainIn.argTypes.push_back(
-                  state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
+                  state.getLLVMTypeForCodegenEntity(elemDecl, funcDecl, func));
             } else if (currentChildNode->getNodeType() == AST::Int) {
               // TODO get types from framework
               args.MainIn.argTypes.push_back(
@@ -1122,8 +1109,7 @@ void StrideGenerator::collectInputArgs(
             } else if (currentChildNode->getNodeType() == AST::Real) {
               args.MainIn.argTypes.push_back(
                   llvm::Type::getDoubleTy(*state.TheContext));
-            } else if (currentChildNode->getNodeType() == AST::MemberAccess ||
-                       currentChildNode->getNodeType() == AST::PortProperty) {
+            } else if (currentChildNode->getNodeType() == AST::MemberAccess) {
               auto pp = std::static_pointer_cast<MemberAccessNode>(currentChildNode);
               if (pp->getPropertyName() == "size") {
                 args.MainIn.argTypes.push_back(
@@ -1142,7 +1128,7 @@ void StrideGenerator::collectInputArgs(
               // Fallback. We shouldn't get here when things are fully
               // implemented
               args.MainIn.argTypes.push_back(
-                  state.getLLVMTypeForCodegenBlock(elemDecl, funcDecl, func));
+                  state.getLLVMTypeForCodegenEntity(elemDecl, funcDecl, func));
               LOG_ERROR() << "Unsupported type for: " << currentChildNode->toText()
                           << std::endl;
             }
@@ -1225,9 +1211,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
     }
   }
   if ((leftNode && leftNode->getNodeType() == AST::Switch) ||
-      (leftDecl && (leftDecl->getObjectType() == "switch" ||
-                    leftDecl->getObjectType() == "trigger" ||
-                    leftDecl->getEntityType() == "switch" ||
+      (leftDecl && (leftDecl->getEntityType() == "switch" ||
                     leftDecl->getEntityType() == "trigger"))) {
     StreamNodeIterator checkIt(stream);
     while (auto n = checkIt.next()) {
@@ -1239,9 +1223,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
             funcDecls, funcNode, scope, tree);
         if (firstFuncDecl) {
           std::string entType = firstFuncDecl->getEntityType();
-          std::string objType = firstFuncDecl->getObjectType();
-          if (entType == "reaction" || entType == "action" ||
-              objType == "reaction" || objType == "action") {
+          if (entType == "reaction" || entType == "action") {
             isTriggeredReactionStream = true;
           }
         }
@@ -1264,7 +1246,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       // FIXME resolve downstream domains correctly
       // FIXME this should be done in the resolver, not here
       auto connection =
-          CodeAnalysis::resolveConnectionBlock(next, scope, tree, true);
+          CodeAnalysis::resolveConnectionEntity(next, scope, tree, true);
       if (connection) {
         domainName = CodeAnalysis::getNodeDomainName(connection, scope, tree);
         if (domainName.size() == 0) {
@@ -1289,21 +1271,17 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         }
       }
     } else if (current->getNodeType() == AST::Entity ||
-               current->getNodeType() == AST::Block ||
-               current->getNodeType() == AST::Array ||
-               current->getNodeType() == AST::Bundle) {
+               current->getNodeType() == AST::Array) {
       // -------------------------------------------------------------
-      // Entity/Block / Array/Bundle
+      // Entity / Array
       auto block = createExpr(current);
       auto decl = ASTQuery::findDeclarationByName(
           ASTQuery::getNodeName(current), scope, tree);
-      if (current->getNodeType() == AST::Array ||
-          current->getNodeType() == AST::Bundle) {
+      if (current->getNodeType() == AST::Array) {
         auto indexNode = std::static_pointer_cast<ArrayNode>(current)->index();
         if (indexNode->getNodeType() == AST::List) {
           for (const auto &elem : indexNode->getChildren()) {
-            if (elem->getNodeType() == AST::Entity ||
-                elem->getNodeType() == AST::Block) {
+            if (elem->getNodeType() == AST::Entity) {
               auto indexDecl = ASTQuery::findDeclarationByName(
                   ASTQuery::getNodeName(elem), scope, tree);
               if (indexDecl) {
@@ -1366,11 +1344,10 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         auto isCallableDecl = [](const std::shared_ptr<DeclarationNode> &d) {
           if (!d)
             return false;
-          for (const auto &t : {d->getEntityType(), d->getObjectType()}) {
-            if (t == "module" || t == "reaction" || t == "action" ||
-                t == "loop" || t == "platformModule" || t == "function") {
-              return true;
-            }
+          const auto &t = d->getEntityType();
+          if (t == "module" || t == "reaction" || t == "action" ||
+              t == "loop" || t == "platformModule" || t == "function") {
+            return true;
           }
           return false;
         };
@@ -1424,14 +1401,12 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
 
       llvm::Type *retType = state.getLLVMType(nextDecl);
       if (retType->isVoidTy() &&
-          (funcDecl->getEntityType() == "platformModule" ||
-           funcDecl->getObjectType() == "platformModule")) {
+          funcDecl->getEntityType() == "platformModule") {
         auto outputList = funcDecl->getPropertyValue("outputs");
         if (outputList && outputList->getNodeType() == AST::List &&
             outputList->getChildren().size() > 0) {
           auto outputBlock = outputList->getChildren()[0];
-          if (outputBlock->getNodeType() == AST::Entity ||
-              outputBlock->getNodeType() == AST::Block) {
+          if (outputBlock->getNodeType() == AST::Entity) {
             auto outputType =
                 std::static_pointer_cast<EntityNode>(outputBlock)->getName();
             if (state.typesMap.find(outputType) != state.typesMap.end()) {
@@ -1441,8 +1416,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         }
       }
 
-      if (funcDecl->getEntityType() == "platformModule" ||
-          funcDecl->getObjectType() == "platformModule") {
+      if (funcDecl->getEntityType() == "platformModule") {
         externFunc = state.getExternalFunction(func->getName(), retType,
                                                args.MainIn.argTypes);
       }
@@ -1573,7 +1547,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
           }
           std::vector<std::unique_ptr<ExprAST>> PortPropArgs;
           if (funcDecl) {
-            auto usedPortProps = CodeAnalysis::getUsedPortProperties(funcDecl);
+            auto usedPortProps = CodeAnalysis::getUsedMemberAccesses(funcDecl);
             auto innerScope = scope;
             std::vector<ASTNode> blocks;
             auto blocksNode = funcDecl->getPropertyValue("blocks");
@@ -1583,29 +1557,27 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
             innerScope.push_back({funcDecl, blocks});
             for (const auto &ppNode : usedPortProps) {
               if (ppNode->getPropertyName() == "size") {
-                auto size = CodeAnalysis::evaluateSizePortProperty(
+                auto size = CodeAnalysis::evaluateSizeMemberAccess(
                     ppNode->getEntity(), innerScope, funcDecl, func, tree);
                 // TODO determine integer type for size from platform
                 // definition.
                 PortPropArgs.push_back(std::make_unique<IntExprAST>(size, 32));
               } else if (ppNode->getPropertyName() == "rate") {
-                auto rate = CodeAnalysis::evaluateRatePortProperty(
+                auto rate = CodeAnalysis::evaluateRateMemberAccess(
                     ppNode->getEntity(), innerScope, funcDecl, func, tree);
                 PortPropArgs.push_back(std::make_unique<RealExprAST>(rate));
               }
             }
-            if (funcDecl->getEntityType() == "module" ||
-                funcDecl->getObjectType() == "module") {
+            if (funcDecl->getEntityType() == "module") {
               LOG_DEBUG() << "Module instance:" << std::endl;
               for (const auto &blockNode : blocks) {
                 if (blockNode->getNodeType() == AST::Declaration ||
-                    blockNode->getNodeType() == AST::ArrayDeclaration ||
-                    blockNode->getNodeType() == AST::BundleDeclaration) {
+                    blockNode->getNodeType() == AST::ArrayDeclaration) {
                   auto blockDecl =
                       std::static_pointer_cast<DeclarationNode>(blockNode);
 
-                  if (!ASTQuery::isPortBlock(blockDecl, funcDecl, scope,
-                                             tree) &&
+                  if (!ASTQuery::isPortEntity(blockDecl, funcDecl, scope,
+                                              tree) &&
                       blockDecl->getCompilerProperty("persistent")) {
                     // Only modules create external instances for their internal
                     // values to have persistence.
@@ -1643,16 +1615,12 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
           } else {
             // Function already declared
             if (funcDecl) {
-              if (funcDecl->getEntityType() == "module" ||
-                  funcDecl->getObjectType() == "module") {
+              if (funcDecl->getEntityType() == "module") {
                 callexpr->callType = CallableType::Module;
               } else if (funcDecl->getEntityType() == "reaction" ||
-                         funcDecl->getObjectType() == "reaction" ||
-                         funcDecl->getEntityType() == "action" ||
-                         funcDecl->getObjectType() == "action") {
+                         funcDecl->getEntityType() == "action") {
                 callexpr->callType = CallableType::Reaction;
-              } else if (funcDecl->getEntityType() == "loop" ||
-                         funcDecl->getObjectType() == "loop") {
+              } else if (funcDecl->getEntityType() == "loop") {
                 callexpr->callType = CallableType::Loop;
               } else {
                 LOG_INFO() << " ERROR: Can't set callable type" << std::endl;
@@ -1689,8 +1657,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       } else {
         generated[domainName].expr.push_back(createExpr(current));
       }
-    } else if (current->getNodeType() == AST::MemberAccess ||
-               current->getNodeType() == AST::PortProperty) {
+    } else if (current->getNodeType() == AST::MemberAccess) {
       generated[domainName].expr.push_back(createExpr(current));
     } else {
       LOG_ERROR() << "ERROR: Unsupported type" << std::endl;
@@ -1740,15 +1707,11 @@ bool StrideGenerator::resolveIOParamsFromDefinition(
     for (const auto &portNode : portsList->getChildren()) {
       auto portDecl = std::static_pointer_cast<DeclarationNode>(portNode);
       auto portTypeStr = portDecl->getEntityType();
-      if (portTypeStr.empty()) {
-        portTypeStr = portDecl->getObjectType();
-      }
       if (portTypeStr == "mainInputPort" || portTypeStr == "mainOutputPort" ||
           portTypeStr == "propertyInputPort" ||
           portTypeStr == "propertyOutputPort") {
         auto blockNode = portDecl->getPropertyValue("block");
-        if (blockNode && (blockNode->getNodeType() == AST::Entity ||
-                          blockNode->getNodeType() == AST::Block)) {
+        if (blockNode && blockNode->getNodeType() == AST::Entity) {
           auto blockName =
               std::static_pointer_cast<EntityNode>(blockNode)->getName();
           auto blockDeclNode =
@@ -1762,8 +1725,8 @@ bool StrideGenerator::resolveIOParamsFromDefinition(
             canResolve = false;
             break;
           }
-          auto type = state.getLLVMTypeForCodegenBlock(blockDeclNode, funcDecl,
-                                                       funcInstance);
+          auto type = state.getLLVMTypeForCodegenEntity(blockDeclNode, funcDecl,
+                                                        funcInstance);
           if (!type) {
             canResolve = false;
             break;
@@ -1793,7 +1756,7 @@ bool StrideGenerator::resolveIOParamsFromDefinition(
   }
 
   if (ioParamsResolved) {
-    auto usedBlocks = CodeAnalysis::getUsedBlocksInStreams(funcDecl);
+    auto usedBlocks = CodeAnalysis::getUsedEntitiesInStreams(funcDecl);
     std::vector<std::string> seen;
     for (const auto &block : usedBlocks) {
       std::shared_ptr<DeclarationNode> outBlockDecl;
@@ -1806,8 +1769,8 @@ bool StrideGenerator::resolveIOParamsFromDefinition(
           std::string blockName = ASTQuery::getNodeName(outBlockDecl);
           if (std::find(seen.begin(), seen.end(), blockName) == seen.end()) {
             seen.push_back(blockName);
-            auto type = state.getLLVMTypeForCodegenBlock(outBlockDecl, funcDecl,
-                                                         funcInstance);
+            auto type = state.getLLVMTypeForCodegenEntity(outBlockDecl, funcDecl,
+                                                          funcInstance);
             if (type) {
               PrototypeArg arg{blockName, type};
               auto funcType =
@@ -1925,7 +1888,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
       for (const auto &var : nodeTree->input) {
         auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
         auto type =
-            state.getLLVMTypeForCodegenBlock(decl, funcDecl, funcInstance);
+            state.getLLVMTypeForCodegenEntity(decl, funcDecl, funcInstance);
         InParams.push_back(
             PrototypeArg{ASTQuery::getNodeName(var.first), type});
       }
@@ -1933,7 +1896,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
       for (const auto &var : nodeTree->output) {
         auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
         auto type =
-            state.getLLVMTypeForCodegenBlock(decl, funcDecl, funcInstance);
+            state.getLLVMTypeForCodegenEntity(decl, funcDecl, funcInstance);
         OutParams.push_back(
             PrototypeArg{ASTQuery::getNodeName(var.first), type});
       }
@@ -1952,7 +1915,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
       for (const auto &var : nodeTree->internal) {
         auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
         auto type =
-            state.getLLVMTypeForCodegenBlock(decl, funcDecl, funcInstance);
+            state.getLLVMTypeForCodegenEntity(decl, funcDecl, funcInstance);
         if (fallbackIsDomainMember && fallbackIsCodeGenerator) {
           usedInternalVariables.push_back(decl);
         } else if (decl->getPropertyValue("persistent")) {
@@ -1967,7 +1930,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
       for (const auto &var : nodeTree->persistent) {
         auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
         auto type =
-            state.getLLVMTypeForCodegenBlock(decl, funcDecl, funcInstance);
+            state.getLLVMTypeForCodegenEntity(decl, funcDecl, funcInstance);
         if (fallbackIsDomainMember && fallbackIsCodeGenerator) {
           usedInternalVariables.push_back(decl);
         } else {
@@ -1978,15 +1941,13 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
 
       for (const auto &var : nodeTree->external) {
         if (var.first->getNodeType() == AST::Declaration ||
-            var.first->getNodeType() == AST::ArrayDeclaration ||
-            var.first->getNodeType() == AST::BundleDeclaration) {
+            var.first->getNodeType() == AST::ArrayDeclaration) {
           auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
           auto type =
-              state.getLLVMTypeForCodegenBlock(decl, funcDecl, funcInstance);
+              state.getLLVMTypeForCodegenEntity(decl, funcDecl, funcInstance);
           ExternalParams.push_back(
               PrototypeArg{ASTQuery::getNodeName(var.first), type});
-        } else if (var.first->getNodeType() == AST::MemberAccess ||
-                   var.first->getNodeType() == AST::PortProperty) {
+        } else if (var.first->getNodeType() == AST::MemberAccess) {
           // Port properties are added in a separate pass
           // TODO move this pass here?
         } else {
@@ -1999,7 +1960,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
     }
   }
 
-  auto usedPortPropertiesNodes = CodeAnalysis::getUsedPortProperties(funcDecl);
+  auto usedPortPropertiesNodes = CodeAnalysis::getUsedMemberAccesses(funcDecl);
   for (const auto &pp : usedPortPropertiesNodes) {
     // FIXME validate unique name
     std::string name = pp->getEntity() + "_" + pp->getPropertyName();
@@ -2038,19 +1999,14 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
   newfunc->funcInstance =
       funcInstance ? ASTNode(funcInstance) : ASTNode(funcDecl);
 
-  if (funcDecl->getEntityType() == "module" ||
-      funcDecl->getObjectType() == "module") {
+  if (funcDecl->getEntityType() == "module") {
     newfunc->callType = CallableType::Module;
   } else if (funcDecl->getEntityType() == "reaction" ||
-             funcDecl->getObjectType() == "reaction" ||
-             funcDecl->getEntityType() == "action" ||
-             funcDecl->getObjectType() == "action") {
+             funcDecl->getEntityType() == "action") {
     newfunc->callType = CallableType::Reaction;
-  } else if (funcDecl->getEntityType() == "loop" ||
-             funcDecl->getObjectType() == "loop") {
+  } else if (funcDecl->getEntityType() == "loop") {
     newfunc->callType = CallableType::Loop;
-  } else if (funcDecl->getEntityType() == "platformModule" ||
-             funcDecl->getObjectType() == "platformModule") {
+  } else if (funcDecl->getEntityType() == "platformModule") {
     newfunc->callType = CallableType::External;
   } else {
     LOG_ERROR() << "Callable type unsuported" << std::endl;
@@ -2058,8 +2014,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
 
   auto terminateWhenNode = funcDecl->getPropertyValue("terminateWhen");
   if (terminateWhenNode) {
-    if (terminateWhenNode->getNodeType() == AST::Entity ||
-        terminateWhenNode->getNodeType() == AST::Block) {
+    if (terminateWhenNode->getNodeType() == AST::Entity) {
       newfunc->terminateWhenName =
           std::static_pointer_cast<EntityNode>(terminateWhenNode)->getName();
     } else if (terminateWhenNode->getNodeType() == AST::String) {
@@ -2084,8 +2039,7 @@ void StrideGenerator::generatePlatformFunctionSignature(
       frameworkScope.push_back(decl);
     }
     for (const auto &input : inputList->getChildren()) {
-      if (input->getNodeType() == AST::Entity ||
-          input->getNodeType() == AST::Block) {
+      if (input->getNodeType() == AST::Entity) {
         auto inputBlock = std::static_pointer_cast<EntityNode>(input);
         auto inputType = inputBlock->getName();
         if (state.typesMap.find(inputType) != state.typesMap.end()) {
@@ -2098,8 +2052,7 @@ void StrideGenerator::generatePlatformFunctionSignature(
     assert(outputList->getChildren().size() < 2);
     if (outputList->getChildren().size() != 0) {
       auto outputBlock = outputList->getChildren()[0];
-      if (outputBlock->getNodeType() == AST::Entity ||
-          outputBlock->getNodeType() == AST::Block) {
+      if (outputBlock->getNodeType() == AST::Entity) {
         auto outputType =
             std::static_pointer_cast<EntityNode>(outputBlock)->getName();
         if (state.typesMap.find(outputType) != state.typesMap.end()) {
@@ -2173,7 +2126,7 @@ StrideGenerator::getDefaultValue(std::shared_ptr<DeclarationNode> decl,
     defaultValue = double(0.0);
   }
 
-  if (decl->getEntityType() == "signal" || decl->getObjectType() == "signal") {
+  if (decl->getEntityType() == "signal") {
     auto defaultNode = decl->getPropertyValue("default");
     if (defaultNode && (defaultNode->getNodeType() == AST::Int ||
                         defaultNode->getNodeType() == AST::Real)) {
@@ -2197,9 +2150,7 @@ StrideGenerator::getDefaultValue(std::shared_ptr<DeclarationNode> decl,
       }
     }
   } else if (decl->getEntityType() == "switch" ||
-             decl->getObjectType() == "switch" ||
-             decl->getEntityType() == "trigger" ||
-             decl->getObjectType() == "trigger") {
+             decl->getEntityType() == "trigger") {
     auto defaultNode = decl->getPropertyValue("default");
     if (defaultNode && defaultNode->getNodeType() == AST::Switch) {
       if (type->isIntegerTy(1)) {
@@ -2222,11 +2173,9 @@ std::unique_ptr<FunctionAST> StrideGenerator::generateStandaloneFunction(
   if (tree) {
     for (const auto &node : tree->getChildren()) {
       if (node->getNodeType() == AST::Declaration ||
-          node->getNodeType() == AST::ArrayDeclaration ||
-          node->getNodeType() == AST::BundleDeclaration) {
+          node->getNodeType() == AST::ArrayDeclaration) {
         auto decl = std::static_pointer_cast<DeclarationNode>(node);
-        if (decl->getEntityType() == "platformModule" ||
-            decl->getObjectType() == "platformModule") {
+        if (decl->getEntityType() == "platformModule") {
           std::vector<ASTNode> dummy;
           StrideGenerator::generatePlatformFunctionSignature(
               decl, scope.empty() ? dummy : scope.back().second, state);

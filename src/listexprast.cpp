@@ -42,7 +42,7 @@ ListExprAST::ListExprAST(std::vector<strd::ASTNode> elements)
 
     if (e->getNodeType() != strd::AST::Int &&
         e->getNodeType() != strd::AST::Real &&
-        e->getNodeType() != strd::AST::PortProperty) {
+        e->getNodeType() != strd::AST::MemberAccess) {
       isMutable = true;
     }
     std::string thisType;

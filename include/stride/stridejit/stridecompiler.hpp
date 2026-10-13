@@ -75,9 +75,9 @@ public:
 
   llvm::Type *getLLVMType(std::shared_ptr<strd::DeclarationNode> decl);
   llvm::Type *
-  getLLVMTypeForCodegenBlock(std::shared_ptr<strd::DeclarationNode> decl,
-                             std::shared_ptr<DeclarationNode> funcDecl,
-                             std::shared_ptr<FunctionNode> functionInstance);
+  getLLVMTypeForCodegenEntity(std::shared_ptr<strd::DeclarationNode> decl,
+                              std::shared_ptr<DeclarationNode> funcDecl,
+                              std::shared_ptr<FunctionNode> functionInstance);
 
   llvm::Function *getFunctionInModule(std::string Name);
 

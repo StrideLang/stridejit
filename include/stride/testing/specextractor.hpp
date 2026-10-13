@@ -15,7 +15,7 @@ public:
     static FunctionTestSpec extractSingleTest(const ASTNode& testNode);
 
 private:
-    static void extractStreams(const ASTNode& blockNode, std::vector<SignalStreamVector>& streams);
+    static void extractStreams(const ASTNode& streamListNode, std::vector<SignalStreamVector>& streams);
 };
 
 } // namespace strd::test

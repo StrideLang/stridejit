@@ -65,15 +65,15 @@ public:
   std::pair<llvm::Value *, std::optional<llvm::Type *>>
   codegen(StrideCompiler &state) override;
   const std::string &getName() const { return Name; }
-  std::vector<std::variant<size_t, std::string>> getIndeces() const;
+  std::vector<std::variant<size_t, std::string>> getIndices() const;
 };
 
-class PortPropertyAST : public ExprAST {
+class MemberAccessAST : public ExprAST {
   std::string Name;
   std::string Property;
 
 public:
-  PortPropertyAST(const std::string &Name, const std::string &Property)
+  MemberAccessAST(const std::string &Name, const std::string &Property)
       : Name(Name), Property(Property) {}
 
   std::pair<llvm::Value *, std::optional<llvm::Type *>>

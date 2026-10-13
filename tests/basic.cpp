@@ -18,7 +18,7 @@ TEST(Basic, Assignment) {
   auto decl = std::make_shared<strd::DeclarationNode>("G", "signal", nullptr,
                                                       __FILE__, __LINE__);
   auto value1 = std::make_shared<strd::ValueNode>(3.3, __FILE__, __LINE__);
-  auto block = std::make_shared<strd::BlockNode>("G", __FILE__, __LINE__);
+  auto block = std::make_shared<strd::EntityNode>("G", __FILE__, __LINE__);
 
   auto str =
       std::make_shared<strd::StreamNode>(value1, block, __FILE__, __LINE__);
@@ -35,8 +35,8 @@ TEST(Basic, Assignment) {
     n1 = std::make_unique<strd::RealExprAST>(
         std::static_pointer_cast<strd::ValueNode>(left)->getRealValue());
   }
-  if (right->getNodeType() == strd::AST::Block) {
-    strenv.mStrideEnv.NamedValues[std::static_pointer_cast<strd::BlockNode>(right)
+  if (right->getNodeType() == strd::AST::Entity) {
+    strenv.mStrideEnv.NamedValues[std::static_pointer_cast<strd::EntityNode>(right)
                                  ->getName()] = n1->codegen(strenv.mStrideEnv);
   }
   // llvm::Type *type =strenv.state.NamedValues["G"].second;
@@ -64,17 +64,17 @@ TEST(Basic, ExpressionFloatLiterals) {
   if (left->getNodeType() == strd::AST::Real) {
     n1 = std::make_unique<strd::RealExprAST>(
         std::static_pointer_cast<strd::ValueNode>(left)->getRealValue());
-  } else if (left->getNodeType() == strd::AST::Block) {
+  } else if (left->getNodeType() == strd::AST::Entity) {
     n1 = std::make_unique<strd::VariableExprAST>(
-        std::static_pointer_cast<strd::BlockNode>(left)->getName());
+        std::static_pointer_cast<strd::EntityNode>(left)->getName());
   }
 
   if (right->getNodeType() == strd::AST::Real) {
     n2 = std::make_unique<strd::RealExprAST>(
         std::static_pointer_cast<strd::ValueNode>(right)->getRealValue());
-  } else if (right->getNodeType() == strd::AST::Block) {
+  } else if (right->getNodeType() == strd::AST::Entity) {
     n2 = std::make_unique<strd::VariableExprAST>(
-        std::static_pointer_cast<strd::BlockNode>(right)->getName());
+        std::static_pointer_cast<strd::EntityNode>(right)->getName());
   }
   auto binExpr = strd::BinaryExprAST('+', std::move(n1), std::move(n2));
   auto v = binExpr.codegen(strenv.mStrideEnv);
@@ -1101,9 +1101,9 @@ TEST(JIT, FunctionStandaloneLoopSimple) {
   scope.push_back({nullptr, {}});
   for (const auto &node : tree->getChildren()) {
     if (node->getNodeType() == strd::AST::Declaration ||
-        node->getNodeType() == strd::AST::BundleDeclaration) {
+        node->getNodeType() == strd::AST::ArrayDeclaration) {
       auto decl = std::static_pointer_cast<strd::DeclarationNode>(node);
-      if (decl->getObjectType() == "platformModule") {
+      if (decl->getEntityType() == "platformModule") {
         strd::StrideGenerator::generatePlatformFunctionSignature(
             decl, scope.back().second, strenv.mStrideEnv);
       }
@@ -1239,9 +1239,9 @@ TEST(JIT, FunctionStandaloneLoop) {
   scope.push_back({nullptr, {}});
   for (const auto &node : tree->getChildren()) {
     if (node->getNodeType() == strd::AST::Declaration ||
-        node->getNodeType() == strd::AST::BundleDeclaration) {
+        node->getNodeType() == strd::AST::ArrayDeclaration) {
       auto decl = std::static_pointer_cast<strd::DeclarationNode>(node);
-      if (decl->getObjectType() == "platformModule") {
+      if (decl->getEntityType() == "platformModule") {
         strd::StrideGenerator::generatePlatformFunctionSignature(
             decl, scope.back().second, strenv.mStrideEnv);
       }

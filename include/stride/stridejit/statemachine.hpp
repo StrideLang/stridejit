@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "stride/parser/entitynode.h"
-#include "stride/parser/blocknode.h"
 #include "stride/stridejit/exprast.hpp"
 
 namespace strd {
@@ -100,7 +99,7 @@ public:
                                   int parentId = -1);
 
   static std::optional<StateMachine>
-  processStateMachine(std::shared_ptr<strd::BlockNode> child,
+  processStateMachine(std::shared_ptr<strd::EntityNode> child,
                       std::string prefix, const ScopeStack &scope,
                       ASTNode tree);
   static std::vector<StateMachine>

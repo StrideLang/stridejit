@@ -74,7 +74,7 @@ public:
   std::vector<PrototypeArg> getInternalArgs() const;
 
   CallableType callType; // Set by parent FunctionAST before codegen()
-  std::vector<PrototypeArg> getUsedPortProperties() const;
+  std::vector<PrototypeArg> getUsedMemberAccesses() const;
 };
 
 class FunctionAST {

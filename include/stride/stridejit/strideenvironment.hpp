@@ -25,7 +25,7 @@ struct StrideExternalVariable {
 };
 
 struct FunctionArgInfo {
-  enum class Role { Output, Input, State, External, PortProperty };
+  enum class Role { Output, Input, State, External, MemberAccess };
 
   std::string name;
   Role role{Role::Input};

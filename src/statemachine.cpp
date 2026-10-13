@@ -10,7 +10,6 @@
 #include "stride/parser/ast.h"
 #include "stride/parser/declarationnode.h"
 #include "stride/parser/entitynode.h"
-#include "stride/parser/blocknode.h"
 #include "stride/parser/propertynode.h"
 #include "stride/parser/valuenode.h"
 #include "stride/utils/astquery.h"
@@ -31,8 +30,7 @@ static int resolveLeafInitialState(int stateId, const StateMachine &sm,
   for (const auto &fs : sm.flattenedStates) {
     if (fs.id == stateId) {
       auto initProp = fs.stateDecl->getPropertyValue("initialState");
-      if (initProp && (initProp->getNodeType() == AST::Entity ||
-                       initProp->getNodeType() == AST::Block)) {
+      if (initProp && initProp->getNodeType() == AST::Entity) {
         auto initName =
             std::static_pointer_cast<EntityNode>(initProp)->getName();
         for (const auto &childFs : sm.flattenedStates) {
@@ -58,8 +56,7 @@ static bool isTrueProp(ASTNode prop) {
   if (prop->getNodeType() == AST::Switch) {
     return std::static_pointer_cast<ValueNode>(prop)->getSwitchValue();
   }
-  if (prop->getNodeType() == AST::Entity ||
-      prop->getNodeType() == AST::Block) {
+  if (prop->getNodeType() == AST::Entity) {
     auto name = std::static_pointer_cast<EntityNode>(prop)->getName();
     return (name == "true" || name == "on" || name == "1" || name == "ON" ||
             name == "TRUE");
@@ -142,8 +139,7 @@ void StateMachine::flattenStateMachine(
   auto statesProp = stateNode->getPropertyValue("states");
   if (statesProp && statesProp->getNodeType() == AST::List) {
     for (const auto &child : statesProp->getChildren()) {
-      if (child->getNodeType() == AST::Entity ||
-          child->getNodeType() == AST::Block) {
+      if (child->getNodeType() == AST::Entity) {
         auto childName = std::static_pointer_cast<EntityNode>(child)->getName();
         auto childDecl =
             ASTQuery::findDeclarationByName(childName, scope, tree);
@@ -156,7 +152,7 @@ void StateMachine::flattenStateMachine(
 }
 
 std::optional<StateMachine>
-StateMachine::processStateMachine(std::shared_ptr<BlockNode> child,
+StateMachine::processStateMachine(std::shared_ptr<EntityNode> child,
                                   std::string prefix, const ScopeStack &scope,
                                   ASTNode tree) {
   auto smName = child->getName();
@@ -185,8 +181,7 @@ StateMachine::processStateMachine(std::shared_ptr<BlockNode> child,
         for (const auto &child : transProp->getChildren()) {
           std::shared_ptr<DeclarationNode> tDecl = nullptr;
 
-          if (child->getNodeType() == AST::Entity ||
-              child->getNodeType() == AST::Block) {
+          if (child->getNodeType() == AST::Entity) {
             auto refName =
                 std::static_pointer_cast<EntityNode>(child)->getName();
             tDecl = ASTQuery::findDeclarationByName(refName, scope, tree);
@@ -196,8 +191,7 @@ StateMachine::processStateMachine(std::shared_ptr<BlockNode> child,
 
           if (tDecl) {
             auto targetProp = tDecl->getPropertyValue("targetState");
-            if (targetProp && (targetProp->getNodeType() == AST::Entity ||
-                               targetProp->getNodeType() == AST::Block)) {
+            if (targetProp && targetProp->getNodeType() == AST::Entity) {
               auto targetName =
                   std::static_pointer_cast<EntityNode>(targetProp)->getName();
               int targetId = -1;
@@ -258,8 +252,7 @@ StateMachine::processStateMachine(std::shared_ptr<BlockNode> child,
     // Determine initial state
     sm.initialStateId = 1; // Default to the root state ID itself
     auto initProp = smDecl->getPropertyValue("initialState");
-    if (initProp && (initProp->getNodeType() == AST::Entity ||
-                     initProp->getNodeType() == AST::Block)) {
+    if (initProp && initProp->getNodeType() == AST::Entity) {
       auto initName = std::static_pointer_cast<EntityNode>(initProp)->getName();
       for (const auto &fs : sm.flattenedStates) {
         if (fs.stateDecl->getName() == initName) {
@@ -284,8 +277,7 @@ StateMachine::collectStateMachines(std::shared_ptr<DeclarationNode> domainDecl,
   auto smProperty = domainDecl->getPropertyValue("stateMachines");
   if (smProperty && smProperty->getNodeType() == AST::List) {
     for (const auto &child : smProperty->getChildren()) {
-      if (child->getNodeType() == AST::Entity ||
-          child->getNodeType() == AST::Block) {
+      if (child->getNodeType() == AST::Entity) {
         auto stateMachine =
             processStateMachine(std::static_pointer_cast<EntityNode>(child),
                                 domainDecl->getName(), scope, tree);
@@ -527,10 +519,10 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
         llvm::Value *CondV = result.first;
         llvm::Type *valType = result.second.value_or(nullptr);
         if (CondV) {
-          if (varExpr && !varExpr->getIndeces().empty() &&
+          if (varExpr && !varExpr->getIndices().empty() &&
               CondV->getType()->isPointerTy()) {
             std::vector<llvm::Value *> idxList;
-            for (const auto &idx : varExpr->getIndeces()) {
+            for (const auto &idx : varExpr->getIndices()) {
               const size_t *intIdx = std::get_if<size_t>(&idx);
               if (intIdx) {
                 idxList.push_back(llvm::ConstantInt::get(

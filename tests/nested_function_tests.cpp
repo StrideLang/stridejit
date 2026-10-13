@@ -847,7 +847,7 @@ TEST(NestedFunctions, StandaloneLoopGenericInvocation) {
   EXPECT_EQ(argsInfo[0].role, strd::FunctionArgInfo::Role::Output);
   EXPECT_EQ(argsInfo[1].role, strd::FunctionArgInfo::Role::Input);
   EXPECT_EQ(argsInfo[2].role, strd::FunctionArgInfo::Role::State);
-  EXPECT_EQ(argsInfo[3].role, strd::FunctionArgInfo::Role::PortProperty);
+  EXPECT_EQ(argsInfo[3].role, strd::FunctionArgInfo::Role::MemberAccess);
   EXPECT_FALSE(argsInfo[3].isPointer);
 
   ret = strenv.compileInMemory();
@@ -934,7 +934,7 @@ TEST(NestedFunctions, StandaloneArgumentQueries) {
   EXPECT_TRUE(args[2].isPointer);
 
   EXPECT_EQ(args[3].name, "InputPort_size");
-  EXPECT_EQ(args[3].role, strd::FunctionArgInfo::Role::PortProperty);
+  EXPECT_EQ(args[3].role, strd::FunctionArgInfo::Role::MemberAccess);
   EXPECT_EQ(args[3].type, strd::DataType::INT32);
   EXPECT_FALSE(args[3].isPointer);
 }

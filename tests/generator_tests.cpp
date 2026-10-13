@@ -1,6 +1,6 @@
 #include "gtest/gtest.h"
 
-#include "stride/parser/blocknode.h"
+#include "stride/parser/entitynode.h"
 #include "stride/parser/declarationnode.h"
 #include "stride/parser/functionnode.h"
 #include "stride/parser/listnode.h"
@@ -59,17 +59,17 @@ TEST(StrideGeneratorTest, ResolveFunctionOverload_PlatformModuleWithArgs) {
 
   auto decl1 = std::make_shared<strd::DeclarationNode>("func1", "platformModule", nullptr, __FILE__, __LINE__);
   auto inputs1 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  inputs1->addChild(std::make_shared<strd::BlockNode>("_IntType", __FILE__, __LINE__));
+  inputs1->addChild(std::make_shared<strd::EntityNode>("_IntType", __FILE__, __LINE__));
   decl1->addProperty(std::make_shared<strd::PropertyNode>("inputs", inputs1, __FILE__, __LINE__));
   auto outputs1 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  outputs1->addChild(std::make_shared<strd::BlockNode>("_RealType", __FILE__, __LINE__));
+  outputs1->addChild(std::make_shared<strd::EntityNode>("_RealType", __FILE__, __LINE__));
   decl1->addProperty(std::make_shared<strd::PropertyNode>("outputs", outputs1, __FILE__, __LINE__));
   auto decl2 = std::make_shared<strd::DeclarationNode>("func2", "platformModule", nullptr, __FILE__, __LINE__);
   auto inputs2 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  inputs2->addChild(std::make_shared<strd::BlockNode>("_RealType", __FILE__, __LINE__));
+  inputs2->addChild(std::make_shared<strd::EntityNode>("_RealType", __FILE__, __LINE__));
   decl2->addProperty(std::make_shared<strd::PropertyNode>("inputs", inputs2, __FILE__, __LINE__));
   auto outputs2 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  outputs2->addChild(std::make_shared<strd::BlockNode>("_IntType", __FILE__, __LINE__));
+  outputs2->addChild(std::make_shared<strd::EntityNode>("_IntType", __FILE__, __LINE__));
   decl2->addProperty(std::make_shared<strd::PropertyNode>("outputs", outputs2, __FILE__, __LINE__));
   std::vector<std::shared_ptr<strd::DeclarationNode>> decls = {decl1, decl2};
   auto func = std::make_shared<strd::FunctionNode>("test_func", nullptr, __FILE__, __LINE__);
@@ -104,12 +104,12 @@ TEST(StrideGeneratorTest, ResolveFunctionOverload_TypeTreeInference) {
 
   auto decl1 = std::make_shared<strd::DeclarationNode>("func1", "platformModule", nullptr, __FILE__, __LINE__);
   auto inputs1 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  inputs1->addChild(std::make_shared<strd::BlockNode>("_IntType", __FILE__, __LINE__));
+  inputs1->addChild(std::make_shared<strd::EntityNode>("_IntType", __FILE__, __LINE__));
   decl1->addProperty(std::make_shared<strd::PropertyNode>("inputs", inputs1, __FILE__, __LINE__));
 
   auto decl2 = std::make_shared<strd::DeclarationNode>("func2", "platformModule", nullptr, __FILE__, __LINE__);
   auto inputs2 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  inputs2->addChild(std::make_shared<strd::BlockNode>("_RealType", __FILE__, __LINE__));
+  inputs2->addChild(std::make_shared<strd::EntityNode>("_RealType", __FILE__, __LINE__));
   decl2->addProperty(std::make_shared<strd::PropertyNode>("inputs", inputs2, __FILE__, __LINE__));
 
   std::vector<std::shared_ptr<strd::DeclarationNode>> decls = {decl1, decl2};
@@ -137,18 +137,18 @@ TEST(StrideGeneratorTest, ResolveFunctionOverload_TypeTreeInference_WithOutputs)
 
   auto decl1 = std::make_shared<strd::DeclarationNode>("func1", "platformModule", nullptr, __FILE__, __LINE__);
   auto inputs1 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  inputs1->addChild(std::make_shared<strd::BlockNode>("_IntType", __FILE__, __LINE__));
+  inputs1->addChild(std::make_shared<strd::EntityNode>("_IntType", __FILE__, __LINE__));
   decl1->addProperty(std::make_shared<strd::PropertyNode>("inputs", inputs1, __FILE__, __LINE__));
   auto outputs1 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  outputs1->addChild(std::make_shared<strd::BlockNode>("_IntType", __FILE__, __LINE__));
+  outputs1->addChild(std::make_shared<strd::EntityNode>("_IntType", __FILE__, __LINE__));
   decl1->addProperty(std::make_shared<strd::PropertyNode>("outputs", outputs1, __FILE__, __LINE__));
 
   auto decl2 = std::make_shared<strd::DeclarationNode>("func2", "platformModule", nullptr, __FILE__, __LINE__);
   auto inputs2 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  inputs2->addChild(std::make_shared<strd::BlockNode>("_IntType", __FILE__, __LINE__));
+  inputs2->addChild(std::make_shared<strd::EntityNode>("_IntType", __FILE__, __LINE__));
   decl2->addProperty(std::make_shared<strd::PropertyNode>("inputs", inputs2, __FILE__, __LINE__));
   auto outputs2 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  outputs2->addChild(std::make_shared<strd::BlockNode>("_RealType", __FILE__, __LINE__));
+  outputs2->addChild(std::make_shared<strd::EntityNode>("_RealType", __FILE__, __LINE__));
   decl2->addProperty(std::make_shared<strd::PropertyNode>("outputs", outputs2, __FILE__, __LINE__));
 
   std::vector<std::shared_ptr<strd::DeclarationNode>> decls = {decl1, decl2};

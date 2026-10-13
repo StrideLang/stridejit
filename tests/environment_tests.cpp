@@ -158,16 +158,16 @@ TEST(StrideEnvironmentTest, EmitCHeaderAndObjectFile) {
 namespace {
 
 // ============================================================================
-// PortPropertyAST Tests (from numberexprast.hpp)
+// MemberAccessAST Tests (from numberexprast.hpp)
 // ============================================================================
 
-TEST(PortPropertyAST, BasicConstruction) {
+TEST(MemberAccessAST, BasicConstruction) {
   strd::StrideCompiler state;
 
-  strd::PortPropertyAST prop("Port", "size");
+  strd::MemberAccessAST prop("Port", "size");
   auto [v, t] = prop.codegen(state);
 
-  // Port property codegen behavior depends on implementation
+  // Member access codegen behavior depends on implementation
   // Just verify it doesn't crash
 }
 

@@ -78,7 +78,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       }
       Type = TypePtr.value();
       if (auto *varExpr = dynamic_cast<VariableExprAST *>(RHS.get())) {
-        auto indeces = varExpr->getIndeces();
+        auto indeces = varExpr->getIndices();
         if (indeces.size() > 0) {
           // FIXME support ranges
           std::vector<llvm::Value *> idxList;
@@ -127,7 +127,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
                 std::nullopt};
       }
       if (auto *varExpr = dynamic_cast<VariableExprAST *>(LHS.get())) {
-        auto indeces = varExpr->getIndeces();
+        auto indeces = varExpr->getIndices();
         if (indeces.size() > 0) {
           // FIXME support ranges
           std::vector<llvm::Value *> idxList;
@@ -238,7 +238,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         return {nullptr, std::nullopt};
       }
       if (auto *varExpr = dynamic_cast<VariableExprAST *>(LHS.get())) {
-        auto indeces = varExpr->getIndeces();
+        auto indeces = varExpr->getIndices();
         if (indeces.size() > 0) {
           // FIXME support ranges
           std::vector<llvm::Value *> idxList;
@@ -283,7 +283,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         return {nullptr, std::nullopt};
       }
       if (auto *varExpr = dynamic_cast<VariableExprAST *>(RHS.get())) {
-        auto indeces = varExpr->getIndeces();
+        auto indeces = varExpr->getIndices();
         if (indeces.size() > 0) {
           // FIXME support ranges
           std::vector<llvm::Value *> idxList;
@@ -455,7 +455,7 @@ BoolExprAST::codegen(StrideCompiler &state) {
 }
 
 std::pair<llvm::Value *, std::optional<llvm::Type *>>
-PortPropertyAST::codegen(StrideCompiler &state) {
+MemberAccessAST::codegen(StrideCompiler &state) {
   // TODO mangle port property names to avoid clashes
   std::string portToken = Name + "_" + Property;
   if (state.NamedValues.find(portToken) == state.NamedValues.end()) {

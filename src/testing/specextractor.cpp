@@ -112,7 +112,7 @@ void extractNodeInfo(const ASTNode &elem, SignalStreamVector &streamVec) {
           }
         } else if (item->getNodeType() == AST::Declaration) {
           auto declSub = std::static_pointer_cast<DeclarationNode>(item);
-          auto kindOpt = parseAssertionKind(declSub->getObjectType());
+          auto kindOpt = parseAssertionKind(declSub->getEntityType());
           if (!kindOpt.has_value()) {
             kindOpt = parseAssertionKind(declSub->getName());
           }
@@ -152,7 +152,7 @@ void extractNodeInfo(const ASTNode &elem, SignalStreamVector &streamVec) {
     }
   } else if (elem->getNodeType() == AST::Declaration) {
     auto declSub = std::static_pointer_cast<DeclarationNode>(elem);
-    auto kindOpt = parseAssertionKind(declSub->getObjectType());
+    auto kindOpt = parseAssertionKind(declSub->getEntityType());
     if (!kindOpt.has_value()) {
       kindOpt = parseAssertionKind(declSub->getName());
     }
@@ -212,7 +212,7 @@ std::vector<FunctionTestSpec> SpecExtractor::extractTests(const ASTNode &tree) {
       continue;
     if (child->getNodeType() == AST::Declaration) {
       auto decl = std::static_pointer_cast<DeclarationNode>(child);
-      if (decl->getObjectType() == "functionTest") {
+      if (decl->getEntityType() == "functionTest") {
         specs.push_back(extractSingleTest(child));
       }
     }
@@ -289,12 +289,12 @@ FunctionTestSpec SpecExtractor::extractSingleTest(const ASTNode &testNode) {
   return spec;
 }
 
-void SpecExtractor::extractStreams(const ASTNode &blockNode,
+void SpecExtractor::extractStreams(const ASTNode &streamListNode,
                                    std::vector<SignalStreamVector> &streams) {
-  if (!blockNode)
+  if (!streamListNode)
     return;
 
-  for (const auto &child : blockNode->getChildren()) {
+  for (const auto &child : streamListNode->getChildren()) {
     if (!child)
       continue;
 

@@ -107,19 +107,14 @@ bool StrideEnvironment::generateAllRootFunctions(ASTNode root) {
 
   for (const auto &child : root->getChildren()) {
     if (child->getNodeType() == AST::Declaration ||
-        child->getNodeType() == AST::ArrayDeclaration ||
-        child->getNodeType() == AST::BundleDeclaration) {
+        child->getNodeType() == AST::ArrayDeclaration) {
       auto decl = std::static_pointer_cast<DeclarationNode>(child);
-      std::string objType = decl->getObjectType();
       std::string entType = decl->getEntityType();
 
-      if (objType == "module" || entType == "module" ||
-          objType == "reaction" || entType == "reaction" ||
-          objType == "action" || entType == "action" ||
-          objType == "function" || entType == "function") {
-        if (objType == "domain" || entType == "domain" ||
-            objType == "_domainDefinition" || entType == "_domainDefinition" ||
-            objType == "platformModule" || entType == "platformModule") {
+      if (entType == "module" || entType == "reaction" ||
+          entType == "action" || entType == "function") {
+        if (entType == "domain" || entType == "_domainDefinition" ||
+            entType == "platformModule") {
           continue;
         }
 
@@ -200,10 +195,9 @@ bool StrideEnvironment::generateIr(const std::vector<std::string> &paths,
 
       for (const auto &member : platformlib) {
         if (member->getNodeType() == AST::Declaration ||
-            member->getNodeType() == AST::ArrayDeclaration ||
-            member->getNodeType() == AST::BundleDeclaration) {
+            member->getNodeType() == AST::ArrayDeclaration) {
           auto decl = std::static_pointer_cast<DeclarationNode>(member);
-          if (decl->getObjectType() == "platformModule") {
+          if (decl->getEntityType() == "platformModule") {
             StrideGenerator::generatePlatformFunctionSignature(
                 decl, frameworkScope, mStrideEnv);
           }
@@ -242,10 +236,9 @@ bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
 
     for (const auto &member : platformlib) {
       if (member->getNodeType() == AST::Declaration ||
-          member->getNodeType() == AST::ArrayDeclaration ||
-          member->getNodeType() == AST::BundleDeclaration) {
+          member->getNodeType() == AST::ArrayDeclaration) {
         auto decl = std::static_pointer_cast<DeclarationNode>(member);
-        if (decl->getObjectType() == "platformModule") {
+        if (decl->getEntityType() == "platformModule") {
           StrideGenerator::generatePlatformFunctionSignature(
               decl, frameworkScope, mStrideEnv);
         }
@@ -920,20 +913,18 @@ StrideEnvironment::getFunctionArgs(const std::string &funcName) const {
         nullptr);
     info.count = 1;
     if (blockDecl) {
-      int sz = ASTQuery::getBlockDeclaredSize(blockDecl, {}, mStrideEnv.m_tree);
+      int sz = ASTQuery::getEntityDeclaredSize(blockDecl, {}, mStrideEnv.m_tree);
       if (sz > 0) {
         info.count = static_cast<size_t>(sz);
       } else {
         info.count = 0; // Undetermined dynamic size
-        if (blockDecl->getNodeType() == AST::ArrayDeclaration ||
-            blockDecl->getNodeType() == AST::BundleDeclaration) {
+        if (blockDecl->getNodeType() == AST::ArrayDeclaration) {
           // FIXME this should be calculated much earlier than here!
           auto bundle = blockDecl->getArrayIndex();
           if (bundle && bundle->index() &&
               !bundle->index()->getChildren().empty()) {
             auto firstIdx = bundle->index()->getChildren()[0];
-            if (firstIdx->getNodeType() == AST::MemberAccess ||
-                firstIdx->getNodeType() == AST::PortProperty) {
+            if (firstIdx->getNodeType() == AST::MemberAccess) {
               auto pp = std::static_pointer_cast<MemberAccessNode>(firstIdx);
               info.sizeProperty = pp->getEntity() + "_" + pp->getPropertyName();
             }
@@ -974,9 +965,9 @@ StrideEnvironment::getFunctionArgs(const std::string &funcName) const {
   for (const auto &arg : proto->getExternalArgs()) {
     result.push_back(makeArgInfo(arg, FunctionArgInfo::Role::External, true));
   }
-  for (const auto &arg : proto->getUsedPortProperties()) {
+  for (const auto &arg : proto->getUsedMemberAccesses()) {
     result.push_back(
-        makeArgInfo(arg, FunctionArgInfo::Role::PortProperty, false));
+        makeArgInfo(arg, FunctionArgInfo::Role::MemberAccess, false));
   }
   return result;
 }
@@ -1661,10 +1652,8 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
       for (const auto &node : t->getChildren()) {
         if (node->getNodeType() == AST::Declaration) {
           auto decl = std::static_pointer_cast<DeclarationNode>(node);
-          std::string objType = decl->getObjectType();
           std::string entType = decl->getEntityType();
-          if (objType == "_domainDefinition" || entType == "_domainDefinition" ||
-              objType == "domain" || entType == "domain") {
+          if (entType == "_domainDefinition" || entType == "domain") {
             if (std::find(domains.begin(), domains.end(), decl->getName()) ==
                 domains.end()) {
               domains.push_back(decl->getName());
@@ -1677,10 +1666,8 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
       for (const auto &node : mStrideEnv.m_tree->getChildren()) {
         if (node->getNodeType() == AST::Declaration) {
           auto decl = std::static_pointer_cast<DeclarationNode>(node);
-          std::string objType = decl->getObjectType();
           std::string entType = decl->getEntityType();
-          if (objType == "_domainDefinition" || entType == "_domainDefinition" ||
-              objType == "domain" || entType == "domain") {
+          if (entType == "_domainDefinition" || entType == "domain") {
             if (std::find(domains.begin(), domains.end(), decl->getName()) ==
                 domains.end()) {
               domains.push_back(decl->getName());
@@ -1977,7 +1964,7 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
       }
       ss << typeName << "* " << arg.name;
     }
-    for (const auto &arg : proto->getUsedPortProperties()) {
+    for (const auto &arg : proto->getUsedMemberAccesses()) {
       if (!first)
         ss << ", ";
       first = false;
