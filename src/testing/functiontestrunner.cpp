@@ -264,19 +264,22 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                             arrSize = valStream->values.size();
                         }
                         if (info.type == DataType::INT32) {
-                            argBuffers[i].int32Vec.assign(arrSize, 0);
+                            if (argBuffers[i].int32Vec.size() != arrSize) {
+                                argBuffers[i].int32Vec.assign(arrSize, 0);
+                            }
                             argPtrs[i] = argBuffers[i].int32Vec.data();
                         } else if (info.type == DataType::BOOL) {
-                            argBuffers[i].boolVec.assign(arrSize, 0);
+                            if (argBuffers[i].boolVec.size() != arrSize) {
+                                argBuffers[i].boolVec.assign(arrSize, 0);
+                            }
                             argPtrs[i] = argBuffers[i].boolVec.data();
                         } else {
-                            argBuffers[i].doubleVec.assign(arrSize, 0.0);
+                            if (argBuffers[i].doubleVec.size() != arrSize) {
+                                argBuffers[i].doubleVec.assign(arrSize, 0.0);
+                            }
                             argPtrs[i] = argBuffers[i].doubleVec.data();
                         }
                     } else {
-                        argBuffers[i].scalarDouble = 0.0;
-                        argBuffers[i].scalarInt32 = 0;
-                        argBuffers[i].scalarBool = 0;
                         if (info.type == DataType::INT32) {
                             argPtrs[i] = &argBuffers[i].scalarInt32;
                         } else if (info.type == DataType::BOOL) {

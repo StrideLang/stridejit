@@ -434,6 +434,68 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     llvm::BasicBlock *PreheaderBB = state.Builder->GetInsertBlock();
     LoopBB = llvm::BasicBlock::Create(*state.TheContext, "loop", TheFunction);
 
+    // Output ports are caller-allocated pointers, so they don't go through the
+    // internal variable default initialization. A loop is reset on every
+    // execution, so write the declared default of each output block into its
+    // pointer before entering the loop body.
+    {
+      std::shared_ptr<DeclarationNode> loopDecl;
+      if (funcInstance && funcInstance->getNodeType() == AST::Declaration) {
+        loopDecl = std::static_pointer_cast<DeclarationNode>(funcInstance);
+      } else if (state.m_tree) {
+        loopDecl = ASTQuery::findDeclarationByName(P.getName(), {},
+                                                   state.m_tree);
+      }
+      auto blocksNode = loopDecl ? loopDecl->getPropertyValue("blocks")
+                                 : nullptr;
+      if (blocksNode) {
+        for (const auto &outArg : P.getOutArgs()) {
+          auto outIt = state.NamedValues.find(outArg.name);
+          if (outIt == state.NamedValues.end() ||
+              !outIt->second.first->getType()->isPointerTy()) {
+            continue;
+          }
+          auto outDecl = ASTQuery::findDeclarationByName(
+              outArg.name, {{loopDecl, blocksNode->getChildren()}}, nullptr);
+          auto defaultNode =
+              outDecl ? outDecl->getPropertyValue("default") : nullptr;
+          llvm::Type *outType = outArg.llvmType;
+          if (!defaultNode || !outType || outType->isArrayTy()) {
+            continue;
+          }
+          llvm::Constant *defaultVal = nullptr;
+          if (defaultNode->getNodeType() == AST::Switch) {
+            bool v = std::static_pointer_cast<ValueNode>(defaultNode)
+                         ->getSwitchValue();
+            if (outType->isFloatingPointTy()) {
+              defaultVal = llvm::ConstantFP::get(outType, v ? 1.0 : 0.0);
+            } else if (outType->isIntegerTy()) {
+              defaultVal = llvm::ConstantInt::get(outType, v ? 1 : 0);
+            }
+          } else if (defaultNode->getNodeType() == AST::Int) {
+            int64_t v = std::static_pointer_cast<ValueNode>(defaultNode)
+                            ->getIntValue();
+            if (outType->isFloatingPointTy()) {
+              defaultVal = llvm::ConstantFP::get(outType, double(v));
+            } else if (outType->isIntegerTy()) {
+              defaultVal = llvm::ConstantInt::get(outType, v, true);
+            }
+          } else if (defaultNode->getNodeType() == AST::Real) {
+            double v = std::static_pointer_cast<ValueNode>(defaultNode)
+                           ->getRealValue();
+            if (outType->isFloatingPointTy()) {
+              defaultVal = llvm::ConstantFP::get(outType, v);
+            } else if (outType->isIntegerTy()) {
+              defaultVal = llvm::ConstantInt::get(outType, int64_t(v), true);
+            }
+          }
+          if (defaultVal) {
+            state.Builder->CreateStore(defaultVal, outIt->second.first);
+          }
+        }
+      }
+    }
+
     // Insert an explicit fall through from the current block to the LoopBB.
     state.Builder->CreateBr(LoopBB);
     // Start insertion in LoopBB.

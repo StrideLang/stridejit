@@ -451,8 +451,22 @@ std::unique_ptr<ExprAST> StrideGenerator::createExpr(ASTNode node) {
   } else if (node->getNodeType() == AST::Expression) {
     auto expr = std::static_pointer_cast<ExpressionNode>(node);
     if (expr->isUnary()) {
-      assert(0 == 1);
-
+      if (expr->getExpressionType() == ExpressionNode::UnaryMinus) {
+        // Lower -x to x * -1. BinaryExprAST promotes the integer constant to
+        // double when x is a real, so this works for both int and real signals.
+        auto operand = createExpr(expr->getValue());
+        if (!operand) {
+          return nullptr;
+        }
+        auto V = std::make_unique<BinaryExprAST>(
+            '*', std::move(operand),
+            std::make_unique<IntExprAST>(static_cast<int32_t>(-1)));
+        setTypeCastMetadata(node, V.get());
+        return V;
+      }
+      LOG_ERROR() << " Unsupported unary expression type: "
+                  << expr->getExpressionTypeString() << std::endl;
+      return nullptr;
     } else {
       auto l = createExpr(expr->getLeft());
       auto r = createExpr(expr->getRight());
