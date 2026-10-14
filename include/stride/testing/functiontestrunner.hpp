@@ -25,6 +25,10 @@ struct TestRunResult {
 struct StateAccessor {
     std::function<void(void* state, const std::string& name, double val)> setVar;
     std::function<double(const void* state, const std::string& name)> getVar;
+    // Optional: returns true if `name` is a variable stored in the state struct.
+    // When provided, ports that are also state variables (e.g. domain inputs and
+    // outputs) are written/read through the state instead of the argument buffer.
+    std::function<bool(const void* state, const std::string& name)> hasVar;
 };
 
 class FunctionTestRunner {

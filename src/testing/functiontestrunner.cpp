@@ -362,7 +362,14 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                         break;
                     }
                 }
-                if (!isArg && m_stateAccessor.has_value() && m_statePtr) {
+                if (!m_stateAccessor.has_value() || !m_statePtr) {
+                    continue;
+                }
+                bool inState = !isArg;
+                if (isArg && !prepStream.isArrayPort && m_stateAccessor->hasVar) {
+                    inState = m_stateAccessor->hasVar(m_statePtr, prepStream.portName);
+                }
+                if (inState) {
                     SignalScalarValue val = 0.0;
                     if (t < prepStream.tickValues.size() && !prepStream.tickValues[t].empty()) {
                         val = prepStream.tickValues[t][0];
@@ -424,6 +431,11 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                                 actualScalar = (argBuffers[argIdx].scalarBool != 0);
                             } else {
                                 actualScalar = argBuffers[argIdx].scalarDouble;
+                            }
+                            if (m_stateAccessor.has_value() && m_statePtr &&
+                                m_stateAccessor->hasVar &&
+                                m_stateAccessor->hasVar(m_statePtr, valStream.portName)) {
+                                actualScalar = m_stateAccessor->getVar(m_statePtr, valStream.portName);
                             }
                             matched = valStream.matches(actualScalar, t);
                         }

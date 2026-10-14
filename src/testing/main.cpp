@@ -231,6 +231,13 @@ int main(int argc, char *argv[]) {
                        .getStateVar<double>(statePtr, name, std::nullopt,
                                             spec.functionName)
                        .value_or(0.0);
+                 },
+                 [&strenv, &spec](const void *statePtr,
+                                  const std::string &name) {
+                   return strenv
+                       .getStateVar<double>(statePtr, name, std::nullopt,
+                                            spec.functionName)
+                       .has_value();
                  }});
           }
 
