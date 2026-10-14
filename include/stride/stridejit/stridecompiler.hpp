@@ -42,12 +42,14 @@ class Module;
 #pragma warning Unknown dynamic link import / export semantics.
 #endif
 
+#include "stride/stridejit/strideruntime_string.h"
+
 extern "C" {
 EXPORT double __stride_Greater_d_dd(double a, double b);
 }
 
 namespace strd {
-enum class DataType { DOUBLE, BOOL, INT32, INT64, CUSTOM, STATE };
+enum class DataType { DOUBLE, BOOL, INT32, INT64, STRING, CUSTOM, STATE };
 
 struct ExternalFunction {
   std::string name;

@@ -484,8 +484,10 @@ std::unique_ptr<ExprAST> StrideGenerator::createExpr(ASTNode node) {
     auto list = std::make_unique<ListExprAST>(node->getChildren());
     return list;
   } else if (node->getNodeType() == AST::String) {
-    auto list = std::make_unique<ListExprAST>(node->getChildren());
-    return list;
+    auto val = std::static_pointer_cast<ValueNode>(node)->getStringValue();
+    auto strExpr = std::make_unique<StringExprAST>(val);
+    setTypeCastMetadata(node, strExpr.get());
+    return strExpr;
   } else if (node->getNodeType() == AST::PortProperty) {
     auto pp = std::static_pointer_cast<PortPropertyNode>(node);
     auto V =
@@ -2122,14 +2124,20 @@ StrideGenerator::getDefaultValue(std::shared_ptr<DeclarationNode> decl,
     defaultValue = int32_t(0);
   } else if (type->isIntegerTy(1)) {
     defaultValue = bool(false);
+  } else if (type->isStructTy()) {
+    defaultValue = std::string("");
   } else {
     defaultValue = double(0.0);
   }
 
-  if (decl->getEntityType() == "signal" || decl->getObjectType() == "signal") {
+  if (decl->getEntityType() == "signal" || decl->getObjectType() == "signal" ||
+      decl->getEntityType() == "string" || decl->getObjectType() == "string") {
     auto defaultNode = decl->getPropertyValue("default");
-    if (defaultNode && (defaultNode->getNodeType() == AST::Int ||
-                        defaultNode->getNodeType() == AST::Real)) {
+    if (defaultNode && defaultNode->getNodeType() == AST::String) {
+      defaultValue =
+          std::static_pointer_cast<ValueNode>(defaultNode)->getStringValue();
+    } else if (defaultNode && (defaultNode->getNodeType() == AST::Int ||
+                               defaultNode->getNodeType() == AST::Real)) {
       if (type->isDoubleTy()) {
         defaultValue =
             std::static_pointer_cast<ValueNode>(defaultNode)->toReal();
