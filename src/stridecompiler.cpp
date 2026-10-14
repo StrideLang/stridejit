@@ -47,7 +47,9 @@ StrideCompiler::StrideCompiler() {
   typesMap["_FloatType"] = llvm::Type::getFloatTy(*TheContext);
   typesMap["_IntType"] = llvm::Type::getInt32Ty(*TheContext);
   typesMap["_SwitchType"] = llvm::Type::getInt1Ty(*TheContext);
-  typesMap["_StringType"] = llvm::PointerType::get(*TheContext, 0);
+  typesMap["_StringType"] = llvm::StructType::get(
+      *TheContext, {llvm::PointerType::get(*TheContext, 0),
+                    llvm::Type::getInt64Ty(*TheContext)});
 
   typesMap[""] = llvm::Type::getVoidTy(*TheContext);
 }
@@ -248,6 +250,9 @@ StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl) {
   if (decl->getEntityType() == "switch" || decl->getEntityType() == "trigger") {
     return typesMap["_SwitchType"];
   }
+  if (decl->getEntityType() == "string" || decl->getObjectType() == "string") {
+    return typesMap["_StringType"];
+  }
   auto typePropNode = decl->getPropertyValue("type");
   std::string type = "_RealType";
   if (typePropNode) {
@@ -276,6 +281,9 @@ llvm::Type *StrideCompiler::getLLVMTypeForCodegenEntity(
   }
   if (decl->getEntityType() == "switch" || decl->getEntityType() == "trigger") {
     return typesMap["_SwitchType"];
+  }
+  if (decl->getEntityType() == "string" || decl->getObjectType() == "string") {
+    return typesMap["_StringType"];
   }
   auto typePropNode = decl->getPropertyValue("type");
   std::string type = "_RealType";
@@ -547,6 +555,16 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
                       scalarDefaultVal = llvm::ConstantFP::get(scalarType, val ? 1.0 : 0.0);
                     } else {
                       scalarDefaultVal = llvm::ConstantInt::get(scalarType, val ? 1 : 0);
+                    }
+                  } else if (defaultNode->getNodeType() == AST::String) {
+                    std::string val = std::static_pointer_cast<ValueNode>(defaultNode)->getStringValue();
+                    llvm::Constant *strPtr = llvm::cast<llvm::Constant>(
+                        Builder->CreateGlobalStringPtr(val, "str_lit"));
+                    llvm::Constant *lenVal = llvm::ConstantInt::get(
+                        llvm::Type::getInt64Ty(*TheContext), val.size());
+                    if (scalarType->isStructTy()) {
+                      scalarDefaultVal = llvm::ConstantStruct::get(
+                          llvm::cast<llvm::StructType>(scalarType), {strPtr, lenVal});
                     }
                   }
                   

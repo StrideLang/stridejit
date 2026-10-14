@@ -110,6 +110,7 @@ set(STRIDEJIT_SRC
   src/strideenvironment.cpp
   src/stridecompiler.cpp
   src/stridegenerator.cpp
+  src/strideruntime_string.cpp
 )
 
 set(STRIDEJIT_HEADERS
@@ -123,6 +124,7 @@ set(STRIDEJIT_HEADERS
   include/stride/stridejit/strideenvironment.hpp
   include/stride/stridejit/stridecompiler.hpp
   include/stride/stridejit/stridegenerator.hpp
+  include/stride/stridejit/strideruntime_string.h
 )
 
 add_library(StrideJit 
