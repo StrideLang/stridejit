@@ -25,6 +25,11 @@ void mock_passthru_process(double *in, double *out) {
   }
 }
 
+const std::vector<strd::FunctionArgInfo> mockPassthruArgs = {
+    {"In", strd::FunctionArgInfo::Role::Input, strd::DataType::DOUBLE},
+    {"Out", strd::FunctionArgInfo::Role::Output, strd::DataType::DOUBLE}
+};
+
 TEST(StrideTestSpec, SignalVectorMatching) {
   SignalStreamVector vec;
   vec.portName = "Out";
@@ -161,7 +166,7 @@ TEST(StrideTestRunner, DirectFunctionExecutionSuccess) {
                                                    "PassthruTest.stride");
   ASSERT_EQ(specs.size(), 1);
 
-  FunctionTestRunner runner(reinterpret_cast<void *>(&mock_passthru_process));
+  FunctionTestRunner runner(reinterpret_cast<void *>(&mock_passthru_process), mockPassthruArgs);
   ASSERT_TRUE(runner.isLoaded());
 
   auto result = runner.runTest(specs[0]);
@@ -182,7 +187,7 @@ TEST(StrideTestRunner, FailureDiagnostics) {
     specs[0].validateStreams[0].tickValues[2] = {99.0};
   }
 
-  FunctionTestRunner runner(reinterpret_cast<void *>(&mock_passthru_process));
+  FunctionTestRunner runner(reinterpret_cast<void *>(&mock_passthru_process), mockPassthruArgs);
   auto result = runner.runTest(specs[0]);
 
   EXPECT_FALSE(result.passed);
@@ -212,6 +217,7 @@ TEST(StrideTestRunner, JITCompiledPassthruExecution) {
   ASSERT_EQ(specs.size(), 1);
 
   FunctionTestRunner runner(fnPtr);
+  runner.setFunctionArgs(strenv.getFunctionArgs("TestDomain_process"));
   std::shared_ptr<void> state = strenv.allocateSharedState("TestDomain");
   ASSERT_NE(state, nullptr);
   runner.setStatePointer(state.get());
@@ -221,6 +227,9 @@ TEST(StrideTestRunner, JITCompiledPassthruExecution) {
        },
        [&strenv](const void *statePtr, const std::string &name) {
          return strenv.getStateVar<double>(statePtr, name, std::nullopt, "TestDomain").value_or(0.0);
+       },
+       [&strenv](const void *statePtr, const std::string &name) {
+         return strenv.getStateVar<double>(statePtr, name, std::nullopt, "TestDomain").has_value();
        }});
 
   auto result = runner.runTest(specs[0]);
@@ -236,7 +245,7 @@ TEST(StrideTestRunner, AssertionKindsExecution) {
                                                    "AssertionsTest.stride");
   ASSERT_EQ(specs.size(), 2);
 
-  FunctionTestRunner runner(reinterpret_cast<void *>(&mock_passthru_process));
+  FunctionTestRunner runner(reinterpret_cast<void *>(&mock_passthru_process), mockPassthruArgs);
 
   // TestNear
   auto resultNear = runner.runTest(specs[0]);
@@ -271,6 +280,7 @@ TEST(StrideTestRunner, ModuleTestExecution) {
   EXPECT_EQ(specs[0].functionName, "GainDomain");
 
   FunctionTestRunner runner(fnPtr);
+  runner.setFunctionArgs(strenv.getFunctionArgs("GainDomain_process"));
   std::shared_ptr<void> state = strenv.allocateSharedState("GainDomain");
   ASSERT_NE(state, nullptr);
   runner.setStatePointer(state.get());
@@ -280,6 +290,9 @@ TEST(StrideTestRunner, ModuleTestExecution) {
        },
        [&strenv](const void *statePtr, const std::string &name) {
          return strenv.getStateVar<double>(statePtr, name, std::nullopt, "GainDomain").value_or(0.0);
+       },
+       [&strenv](const void *statePtr, const std::string &name) {
+         return strenv.getStateVar<double>(statePtr, name, std::nullopt, "GainDomain").has_value();
        }});
 
   auto result = runner.runTest(specs[0]);
@@ -345,7 +358,7 @@ TEST(StrideTestRunner, RepeatedExecution) {
   auto specs = SpecExtractor::extractTestsFromFile(STRIDEJIT_TESTS_SOURCE_DIR "PassthruTest.stride");
   ASSERT_EQ(specs.size(), 1);
 
-  FunctionTestRunner runner(reinterpret_cast<void*>(&mock_passthru_process));
+  FunctionTestRunner runner(reinterpret_cast<void*>(&mock_passthru_process), mockPassthruArgs);
   TestReporter reporter;
   const int repeatCount = 5;
 
@@ -360,6 +373,20 @@ TEST(StrideTestRunner, RepeatedExecution) {
   EXPECT_EQ(reporter.totalTests(), 5);
   EXPECT_EQ(reporter.passedTests(), 5);
   EXPECT_EQ(reporter.failedTests(), 0);
+}
+
+TEST(StrideTestRunner, MissingArgInfosReturnsError) {
+  auto specs = SpecExtractor::extractTestsFromFile(STRIDEJIT_TESTS_SOURCE_DIR "PassthruTest.stride");
+  ASSERT_EQ(specs.size(), 1);
+
+  FunctionTestRunner runner(reinterpret_cast<void*>(&mock_passthru_process));
+  // m_argInfos intentionally not set
+  auto result = runner.runTest(specs[0]);
+
+  EXPECT_FALSE(result.passed);
+  EXPECT_NE(
+      result.errorMessage.find("function argument metadata (m_argInfos) must be provided"),
+      std::string::npos);
 }
 
 } // namespace
