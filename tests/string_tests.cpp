@@ -92,104 +92,55 @@ TEST(Strings, JITCompilationAndExecution) {
   ok = strenv.compileInMemory();
   ASSERT_TRUE(ok);
 
-  // According to Rule 2 of AGENTS.md:
-  // RootDomain_process takes all declared inputs followed by all declared outputs by pointer.
-  // Inputs:
-  //   InStr (StrideStringView*)
-  //   PaddedStr (StrideStringView*)
-  // Outputs:
-  //   OutLiteral (StrideStringView*)
-  //   OutSub (StrideStringView*)
-  //   OutTrim (StrideStringView*)
-  //   OutPos (int32_t*)
-  //   OutStarts (bool*)
-  //   OutEnds (bool*)
-  //   OutContains (bool*)
-  //   OutEqual (bool*)
-  //   OutCmp (int32_t*)
-  //   OutLen (int32_t*)
-  //   OutEmpty (bool*)
-  //   OutInt (int32_t*)
-  //   OutReal (double*)
-  //   OutArrayElem (StrideStringView*)
+  // RootDomain declares a domain-level array (StrArray), so it is stateful.
+  // In a stateful domain every port (inputs and outputs) lives in the domain
+  // state struct and is accessed through setStateVar/getStateVar. The process
+  // function still takes the state pointer followed by one (unused) pointer
+  // per port, in declaration order: inputs then outputs.
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *state = statePtr.get();
 
-  StrideStringView inStr{"Hello World", 11};
-  StrideStringView paddedStr{"   Trimmed   ", 13};
+  const std::string dom = "RootDomain";
+  ASSERT_TRUE(strenv.setStateVar(state, "InStr", StrideStringView{"Hello World", 11}, std::nullopt, dom));
+  ASSERT_TRUE(strenv.setStateVar(state, "PaddedStr", StrideStringView{"   Trimmed   ", 13}, std::nullopt, dom));
 
-  StrideStringView outLiteral{};
-  StrideStringView outSub{};
-  StrideStringView outTrim{};
-  int32_t outPos = 0;
-  bool outStarts = false;
-  bool outEnds = false;
-  bool outContains = false;
-  bool outEqual = false;
-  int32_t outCmp = -999;
-  int32_t outLen = 0;
-  bool outEmpty = true;
-  int32_t outInt = 0;
-  double outReal = 0.0;
-  StrideStringView outArrayElem{};
-
-  void *args[] = {
-      &inStr,
-      &paddedStr,
-      &outLiteral,
-      &outSub,
-      &outTrim,
-      &outPos,
-      &outStarts,
-      &outEnds,
-      &outContains,
-      &outEqual,
-      &outCmp,
-      &outLen,
-      &outEmpty,
-      &outInt,
-      &outReal,
-      &outArrayElem
-  };
-
+  // state + 2 inputs + 14 outputs
+  void *args[17] = {state};
   int32_t res = strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(res, 0);
 
+  auto str = [&](const char *name) {
+    auto v = strenv.getStateVar<StrideStringView>(state, name, std::nullopt, dom);
+    EXPECT_TRUE(v.has_value()) << name;
+    return v ? v->toString() : std::string();
+  };
+
   // 1. Literal assignment
-  EXPECT_EQ(outLiteral.toString(), "Constant Message");
-
+  EXPECT_EQ(str("OutLiteral"), "Constant Message");
   // 2. Substring [0, 5]
-  EXPECT_EQ(outSub.toString(), "Hello");
-
+  EXPECT_EQ(str("OutSub"), "Hello");
   // 3. Trim
-  EXPECT_EQ(outTrim.toString(), "Trimmed");
-
+  EXPECT_EQ(str("OutTrim"), "Trimmed");
   // 4. Find "World"
-  EXPECT_EQ(outPos, 6);
-
+  EXPECT_EQ(strenv.getStateVar<int32_t>(state, "OutPos", std::nullopt, dom).value_or(-1), 6);
   // 5. StartsWith "Hello"
-  EXPECT_TRUE(outStarts);
-
+  EXPECT_TRUE(strenv.getStateVar<bool>(state, "OutStarts", std::nullopt, dom).value_or(false));
   // 6. EndsWith "World"
-  EXPECT_TRUE(outEnds);
-
+  EXPECT_TRUE(strenv.getStateVar<bool>(state, "OutEnds", std::nullopt, dom).value_or(false));
   // 7. Contains "lo Wo"
-  EXPECT_TRUE(outContains);
-
+  EXPECT_TRUE(strenv.getStateVar<bool>(state, "OutContains", std::nullopt, dom).value_or(false));
   // 8. Equal to "Hello World"
-  EXPECT_TRUE(outEqual);
-
+  EXPECT_TRUE(strenv.getStateVar<bool>(state, "OutEqual", std::nullopt, dom).value_or(false));
   // 9. Compare with "Hello World"
-  EXPECT_EQ(outCmp, 0);
-
+  EXPECT_EQ(strenv.getStateVar<int32_t>(state, "OutCmp", std::nullopt, dom).value_or(-999), 0);
   // 10. Length
-  EXPECT_EQ(outLen, 11);
-
+  EXPECT_EQ(strenv.getStateVar<int32_t>(state, "OutLen", std::nullopt, dom).value_or(-1), 11);
   // 11. IsEmpty
-  EXPECT_FALSE(outEmpty);
-
+  EXPECT_FALSE(strenv.getStateVar<bool>(state, "OutEmpty", std::nullopt, dom).value_or(true));
   // 12. Parse numbers
-  EXPECT_EQ(outInt, 12345);
-  EXPECT_DOUBLE_EQ(outReal, 98.765);
-
+  EXPECT_EQ(strenv.getStateVar<int32_t>(state, "OutInt", std::nullopt, dom).value_or(-1), 12345);
+  EXPECT_DOUBLE_EQ(strenv.getStateVar<double>(state, "OutReal", std::nullopt, dom).value_or(0.0), 98.765);
   // 13. Array of strings indexing: StrArray[1] should be "Second"
-  EXPECT_EQ(outArrayElem.toString(), "Second");
+  EXPECT_EQ(str("OutArrayElem"), "Second");
 }

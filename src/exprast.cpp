@@ -13,7 +13,7 @@ StringExprAST::codegen(StrideCompiler &state) {
   llvm::Value *strGlobal = state.Builder->CreateGlobalStringPtr(Val, "str_lit");
   llvm::Type *stringTy = state.typesMap["_StringType"];
   llvm::Value *lenVal = llvm::ConstantInt::get(
-      llvm::Type::getInt64Ty(*state.TheContext), Val.size());
+      llvm::Type::getInt32Ty(*state.TheContext), Val.size());
   llvm::Value *strStruct = llvm::UndefValue::get(stringTy);
   strStruct = state.Builder->CreateInsertValue(strStruct, strGlobal, 0);
   strStruct = state.Builder->CreateInsertValue(strStruct, lenVal, 1);

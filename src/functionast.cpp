@@ -1227,6 +1227,16 @@ CallExprAST::codegen(StrideCompiler &state) {
   } else if (callType == CallableType::External) {
     processArgGroup(state, InArgs, CalleeF, CallArgs);
     // processArgGroup(state, InternalArgs, CalleeF, CallArgs)
+    if (CalleeF->hasFnAttribute("stride.struct_out") && !OutArgs.empty()) {
+      // Struct results are written through a trailing out pointer
+      auto [outPtr, outTy] = OutArgs[0]->codegen(state);
+      if (outPtr && outPtr->getType()->isPointerTy()) {
+        CallArgs.push_back({outPtr, outTy});
+      } else {
+        LOG_ERROR() << "No destination storage for struct result of " << Callee
+                    << std::endl;
+      }
+    }
   }
   processArgGroup(state, PropertyArgs, CalleeF, CallArgs);
 
@@ -1346,7 +1356,7 @@ CallExprAST::codegen(StrideCompiler &state) {
       CallArgsValues.push_back(p.first);
     }
     call =
-        state.Builder->CreateCall(CalleeF, CallArgsValues, CalleeF->getName());
+        state.Builder->CreateCall(CalleeF, CallArgsValues, CalleeF->getReturnType()->isVoidTy() ? "" : CalleeF->getName());
 
     state.Builder->CreateBr(MergeBB);
     // ThenBB = state.Builder->GetInsertBlock();
@@ -1378,7 +1388,7 @@ CallExprAST::codegen(StrideCompiler &state) {
       }
     }
     call =
-        state.Builder->CreateCall(CalleeF, CallArgsValues, CalleeF->getName());
+        state.Builder->CreateCall(CalleeF, CallArgsValues, CalleeF->getReturnType()->isVoidTy() ? "" : CalleeF->getName());
   }
 
   // Write to output

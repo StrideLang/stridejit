@@ -31,84 +31,84 @@ _domainDefinition RootDomain {
 platformModule Substring {
     inputs: [_StringType, _IntType, _IntType]
     outputs: [_StringType]
-    processing: "@__stride_string_substring"
+    processing: "@__stride_jit_string_substring"
     inherits: [_Signal]
 }
 
 platformModule Trim {
     inputs: [_StringType, _StringType]
     outputs: [_StringType]
-    processing: "@__stride_string_trim"
+    processing: "@__stride_jit_string_trim"
     inherits: [_Signal]
 }
 
 platformModule Find {
     inputs: [_StringType, _StringType, _IntType]
     outputs: [_IntType]
-    processing: "@__stride_string_find"
+    processing: "@__stride_jit_string_find"
     inherits: [_Signal]
 }
 
 platformModule Contains {
     inputs: [_StringType, _StringType]
     outputs: [_SwitchType]
-    processing: "@__stride_string_contains"
+    processing: "@__stride_jit_string_contains"
     inherits: [_Signal]
 }
 
 platformModule StartsWith {
     inputs: [_StringType, _StringType]
     outputs: [_SwitchType]
-    processing: "@__stride_string_starts_with"
+    processing: "@__stride_jit_string_starts_with"
     inherits: [_Signal]
 }
 
 platformModule EndsWith {
     inputs: [_StringType, _StringType]
     outputs: [_SwitchType]
-    processing: "@__stride_string_ends_with"
+    processing: "@__stride_jit_string_ends_with"
     inherits: [_Signal]
 }
 
 platformModule Equal@String_Bool {
     inputs: [_StringType, _StringType]
     outputs: [_SwitchType]
-    processing: "@__stride_string_equal"
+    processing: "@__stride_jit_string_equal"
     inherits: [_Signal]
 }
 
 platformModule Compare@String_Int {
     inputs: [_StringType, _StringType]
     outputs: [_IntType]
-    processing: "@__stride_string_compare"
+    processing: "@__stride_jit_string_compare"
     inherits: [_Signal]
 }
 
 platformModule Length {
     inputs: [_StringType]
     outputs: [_IntType]
-    processing: "@__stride_string_length"
+    processing: "@__stride_jit_string_length"
     inherits: [_Signal]
 }
 
 platformModule IsEmpty {
     inputs: [_StringType]
     outputs: [_SwitchType]
-    processing: "@__stride_string_is_empty"
+    processing: "@__stride_jit_string_is_empty"
     inherits: [_Signal]
 }
 
 platformModule Parse@String_Int {
     inputs: [_StringType, _IntType]
     outputs: [_IntType]
-    processing: "@__stride_string_parse_int"
+    processing: "@__stride_jit_string_parse_int"
     inherits: [_Signal]
 }
 
 platformModule Parse@String_Real {
     inputs: [_StringType, _RealType]
     outputs: [_RealType]
-    processing: "@__stride_string_parse_real"
+    processing: "@__stride_jit_string_parse_real"
     inherits: [_Signal]
 }
 

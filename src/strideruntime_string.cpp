@@ -16,7 +16,7 @@ __stride_string_substring(StrideStringView src, int64_t start, int64_t len) {
   }
   int64_t avail = src.length - start;
   int64_t actualLen = (len < 0 || len > avail) ? avail : len;
-  return StrideStringView{src.data + start, actualLen};
+  return StrideStringView{src.data + start, static_cast<int32_t>(actualLen)};
 }
 
 STRIDE_EXPORT StrideStringView
@@ -41,7 +41,7 @@ __stride_string_trim_left(StrideStringView src, StrideStringView chars) {
       break;
     start++;
   }
-  return StrideStringView{src.data + start, src.length - start};
+  return StrideStringView{src.data + start, static_cast<int32_t>(src.length - start)};
 }
 
 STRIDE_EXPORT StrideStringView
@@ -66,7 +66,7 @@ __stride_string_trim_right(StrideStringView src, StrideStringView chars) {
       break;
     end--;
   }
-  return StrideStringView{src.data, end};
+  return StrideStringView{src.data, static_cast<int32_t>(end)};
 }
 
 STRIDE_EXPORT StrideStringView
@@ -211,14 +211,14 @@ STRIDE_EXPORT int64_t __stride_string_tokenize(
   while (start <= src.length) {
     int64_t found = -1;
     if (start < src.length) {
-      found = __stride_string_find(src, StrideStringView{delimPtr, delimLen}, start);
+      found = __stride_string_find(src, StrideStringView{delimPtr, static_cast<int32_t>(delimLen)}, start);
     }
     int64_t tokenEnd = (found >= 0) ? found : src.length;
     int64_t tokenLen = tokenEnd - start;
 
     if (tokenCount < maxTokens) {
       if (outTokens) {
-        outTokens[tokenCount] = StrideStringView{src.data + start, tokenLen};
+        outTokens[tokenCount] = StrideStringView{src.data + start, static_cast<int32_t>(tokenLen)};
       }
     } else {
       if (outOverflow) {
@@ -248,6 +248,97 @@ STRIDE_EXPORT void __stride_string_print(StrideStringView str) {
     std::cout.write(str.data, str.length);
   }
   std::cout.flush();
+}
+
+// ---------------------------------------------------------------------------
+// JIT-facing, ABI-neutral wrappers (see header).
+// ---------------------------------------------------------------------------
+
+STRIDE_EXPORT void
+__stride_jit_string_substring(const StrideStringView *src, int32_t start,
+                              int32_t len, StrideStringView *out) {
+  *out = __stride_string_substring(*src, start, len);
+}
+
+STRIDE_EXPORT void __stride_jit_string_trim(const StrideStringView *src,
+                                            const StrideStringView *chars,
+                                            StrideStringView *out) {
+  *out = __stride_string_trim(*src, *chars);
+}
+
+STRIDE_EXPORT void __stride_jit_string_trim_left(const StrideStringView *src,
+                                                 const StrideStringView *chars,
+                                                 StrideStringView *out) {
+  *out = __stride_string_trim_left(*src, *chars);
+}
+
+STRIDE_EXPORT void __stride_jit_string_trim_right(const StrideStringView *src,
+                                                  const StrideStringView *chars,
+                                                  StrideStringView *out) {
+  *out = __stride_string_trim_right(*src, *chars);
+}
+
+STRIDE_EXPORT int32_t __stride_jit_string_find(const StrideStringView *haystack,
+                                               const StrideStringView *needle,
+                                               int32_t start) {
+  return static_cast<int32_t>(__stride_string_find(*haystack, *needle, start));
+}
+
+STRIDE_EXPORT int32_t __stride_jit_string_find_last(
+    const StrideStringView *haystack, const StrideStringView *needle) {
+  return static_cast<int32_t>(__stride_string_find_last(*haystack, *needle));
+}
+
+STRIDE_EXPORT bool __stride_jit_string_contains(const StrideStringView *haystack,
+                                                const StrideStringView *needle) {
+  return __stride_string_contains(*haystack, *needle);
+}
+
+STRIDE_EXPORT bool
+__stride_jit_string_starts_with(const StrideStringView *str,
+                                const StrideStringView *prefix) {
+  return __stride_string_starts_with(*str, *prefix);
+}
+
+STRIDE_EXPORT bool __stride_jit_string_ends_with(const StrideStringView *str,
+                                                 const StrideStringView *suffix) {
+  return __stride_string_ends_with(*str, *suffix);
+}
+
+STRIDE_EXPORT bool __stride_jit_string_equal(const StrideStringView *a,
+                                             const StrideStringView *b) {
+  return __stride_string_equal(*a, *b);
+}
+
+STRIDE_EXPORT int32_t __stride_jit_string_compare(const StrideStringView *a,
+                                                  const StrideStringView *b) {
+  return static_cast<int32_t>(__stride_string_compare(*a, *b));
+}
+
+STRIDE_EXPORT int32_t __stride_jit_string_length(const StrideStringView *str) {
+  return static_cast<int32_t>(__stride_string_length(*str));
+}
+
+STRIDE_EXPORT bool __stride_jit_string_is_empty(const StrideStringView *str) {
+  return __stride_string_is_empty(*str);
+}
+
+STRIDE_EXPORT int32_t __stride_jit_string_parse_int(const StrideStringView *str,
+                                                    int32_t defaultVal) {
+  return static_cast<int32_t>(__stride_string_parse_int(*str, defaultVal));
+}
+
+STRIDE_EXPORT double __stride_jit_string_parse_real(const StrideStringView *str,
+                                                    double defaultVal) {
+  return __stride_string_parse_real(*str, defaultVal);
+}
+
+STRIDE_EXPORT void __stride_jit_string_println(const StrideStringView *str) {
+  __stride_string_println(*str);
+}
+
+STRIDE_EXPORT void __stride_jit_string_print(const StrideStringView *str) {
+  __stride_string_print(*str);
 }
 
 }

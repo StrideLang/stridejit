@@ -668,7 +668,7 @@ bool StrideEnvironment::setStateVar(void *statePtr, const std::string &varName,
     if constexpr (std::is_same_v<T, std::string>) {
       if (elemTy->isStructTy()) {
         *reinterpret_cast<StrideStringView *>(elemPtr) =
-            StrideStringView{value.c_str(), static_cast<int64_t>(value.size())};
+            StrideStringView{value.c_str(), static_cast<int32_t>(value.size())};
         return true;
       }
     } else if constexpr (std::is_same_v<T, StrideStringView>) {
@@ -698,7 +698,7 @@ bool StrideEnvironment::setStateVar(void *statePtr, const std::string &varName,
   if constexpr (std::is_same_v<T, std::string>) {
     if (fieldType->isStructTy()) {
       *reinterpret_cast<StrideStringView *>(bytePtr) =
-          StrideStringView{value.c_str(), static_cast<int64_t>(value.size())};
+          StrideStringView{value.c_str(), static_cast<int32_t>(value.size())};
       return true;
     }
   } else if constexpr (std::is_same_v<T, StrideStringView>) {
@@ -921,15 +921,16 @@ static void fillTypeInfo(llvm::Type *ty, const llvm::DataLayout *DL,
     outTypeName = "_RealType";
     outElemSize = DL ? DL->getTypeAllocSize(ty) : 4;
   } else if (ty->isStructTy()) {
-    if (ty->isLiteral() && ty->getStructNumElements() == 2 &&
-        ty->getStructElementType(0)->isPointerTy() &&
-        ty->getStructElementType(1)->isIntegerTy(64)) {
+    auto *structTy = llvm::cast<llvm::StructType>(ty);
+    if (structTy->isLiteral() && structTy->getNumElements() == 2 &&
+        structTy->getElementType(0)->isPointerTy() &&
+        structTy->getElementType(1)->isIntegerTy(32)) {
       outType = DataType::STRING;
       outTypeName = "_StringType";
-      outElemSize = DL ? DL->getTypeAllocSize(ty) : 16;
+      outElemSize = DL ? DL->getTypeAllocSize(ty) : sizeof(StrideStringView);
     } else {
       outType = DataType::STATE;
-      outTypeName = ty->getStructName().str();
+      outTypeName = structTy->hasName() ? structTy->getName().str() : "";
       outElemSize = DL ? DL->getTypeAllocSize(ty) : 0;
     }
   } else {
@@ -1317,6 +1318,23 @@ bool StrideEnvironment::compileInMemory() {
   regSym("__stride_string_tokenize", &__stride_string_tokenize);
   regSym("__stride_string_println", &__stride_string_println);
   regSym("__stride_string_print", &__stride_string_print);
+  regSym("__stride_jit_string_substring", &__stride_jit_string_substring);
+  regSym("__stride_jit_string_trim", &__stride_jit_string_trim);
+  regSym("__stride_jit_string_trim_left", &__stride_jit_string_trim_left);
+  regSym("__stride_jit_string_trim_right", &__stride_jit_string_trim_right);
+  regSym("__stride_jit_string_find", &__stride_jit_string_find);
+  regSym("__stride_jit_string_find_last", &__stride_jit_string_find_last);
+  regSym("__stride_jit_string_contains", &__stride_jit_string_contains);
+  regSym("__stride_jit_string_starts_with", &__stride_jit_string_starts_with);
+  regSym("__stride_jit_string_ends_with", &__stride_jit_string_ends_with);
+  regSym("__stride_jit_string_equal", &__stride_jit_string_equal);
+  regSym("__stride_jit_string_compare", &__stride_jit_string_compare);
+  regSym("__stride_jit_string_length", &__stride_jit_string_length);
+  regSym("__stride_jit_string_is_empty", &__stride_jit_string_is_empty);
+  regSym("__stride_jit_string_parse_int", &__stride_jit_string_parse_int);
+  regSym("__stride_jit_string_parse_real", &__stride_jit_string_parse_real);
+  regSym("__stride_jit_string_println", &__stride_jit_string_println);
+  regSym("__stride_jit_string_print", &__stride_jit_string_print);
 
   llvm::cantFail(JIT->getMainJITDylib().define(llvm::orc::absoluteSymbols(M)));
 
@@ -1362,10 +1380,12 @@ bool StrideEnvironment::compileObjectToDisk(std::string path) {
           f << "int *";
         } else if (domainFunc.type == DataType::BOOL) {
           f << "bool *";
+        } else if (domainFunc.type == DataType::STRING) {
+          f << "StrideStringView *";
           //        } else if (domainFunc.type == DataType::INT64) {
           //          f << "int64_t *";
         } else {
-          f << "INVALID";
+          f << "void *";
         }
         f << " " << domainFunc.name;
       }
