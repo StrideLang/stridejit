@@ -190,6 +190,14 @@ __stride_jit_string_parse_real(const strd::StrideStringView *str,
 STRIDE_EXPORT void
 __stride_jit_string_println(const strd::StrideStringView *str);
 STRIDE_EXPORT void __stride_jit_string_print(const strd::StrideStringView *str);
+STRIDE_EXPORT void __stride_jit_string_tokenize(
+    const strd::StrideStringView *src, const strd::StrideStringView *delim,
+    strd::StrideStringView *outTokens, int32_t maxTokens, int32_t *outCount,
+    bool *outOverflow);
+STRIDE_EXPORT void
+__stride_jit_string_concat2(const strd::StrideStringView *a,
+                            const strd::StrideStringView *b,
+                            strd::StrideStringView *out);
 
 }
 

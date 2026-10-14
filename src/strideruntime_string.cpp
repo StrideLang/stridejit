@@ -341,4 +341,47 @@ STRIDE_EXPORT void __stride_jit_string_print(const StrideStringView *str) {
   __stride_string_print(*str);
 }
 
+STRIDE_EXPORT void __stride_jit_string_tokenize(
+    const StrideStringView *src, const StrideStringView *delim,
+    StrideStringView *outTokens, int32_t maxTokens, int32_t *outCount,
+    bool *outOverflow) {
+  int64_t count = __stride_string_tokenize(
+      src ? *src : StrideStringView{},
+      delim ? *delim : StrideStringView{" ", 1},
+      outTokens, maxTokens, outOverflow);
+  if (outCount) {
+    *outCount = static_cast<int32_t>(count);
+  }
+}
+
+STRIDE_EXPORT void
+__stride_jit_string_concat2(const StrideStringView *a,
+                            const StrideStringView *b,
+                            StrideStringView *out) {
+  if (!out)
+    return;
+  int32_t lenA = (a && a->data && a->length > 0) ? a->length : 0;
+  int32_t lenB = (b && b->data && b->length > 0) ? b->length : 0;
+  int32_t totalLen = lenA + lenB;
+  if (totalLen == 0) {
+    *out = StrideStringView{"", 0};
+    return;
+  }
+  static thread_local char buffer[65536];
+  static thread_local size_t offset = 0;
+  if (offset + static_cast<size_t>(totalLen) + 1 > sizeof(buffer)) {
+    offset = 0;
+  }
+  char *dest = buffer + offset;
+  offset += static_cast<size_t>(totalLen) + 1;
+  if (lenA > 0) {
+    std::memcpy(dest, a->data, static_cast<size_t>(lenA));
+  }
+  if (lenB > 0) {
+    std::memcpy(dest + lenA, b->data, static_cast<size_t>(lenB));
+  }
+  dest[totalLen] = '\0';
+  *out = StrideStringView{dest, totalLen};
+}
+
 }

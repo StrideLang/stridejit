@@ -83,6 +83,26 @@ TEST(Strings, TokenizeWithOverflow) {
   EXPECT_EQ(tokensFull[4].toString(), "epsilon");
 }
 
+TEST(Strings, JITTokenizeAndConcatDirect) {
+  StrideStringView a{"Hello, ", 7};
+  StrideStringView b{"World!", 6};
+  StrideStringView cat{};
+  __stride_jit_string_concat2(&a, &b, &cat);
+  EXPECT_EQ(cat.toString(), "Hello, World!");
+
+  StrideStringView src{"one:two:three", 13};
+  StrideStringView delim{":", 1};
+  StrideStringView tokens[4];
+  int32_t count = 0;
+  bool overflow = false;
+  __stride_jit_string_tokenize(&src, &delim, tokens, 4, &count, &overflow);
+  EXPECT_EQ(count, 3);
+  EXPECT_FALSE(overflow);
+  EXPECT_EQ(tokens[0].toString(), "one");
+  EXPECT_EQ(tokens[1].toString(), "two");
+  EXPECT_EQ(tokens[2].toString(), "three");
+}
+
 TEST(Strings, JITCompilationAndExecution) {
   StrideEnvironment strenv;
 
@@ -105,8 +125,8 @@ TEST(Strings, JITCompilationAndExecution) {
   ASSERT_TRUE(strenv.setStateVar(state, "InStr", StrideStringView{"Hello World", 11}, std::nullopt, dom));
   ASSERT_TRUE(strenv.setStateVar(state, "PaddedStr", StrideStringView{"   Trimmed   ", 13}, std::nullopt, dom));
 
-  // state + 2 inputs + 14 outputs
-  void *args[17] = {state};
+  // state + 2 inputs + 16 outputs
+  void *args[19] = {state};
   int32_t res = strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(res, 0);
 
@@ -141,6 +161,10 @@ TEST(Strings, JITCompilationAndExecution) {
   // 12. Parse numbers
   EXPECT_EQ(strenv.getStateVar<int32_t>(state, "OutInt", std::nullopt, dom).value_or(-1), 12345);
   EXPECT_DOUBLE_EQ(strenv.getStateVar<double>(state, "OutReal", std::nullopt, dom).value_or(0.0), 98.765);
-  // 13. Array of strings indexing: StrArray[1] should be "Second"
+  // 13. Concat
+  EXPECT_EQ(str("OutConcat"), "Hello, World!");
+  // 14. Array of strings indexing: StrArray[1] should be "Second"
   EXPECT_EQ(str("OutArrayElem"), "Second");
+  // 15. Substring written directly into array element StrArray[2]
+  EXPECT_EQ(str("OutArraySub"), "Hello");
 }

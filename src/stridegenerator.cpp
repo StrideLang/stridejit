@@ -201,6 +201,12 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
             '=', std::make_unique<VariableExprAST>(extArg.name),
             std::make_unique<BoolExprAST>(std::get<bool>(extArg.defaultValue)));
         resetBody.push_back(std::move(varInit));
+      } else if (std::holds_alternative<std::string>(extArg.defaultValue)) {
+        auto varInit = std::make_unique<BinaryExprAST>(
+            '=', std::make_unique<VariableExprAST>(extArg.name),
+            std::make_unique<StringExprAST>(
+                std::get<std::string>(extArg.defaultValue)));
+        resetBody.push_back(std::move(varInit));
       } else {
         LOG_ERROR() << "ERROR unexpected type for default." << std::endl;
       }
@@ -240,7 +246,8 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
               LOG_ERROR() << "Unsupported type for switch default: "
                           << defaultValueNode->toText() << std::endl;
             }
-          } else if (decl->getEntityType() == "signal") {
+          } else if (decl->getEntityType() == "signal" ||
+                     decl->getEntityType() == "string") {
             llvm::Type *llvmType = state.getLLVMType(decl);
             std::unique_ptr<ExprAST> valExpr;
             if (defaultValueNode->getNodeType() == AST::Real) {
@@ -274,6 +281,11 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
                 valExpr = std::make_unique<IntExprAST>(val ? 1 : 0);
               else
                 valExpr = std::make_unique<BoolExprAST>(val);
+            } else if (defaultValueNode->getNodeType() == AST::String) {
+              std::string val =
+                  std::static_pointer_cast<ValueNode>(defaultValueNode)
+                      ->getStringValue();
+              valExpr = std::make_unique<StringExprAST>(val);
             }
             if (valExpr) {
               auto varInit = std::make_unique<BinaryExprAST>(
@@ -1550,7 +1562,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               // TODO: Ensure this generated intermediate symbol is managed when
               // checking for symbol clashes across scopes.
               std::string intermediateName =
-                  "__intermediate_" + state.getName() + "S" + arg.name;
+                  "__intermediate_" + state.getName() + "_" + arg.name;
               if (func) {
                 func->setCompilerProperty(
                     "intermediateOutput",
@@ -1581,7 +1593,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                 // TODO: Ensure this generated intermediate symbol is managed
                 // when checking for symbol clashes across scopes.
                 std::string intermediateName =
-                    "__intermediate_" + state.getName() + "S" + arg.name;
+                    "__intermediate_" + state.getName() + "_" + arg.name;
                 if (func) {
                   func->setCompilerProperty(
                       "intermediateOutput",
@@ -2068,7 +2080,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
   auto usedPortPropertiesNodes = CodeAnalysis::getUsedMemberAccesses(funcDecl);
   for (const auto &pp : usedPortPropertiesNodes) {
     // FIXME validate unique name
-    std::string name = pp->getEntity() + "S" + pp->getPropertyName();
+    std::string name = pp->getEntity() + "_" + pp->getPropertyName();
     // TODO determine the type of integer for port properties from platform
     // defintion.
     if (pp->getPropertyName() == "size") {

@@ -24,6 +24,8 @@ _domainDefinition RootDomain {
         signal OutInt { domain: RootDomain type: _IntType }
         signal OutReal { domain: RootDomain type: _RealType }
         signal OutArrayElem { domain: RootDomain type: _StringType }
+        signal OutConcat { domain: RootDomain type: _StringType }
+        signal OutArraySub { domain: RootDomain type: _StringType }
     ]
     domainFunctionCode: ''
 }
@@ -112,6 +114,20 @@ platformModule Parse@String_Real {
     inherits: [_Signal]
 }
 
+platformModule Concat {
+    inputs: [_StringType, _StringType]
+    outputs: [_StringType]
+    processing: "@__stride_jit_string_concat2"
+    inherits: [_Signal]
+}
+
+platformModule PrintLn {
+    inputs: [_StringType]
+    outputs: []
+    processing: "@__stride_jit_string_println"
+    inherits: [_Signal]
+}
+
 # 1. String literal assignment
 "Constant Message" >> OutLiteral;
 
@@ -149,11 +165,22 @@ InStr >> IsEmpty() >> OutEmpty;
 [ "12345", 0 ] >> Parse() >> OutInt;
 [ "98.765", 0.0 ] >> Parse() >> OutReal;
 
-# 13. Array of strings
+# 13. Concat two strings
+[ "Hello, ", "World!" ] >> Concat() >> OutConcat;
+
+# 14. PrintLn (sink)
+OutConcat >> PrintLn();
+
+# 15. Array of strings and array indexing as struct_out destination
 string StrArray[3] { domain: RootDomain }
 
 "First" >> StrArray[0];
 "Second" >> StrArray[1];
 "Third" >> StrArray[2];
 
+# Write Substring directly into array element StrArray[2]
+[ InStr, 0, 5 ] >> Substring() >> StrArray[2];
+
 StrArray[1] >> OutArrayElem;
+StrArray[2] >> OutArraySub;
+

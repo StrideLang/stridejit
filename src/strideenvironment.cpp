@@ -1335,6 +1335,8 @@ bool StrideEnvironment::compileInMemory() {
   regSym("__stride_jit_string_parse_real", &__stride_jit_string_parse_real);
   regSym("__stride_jit_string_println", &__stride_jit_string_println);
   regSym("__stride_jit_string_print", &__stride_jit_string_print);
+  regSym("__stride_jit_string_tokenize", &__stride_jit_string_tokenize);
+  regSym("__stride_jit_string_concat2", &__stride_jit_string_concat2);
 
   llvm::cantFail(JIT->getMainJITDylib().define(llvm::orc::absoluteSymbols(M)));
 
