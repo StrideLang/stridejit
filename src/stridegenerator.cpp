@@ -1092,14 +1092,29 @@ void StrideGenerator::collectInputArgs(
               llvm::Type::getInt32Ty(*state.TheContext));
         }
       } else {
-        args.MainIn.args.emplace_back(std::move(exprs.back()));
-        exprs.pop_back();
-        // FIXME do automatic type casting int ->float
-        args.MainIn.argTypes.push_back(
-            llvm::Type::getDoubleTy(*state.TheContext));
+        if (!exprs.empty()) {
+          args.MainIn.args.emplace_back(std::move(exprs.back()));
+          exprs.pop_back();
+          // FIXME do automatic type casting int ->float
+          args.MainIn.argTypes.push_back(
+              llvm::Type::getDoubleTy(*state.TheContext));
+        } else {
+          LOG_ERROR() << "ERROR: exprs is empty when collecting function input argument"
+                      << std::endl;
+        }
       }
     } else if (auto prevList = std::dynamic_pointer_cast<ListNode>(input)) {
+      if (exprs.empty()) {
+        LOG_ERROR() << "ERROR: exprs is empty when collecting list input arguments"
+                    << std::endl;
+        return;
+      }
       auto *v = dynamic_cast<ListExprAST *>(exprs.back().get());
+      if (!v) {
+        LOG_ERROR() << "ERROR: exprs.back() is not a ListExprAST"
+                    << std::endl;
+        return;
+      }
       auto listNodes = prevList->getChildren();
       auto nodeIt = listNodes.begin();
       if (v->getType() == ListExprAST::Type::MUTABLE_CONSISTENT ||
