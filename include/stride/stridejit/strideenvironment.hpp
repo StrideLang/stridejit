@@ -1,7 +1,8 @@
 /*
-    Stride is licensed under the terms of the GNU Affero General Public License version 3.
+    Stride is licensed under the terms of the GNU Affero General Public License
+   version 3.
 
-    Copyright (C) 2017-2026 Andres Cabrera
+    Copyright (C) 2022-2026 Andres Cabrera
     All rights reserved.
 
     This program is free software: you can redistribute it and/or modify
@@ -135,8 +136,7 @@ public:
 
   // Dynamic state variable access by name or pattern
   template <typename T>
-  std::optional<T> getStateVar(const void *statePtr,
-                               const std::string &varName,
+  std::optional<T> getStateVar(const void *statePtr, const std::string &varName,
                                std::optional<int> index = std::nullopt,
                                const std::string &domainName = "") const;
 
@@ -144,7 +144,7 @@ public:
                                      const std::string &varName,
                                      std::optional<int> index = std::nullopt,
                                      const std::string &domainName = "") const {
-      return getStateVar<int32_t>(statePtr, varName, index, domainName);
+    return getStateVar<int32_t>(statePtr, varName, index, domainName);
   }
   template <typename T>
   bool setStateVar(void *statePtr, const std::string &varName, T value,
@@ -193,11 +193,9 @@ public:
                   const std::string &smName = "",
                   const std::string &domainName = "",
                   const std::string &stateName = "") const;
-  std::optional<int32_t>
-  getTransitionIdForState(const std::string &transitionName,
-                          const std::string &stateName,
-                          const std::string &smName = "",
-                          const std::string &domainName = "") const;
+  std::optional<int32_t> getTransitionIdForState(
+      const std::string &transitionName, const std::string &stateName,
+      const std::string &smName = "", const std::string &domainName = "") const;
 
   const std::vector<StrideCompiler::StateMachineInfo> &
   getStateMachineInfos() const {

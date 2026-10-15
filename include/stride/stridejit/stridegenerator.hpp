@@ -1,7 +1,8 @@
 /*
-    Stride is licensed under the terms of the GNU Affero General Public License version 3.
+    Stride is licensed under the terms of the GNU Affero General Public License
+   version 3.
 
-    Copyright (C) 2017-2026 Andres Cabrera
+    Copyright (C) 2022-2026 Andres Cabrera
     All rights reserved.
 
     This program is free software: you can redistribute it and/or modify
