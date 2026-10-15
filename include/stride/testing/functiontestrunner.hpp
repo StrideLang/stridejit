@@ -57,6 +57,10 @@ class FunctionTestRunner {
 public:
     explicit FunctionTestRunner(const std::string& sharedLibPath);
     explicit FunctionTestRunner(void* functionPointer);
+    FunctionTestRunner(void* functionPointer, std::vector<FunctionArgInfo> args)
+        : FunctionTestRunner(functionPointer) {
+        m_argInfos = std::move(args);
+    }
 
     bool isLoaded() const;
     const std::string& getErrorMessage() const;

@@ -1227,6 +1227,50 @@ CallExprAST::codegen(StrideCompiler &state) {
   } else if (callType == CallableType::External) {
     processArgGroup(state, InArgs, CalleeF, CallArgs);
     // processArgGroup(state, InternalArgs, CalleeF, CallArgs)
+    if (CalleeF->hasFnAttribute("stride.struct_out") && !OutArgs.empty()) {
+      // Struct results are written through a trailing out pointer
+      auto [outPtr, outTy] = OutArgs[0]->codegen(state);
+      if (auto *varExpr = dynamic_cast<VariableExprAST *>(OutArgs[0].get())) {
+        auto indeces = varExpr->getIndices();
+        if (!indeces.empty() && outPtr && outPtr->getType()->isPointerTy()) {
+          std::vector<llvm::Value *> idxList;
+          auto idx = indeces[0];
+          const size_t *intIdx = std::get_if<size_t>(&idx);
+          if (intIdx) {
+            idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
+                                                     llvm::APInt(64, *intIdx)));
+          }
+          const std::string *strIdx = std::get_if<std::string>(&idx);
+          if (strIdx) {
+            auto it = state.NamedValues.find(*strIdx);
+            if (it != state.NamedValues.end()) {
+              llvm::Value *indexVal = it->second.first;
+              if (indexVal->getType()->isPointerTy()) {
+                indexVal = state.Builder->CreateLoad(it->second.second.value(),
+                                                     indexVal, *strIdx);
+              }
+              idxList.push_back(indexVal);
+            }
+          }
+          if (!idxList.empty()) {
+            llvm::Type *gepElemType =
+                outTy.value_or(state.typesMap["_StringType"]);
+            if (gepElemType->isArrayTy()) {
+              gepElemType =
+                  static_cast<llvm::ArrayType *>(gepElemType)->getElementType();
+            }
+            outPtr = state.Builder->CreateGEP(gepElemType, outPtr, idxList);
+            outTy = gepElemType;
+          }
+        }
+      }
+      if (outPtr && outPtr->getType()->isPointerTy()) {
+        CallArgs.push_back({outPtr, outTy});
+      } else {
+        LOG_ERROR() << "No destination storage for struct result of " << Callee
+                    << std::endl;
+      }
+    }
   }
   processArgGroup(state, PropertyArgs, CalleeF, CallArgs);
 
@@ -1346,7 +1390,7 @@ CallExprAST::codegen(StrideCompiler &state) {
       CallArgsValues.push_back(p.first);
     }
     call =
-        state.Builder->CreateCall(CalleeF, CallArgsValues, CalleeF->getName());
+        state.Builder->CreateCall(CalleeF, CallArgsValues, CalleeF->getReturnType()->isVoidTy() ? "" : CalleeF->getName());
 
     state.Builder->CreateBr(MergeBB);
     // ThenBB = state.Builder->GetInsertBlock();
@@ -1378,7 +1422,7 @@ CallExprAST::codegen(StrideCompiler &state) {
       }
     }
     call =
-        state.Builder->CreateCall(CalleeF, CallArgsValues, CalleeF->getName());
+        state.Builder->CreateCall(CalleeF, CallArgsValues, CalleeF->getReturnType()->isVoidTy() ? "" : CalleeF->getName());
   }
 
   // Write to output
@@ -1498,6 +1542,9 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
 
   for (unsigned i = 0, e = InArgs.size(); i != e; ++i) {
     auto [value, type] = InArgs[i]->codegen(state);
+    if (!value) {
+      return {nullptr, std::nullopt};
+    }
     if (value->getType()->isTokenTy()) {
       auto *list = dynamic_cast<ListExprAST *>(InArgs[i].get());
       assert(list);
@@ -1522,6 +1569,9 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
 
   for (unsigned i = 0, e = OutArgs.size(); i != e; ++i) {
     auto [value, type] = OutArgs[i]->codegen(state);
+    if (!value) {
+      return {nullptr, std::nullopt};
+    }
     if (value->getType()->isTokenTy()) {
       auto *list = dynamic_cast<ListExprAST *>(OutArgs[i].get());
       assert(list);
@@ -1547,6 +1597,9 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
 
   for (unsigned i = 0, e = ExternalArgs.size(); i != e; ++i) {
     auto [value, type] = ExternalArgs[i]->codegen(state);
+    if (!value) {
+      return {nullptr, std::nullopt};
+    }
     if (value->getType()->isTokenTy()) {
       auto *list = dynamic_cast<ListExprAST *>(ExternalArgs[i].get());
       if (list) {

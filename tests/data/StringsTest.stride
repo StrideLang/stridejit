@@ -1,0 +1,186 @@
+# Tests for Stride String Support
+
+_domainDefinition RootDomain {
+    framework: _JitFramework
+    rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+        signal InStr { domain: RootDomain type: _StringType }
+        signal PaddedStr { domain: RootDomain type: _StringType }
+    ]
+    outputs: [
+        signal OutLiteral { domain: RootDomain type: _StringType }
+        signal OutSub { domain: RootDomain type: _StringType }
+        signal OutTrim { domain: RootDomain type: _StringType }
+        signal OutPos { domain: RootDomain type: _IntType }
+        signal OutStarts { domain: RootDomain type: _SwitchType }
+        signal OutEnds { domain: RootDomain type: _SwitchType }
+        signal OutContains { domain: RootDomain type: _SwitchType }
+        signal OutEqual { domain: RootDomain type: _SwitchType }
+        signal OutCmp { domain: RootDomain type: _IntType }
+        signal OutLen { domain: RootDomain type: _IntType }
+        signal OutEmpty { domain: RootDomain type: _SwitchType }
+        signal OutInt { domain: RootDomain type: _IntType }
+        signal OutReal { domain: RootDomain type: _RealType }
+        signal OutArrayElem { domain: RootDomain type: _StringType }
+        signal OutConcat { domain: RootDomain type: _StringType }
+        signal OutArraySub { domain: RootDomain type: _StringType }
+    ]
+    domainFunctionCode: ''
+}
+
+platformModule Substring {
+    inputs: [_StringType, _IntType, _IntType]
+    outputs: [_StringType]
+    processing: "@__stride_jit_string_substring"
+    inherits: [_Signal]
+}
+
+platformModule Trim {
+    inputs: [_StringType, _StringType]
+    outputs: [_StringType]
+    processing: "@__stride_jit_string_trim"
+    inherits: [_Signal]
+}
+
+platformModule Find {
+    inputs: [_StringType, _StringType, _IntType]
+    outputs: [_IntType]
+    processing: "@__stride_jit_string_find"
+    inherits: [_Signal]
+}
+
+platformModule Contains {
+    inputs: [_StringType, _StringType]
+    outputs: [_SwitchType]
+    processing: "@__stride_jit_string_contains"
+    inherits: [_Signal]
+}
+
+platformModule StartsWith {
+    inputs: [_StringType, _StringType]
+    outputs: [_SwitchType]
+    processing: "@__stride_jit_string_starts_with"
+    inherits: [_Signal]
+}
+
+platformModule EndsWith {
+    inputs: [_StringType, _StringType]
+    outputs: [_SwitchType]
+    processing: "@__stride_jit_string_ends_with"
+    inherits: [_Signal]
+}
+
+platformModule Equal@String_Bool {
+    inputs: [_StringType, _StringType]
+    outputs: [_SwitchType]
+    processing: "@__stride_jit_string_equal"
+    inherits: [_Signal]
+}
+
+platformModule Compare@String_Int {
+    inputs: [_StringType, _StringType]
+    outputs: [_IntType]
+    processing: "@__stride_jit_string_compare"
+    inherits: [_Signal]
+}
+
+platformModule Length {
+    inputs: [_StringType]
+    outputs: [_IntType]
+    processing: "@__stride_jit_string_length"
+    inherits: [_Signal]
+}
+
+platformModule IsEmpty {
+    inputs: [_StringType]
+    outputs: [_SwitchType]
+    processing: "@__stride_jit_string_is_empty"
+    inherits: [_Signal]
+}
+
+platformModule Parse@String_Int {
+    inputs: [_StringType, _IntType]
+    outputs: [_IntType]
+    processing: "@__stride_jit_string_parse_int"
+    inherits: [_Signal]
+}
+
+platformModule Parse@String_Real {
+    inputs: [_StringType, _RealType]
+    outputs: [_RealType]
+    processing: "@__stride_jit_string_parse_real"
+    inherits: [_Signal]
+}
+
+platformModule Concat {
+    inputs: [_StringType, _StringType]
+    outputs: [_StringType]
+    processing: "@__stride_jit_string_concat2"
+    inherits: [_Signal]
+}
+
+platformModule PrintLn {
+    inputs: [_StringType]
+    outputs: []
+    processing: "@__stride_jit_string_println"
+    inherits: [_Signal]
+}
+
+# 1. String literal assignment
+"Constant Message" >> OutLiteral;
+
+# 2. Substring extraction (start: 0, len: 5)
+[ InStr, 0, 5 ] >> Substring() >> OutSub;
+
+# 3. Trim whitespace
+[ PaddedStr, " " ] >> Trim() >> OutTrim;
+
+# 4. Find needle "World" starting at 0
+[ InStr, "World", 0 ] >> Find() >> OutPos;
+
+# 5. StartsWith "Hello"
+[ InStr, "Hello" ] >> StartsWith() >> OutStarts;
+
+# 6. EndsWith "World"
+[ InStr, "World" ] >> EndsWith() >> OutEnds;
+
+# 7. Contains "lo Wo"
+[ InStr, "lo Wo" ] >> Contains() >> OutContains;
+
+# 8. Equal to "Hello World"
+[ InStr, "Hello World" ] >> Equal() >> OutEqual;
+
+# 9. Compare with "Hello World" (should be 0)
+[ InStr, "Hello World" ] >> Compare() >> OutCmp;
+
+# 10. Length
+InStr >> Length() >> OutLen;
+
+# 11. IsEmpty
+InStr >> IsEmpty() >> OutEmpty;
+
+# 12. Parse numbers
+[ "12345", 0 ] >> Parse() >> OutInt;
+[ "98.765", 0.0 ] >> Parse() >> OutReal;
+
+# 13. Concat two strings
+[ "Hello, ", "World!" ] >> Concat() >> OutConcat;
+
+# 14. PrintLn (sink)
+OutConcat >> PrintLn();
+
+# 15. Array of strings and array indexing as struct_out destination
+string StrArray[3] { domain: RootDomain }
+
+"First" >> StrArray[0];
+"Second" >> StrArray[1];
+"Third" >> StrArray[2];
+
+# Write Substring directly into array element StrArray[2]
+[ InStr, 0, 5 ] >> Substring() >> StrArray[2];
+
+StrArray[1] >> OutArrayElem;
+StrArray[2] >> OutArraySub;
+

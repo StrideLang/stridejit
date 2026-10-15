@@ -199,8 +199,11 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
         }, v);
     };
 
-    // If metadata (m_argInfos) is available, use typed argument binding
-    if (!m_argInfos.empty()) {
+    if (m_argInfos.empty()) {
+        result.passed = false;
+        result.errorMessage = "FunctionTestRunner: function argument metadata (m_argInfos) must be provided.";
+        return result;
+    }
         struct ArgBuffer {
             std::vector<double> doubleVec;
             std::vector<int32_t> int32Vec;
@@ -496,93 +499,6 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
         });
 
         return result;
-    }
-
-    // Fallback path when m_argInfos is not provided (legacy mock tests)
-    // Allocate typed storage for inputs and outputs
-    std::vector<double> inDoubles(spec.prepareStreams.size(), 0.0);
-    std::vector<double> outDoubles(spec.validateStreams.size(), 0.0);
-
-    // Build argument pointers list (state pointer if present, then all inputs followed by all outputs)
-    std::vector<void*> argPtrs;
-    argPtrs.reserve((m_statePtr ? 1 : 0) + inDoubles.size() + outDoubles.size());
-    if (m_statePtr) {
-        argPtrs.push_back(m_statePtr);
-    }
-    for (size_t i = 0; i < inDoubles.size(); ++i) {
-        argPtrs.push_back(&inDoubles[i]);
-    }
-    for (size_t i = 0; i < outDoubles.size(); ++i) {
-        argPtrs.push_back(&outDoubles[i]);
-    }
-
-    // Main multi-tick execution loop
-    {
-        NoHeapAllocGuard allocGuard;
-
-        for (size_t t = 0; t < spec.tickCount; ++t) {
-            // Populate input values for tick t
-            for (size_t i = 0; i < spec.prepareStreams.size(); ++i) {
-                const auto& prep = spec.prepareStreams[i];
-                if (t < prep.values.size()) {
-                    if (std::holds_alternative<double>(prep.values[t])) {
-                        inDoubles[i] = std::get<double>(prep.values[t]);
-                    } else if (std::holds_alternative<int32_t>(prep.values[t])) {
-                        inDoubles[i] = static_cast<double>(std::get<int32_t>(prep.values[t]));
-                    } else if (std::holds_alternative<int64_t>(prep.values[t])) {
-                        inDoubles[i] = static_cast<double>(std::get<int64_t>(prep.values[t]));
-                    } else if (std::holds_alternative<bool>(prep.values[t])) {
-                        inDoubles[i] = std::get<bool>(prep.values[t]) ? 1.0 : 0.0;
-                    }
-                }
-                if (m_stateAccessor.has_value() && m_statePtr) {
-                    m_stateAccessor->setVar(m_statePtr, prep.portName, inDoubles[i]);
-                }
-            }
-
-            // Execute the compiled domain process function
-            invokeProcessFunction(processFn, argPtrs);
-
-            // Validate outputs at tick t
-            for (size_t i = 0; i < spec.validateStreams.size(); ++i) {
-                const auto& valStream = spec.validateStreams[i];
-                SignalScalarValue actualVal = outDoubles[i];
-                if (m_stateAccessor.has_value() && m_statePtr) {
-                    actualVal = m_stateAccessor->getVar(m_statePtr, valStream.portName);
-                }
-                if (!valStream.matches(actualVal, t)) {
-                    result.passed = false;
-                    std::ostringstream ss;
-                    ss << "Assertion failed on port '" << valStream.portName << "' at tick " << t << "\n";
-                    ss << "  Expected: " << valStream.formatCondition(t);
-                    ss << "\n  Actual:   ";
-                    if (std::holds_alternative<double>(actualVal)) {
-                        ss << std::get<double>(actualVal);
-                    } else if (std::holds_alternative<int32_t>(actualVal)) {
-                        ss << std::get<int32_t>(actualVal);
-                    } else if (std::holds_alternative<int64_t>(actualVal)) {
-                        ss << std::get<int64_t>(actualVal);
-                    } else if (std::holds_alternative<bool>(actualVal)) {
-                        ss << (std::get<bool>(actualVal) ? "true" : "false");
-                    }
-                    result.errorMessage = ss.str();
-                    result.ticksExecuted = t;
-                    return result;
-                }
-            }
-        }
-
-        result.heapAllocations = allocGuard.getDeltaAllocations();
-    }
-
-    result.ticksExecuted = spec.tickCount;
-
-    // Performance and jitter profiling
-    result.perfMetrics = PerfAnalyzer::profile(50, 2000, [&]() {
-        invokeProcessFunction(processFn, argPtrs);
-    });
-
-    return result;
 }
 
 } // namespace strd::test

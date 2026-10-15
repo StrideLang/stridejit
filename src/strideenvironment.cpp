@@ -15,6 +15,7 @@
 #include "stride/stridejit/statemachine.hpp"
 #include "stride/stridejit/strideenvironment.hpp"
 #include "stride/stridejit/stridegenerator.hpp"
+#include "stride/stridejit/strideruntime_string.h"
 
 // llvm
 #include "llvm/ADT/StringRef.h"
@@ -536,36 +537,60 @@ StrideEnvironment::getStateVar(const void *statePtr, const std::string &varName,
       elemSz = DL->getTypeAllocSize(elemTy);
     }
     const char *elemPtr = bytePtr + (arrayIdx * elemSz);
-    if (elemTy->isDoubleTy()) {
-      return static_cast<T>(*reinterpret_cast<const double *>(elemPtr));
-    } else if (elemTy->isFloatTy()) {
-      return static_cast<T>(*reinterpret_cast<const float *>(elemPtr));
-    } else if (elemTy->isIntegerTy(1) || elemTy->isIntegerTy(8)) {
-      return static_cast<T>(*reinterpret_cast<const uint8_t *>(elemPtr));
-    } else if (elemTy->isIntegerTy(16)) {
-      return static_cast<T>(*reinterpret_cast<const int16_t *>(elemPtr));
-    } else if (elemTy->isIntegerTy(32)) {
+    if constexpr (std::is_same_v<T, std::string>) {
+      if (elemTy->isStructTy()) {
+        const auto *view = reinterpret_cast<const StrideStringView *>(elemPtr);
+        return view->toString();
+      }
+    } else if constexpr (std::is_same_v<T, StrideStringView>) {
+      if (elemTy->isStructTy()) {
+        return *reinterpret_cast<const StrideStringView *>(elemPtr);
+      }
+    } else {
+      if (elemTy->isDoubleTy()) {
+        return static_cast<T>(*reinterpret_cast<const double *>(elemPtr));
+      } else if (elemTy->isFloatTy()) {
+        return static_cast<T>(*reinterpret_cast<const float *>(elemPtr));
+      } else if (elemTy->isIntegerTy(1) || elemTy->isIntegerTy(8)) {
+        return static_cast<T>(*reinterpret_cast<const uint8_t *>(elemPtr));
+      } else if (elemTy->isIntegerTy(16)) {
+        return static_cast<T>(*reinterpret_cast<const int16_t *>(elemPtr));
+      } else if (elemTy->isIntegerTy(32)) {
+        return static_cast<T>(*reinterpret_cast<const int32_t *>(elemPtr));
+      } else if (elemTy->isIntegerTy(64)) {
+        return static_cast<T>(*reinterpret_cast<const int64_t *>(elemPtr));
+      }
       return static_cast<T>(*reinterpret_cast<const int32_t *>(elemPtr));
-    } else if (elemTy->isIntegerTy(64)) {
-      return static_cast<T>(*reinterpret_cast<const int64_t *>(elemPtr));
     }
-    return static_cast<T>(*reinterpret_cast<const int32_t *>(elemPtr));
+    return std::nullopt;
   }
 
-  if (fieldType->isDoubleTy()) {
-    return static_cast<T>(*reinterpret_cast<const double *>(bytePtr));
-  } else if (fieldType->isFloatTy()) {
-    return static_cast<T>(*reinterpret_cast<const float *>(bytePtr));
-  } else if (fieldType->isIntegerTy(1) || fieldType->isIntegerTy(8)) {
-    return static_cast<T>(*reinterpret_cast<const uint8_t *>(bytePtr));
-  } else if (fieldType->isIntegerTy(16)) {
-    return static_cast<T>(*reinterpret_cast<const int16_t *>(bytePtr));
-  } else if (fieldType->isIntegerTy(32)) {
+  if constexpr (std::is_same_v<T, std::string>) {
+    if (fieldType->isStructTy()) {
+      const auto *view = reinterpret_cast<const StrideStringView *>(bytePtr);
+      return view->toString();
+    }
+  } else if constexpr (std::is_same_v<T, StrideStringView>) {
+    if (fieldType->isStructTy()) {
+      return *reinterpret_cast<const StrideStringView *>(bytePtr);
+    }
+  } else {
+    if (fieldType->isDoubleTy()) {
+      return static_cast<T>(*reinterpret_cast<const double *>(bytePtr));
+    } else if (fieldType->isFloatTy()) {
+      return static_cast<T>(*reinterpret_cast<const float *>(bytePtr));
+    } else if (fieldType->isIntegerTy(1) || fieldType->isIntegerTy(8)) {
+      return static_cast<T>(*reinterpret_cast<const uint8_t *>(bytePtr));
+    } else if (fieldType->isIntegerTy(16)) {
+      return static_cast<T>(*reinterpret_cast<const int16_t *>(bytePtr));
+    } else if (fieldType->isIntegerTy(32)) {
+      return static_cast<T>(*reinterpret_cast<const int32_t *>(bytePtr));
+    } else if (fieldType->isIntegerTy(64)) {
+      return static_cast<T>(*reinterpret_cast<const int64_t *>(bytePtr));
+    }
     return static_cast<T>(*reinterpret_cast<const int32_t *>(bytePtr));
-  } else if (fieldType->isIntegerTy(64)) {
-    return static_cast<T>(*reinterpret_cast<const int64_t *>(bytePtr));
   }
-  return static_cast<T>(*reinterpret_cast<const int32_t *>(bytePtr));
+  return std::nullopt;
 }
 
 template <typename T>
@@ -640,34 +665,62 @@ bool StrideEnvironment::setStateVar(void *statePtr, const std::string &varName,
       elemSz = DL->getTypeAllocSize(elemTy);
     }
     char *elemPtr = bytePtr + (arrayIdx * elemSz);
-    if (elemTy->isIntegerTy(1) || elemTy->isIntegerTy(8)) {
-      *reinterpret_cast<int8_t *>(elemPtr) = static_cast<int8_t>(value);
-    } else if (elemTy->isIntegerTy(32)) {
-      *reinterpret_cast<int32_t *>(elemPtr) = value;
-    } else if (elemTy->isIntegerTy(64)) {
-      *reinterpret_cast<int64_t *>(elemPtr) = static_cast<int64_t>(value);
-    } else if (elemTy->isDoubleTy()) {
-      *reinterpret_cast<double *>(elemPtr) = static_cast<double>(value);
-    } else if (elemTy->isFloatTy()) {
-      *reinterpret_cast<float *>(elemPtr) = static_cast<float>(value);
+    if constexpr (std::is_same_v<T, std::string>) {
+      if (elemTy->isStructTy()) {
+        *reinterpret_cast<StrideStringView *>(elemPtr) =
+            StrideStringView{value.c_str(), static_cast<int32_t>(value.size())};
+        return true;
+      }
+    } else if constexpr (std::is_same_v<T, StrideStringView>) {
+      if (elemTy->isStructTy()) {
+        *reinterpret_cast<StrideStringView *>(elemPtr) = value;
+        return true;
+      }
     } else {
-      *reinterpret_cast<int32_t *>(elemPtr) = value;
+      if (elemTy->isIntegerTy(1) || elemTy->isIntegerTy(8)) {
+        *reinterpret_cast<int8_t *>(elemPtr) = static_cast<int8_t>(value);
+      } else if (elemTy->isIntegerTy(32)) {
+        *reinterpret_cast<int32_t *>(elemPtr) = value;
+      } else if (elemTy->isIntegerTy(64)) {
+        *reinterpret_cast<int64_t *>(elemPtr) = static_cast<int64_t>(value);
+      } else if (elemTy->isDoubleTy()) {
+        *reinterpret_cast<double *>(elemPtr) = static_cast<double>(value);
+      } else if (elemTy->isFloatTy()) {
+        *reinterpret_cast<float *>(elemPtr) = static_cast<float>(value);
+      } else {
+        *reinterpret_cast<int32_t *>(elemPtr) = value;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  if constexpr (std::is_same_v<T, std::string>) {
+    if (fieldType->isStructTy()) {
+      *reinterpret_cast<StrideStringView *>(bytePtr) =
+          StrideStringView{value.c_str(), static_cast<int32_t>(value.size())};
+      return true;
+    }
+  } else if constexpr (std::is_same_v<T, StrideStringView>) {
+    if (fieldType->isStructTy()) {
+      *reinterpret_cast<StrideStringView *>(bytePtr) = value;
+      return true;
+    }
+  } else {
+    if (fieldType->isIntegerTy(1) || fieldType->isIntegerTy(8)) {
+      *reinterpret_cast<int8_t *>(bytePtr) = static_cast<int8_t>(value);
+    } else if (fieldType->isIntegerTy(64)) {
+      *reinterpret_cast<int64_t *>(bytePtr) = static_cast<int64_t>(value);
+    } else if (fieldType->isDoubleTy()) {
+      *reinterpret_cast<double *>(bytePtr) = static_cast<double>(value);
+    } else if (fieldType->isFloatTy()) {
+      *reinterpret_cast<float *>(bytePtr) = static_cast<float>(value);
+    } else {
+      *reinterpret_cast<int32_t *>(bytePtr) = value;
     }
     return true;
   }
-
-  if (fieldType->isIntegerTy(1) || fieldType->isIntegerTy(8)) {
-    *reinterpret_cast<int8_t *>(bytePtr) = static_cast<int8_t>(value);
-  } else if (fieldType->isIntegerTy(64)) {
-    *reinterpret_cast<int64_t *>(bytePtr) = static_cast<int64_t>(value);
-  } else if (fieldType->isDoubleTy()) {
-    *reinterpret_cast<double *>(bytePtr) = static_cast<double>(value);
-  } else if (fieldType->isFloatTy()) {
-    *reinterpret_cast<float *>(bytePtr) = static_cast<float>(value);
-  } else {
-    *reinterpret_cast<int32_t *>(bytePtr) = value;
-  }
-  return true;
+  return false;
 }
 
 std::optional<int32_t>
@@ -868,9 +921,18 @@ static void fillTypeInfo(llvm::Type *ty, const llvm::DataLayout *DL,
     outTypeName = "_RealType";
     outElemSize = DL ? DL->getTypeAllocSize(ty) : 4;
   } else if (ty->isStructTy()) {
-    outType = DataType::STATE;
-    outTypeName = ty->getStructName().str();
-    outElemSize = DL ? DL->getTypeAllocSize(ty) : 0;
+    auto *structTy = llvm::cast<llvm::StructType>(ty);
+    if (structTy->isLiteral() && structTy->getNumElements() == 2 &&
+        structTy->getElementType(0)->isPointerTy() &&
+        structTy->getElementType(1)->isIntegerTy(32)) {
+      outType = DataType::STRING;
+      outTypeName = "_StringType";
+      outElemSize = DL ? DL->getTypeAllocSize(ty) : sizeof(StrideStringView);
+    } else {
+      outType = DataType::STATE;
+      outTypeName = structTy->hasName() ? structTy->getName().str() : "";
+      outElemSize = DL ? DL->getTypeAllocSize(ty) : 0;
+    }
   } else {
     outType = DataType::CUSTOM;
     outTypeName = "";
@@ -1232,9 +1294,50 @@ bool StrideEnvironment::compileInMemory() {
   llvm::orc::SymbolMap M;
   llvm::orc::MangleAndInterner Mangle(JIT->getExecutionSession(),
                                       JIT->getDataLayout());
-  M[Mangle("__stride_Greater_d_dd")] = llvm::orc::ExecutorSymbolDef(
-      llvm::orc::ExecutorAddr::fromPtr(&__stride_Greater_d_dd),
-      llvm::JITSymbolFlags::Exported);
+  auto regSym = [&](const char *name, auto *fnPtr) {
+    M[Mangle(name)] = llvm::orc::ExecutorSymbolDef(
+        llvm::orc::ExecutorAddr::fromPtr(fnPtr),
+        llvm::JITSymbolFlags::Exported);
+  };
+  regSym("__stride_Greater_d_dd", &__stride_Greater_d_dd);
+  regSym("__stride_string_substring", &__stride_string_substring);
+  regSym("__stride_string_trim", &__stride_string_trim);
+  regSym("__stride_string_trim_left", &__stride_string_trim_left);
+  regSym("__stride_string_trim_right", &__stride_string_trim_right);
+  regSym("__stride_string_find", &__stride_string_find);
+  regSym("__stride_string_find_last", &__stride_string_find_last);
+  regSym("__stride_string_contains", &__stride_string_contains);
+  regSym("__stride_string_starts_with", &__stride_string_starts_with);
+  regSym("__stride_string_ends_with", &__stride_string_ends_with);
+  regSym("__stride_string_equal", &__stride_string_equal);
+  regSym("__stride_string_compare", &__stride_string_compare);
+  regSym("__stride_string_length", &__stride_string_length);
+  regSym("__stride_string_is_empty", &__stride_string_is_empty);
+  regSym("__stride_string_parse_int", &__stride_string_parse_int);
+  regSym("__stride_string_parse_real", &__stride_string_parse_real);
+  regSym("__stride_string_tokenize", &__stride_string_tokenize);
+  regSym("__stride_string_println", &__stride_string_println);
+  regSym("__stride_string_print", &__stride_string_print);
+  regSym("__stride_jit_string_substring", &__stride_jit_string_substring);
+  regSym("__stride_jit_string_trim", &__stride_jit_string_trim);
+  regSym("__stride_jit_string_trim_left", &__stride_jit_string_trim_left);
+  regSym("__stride_jit_string_trim_right", &__stride_jit_string_trim_right);
+  regSym("__stride_jit_string_find", &__stride_jit_string_find);
+  regSym("__stride_jit_string_find_last", &__stride_jit_string_find_last);
+  regSym("__stride_jit_string_contains", &__stride_jit_string_contains);
+  regSym("__stride_jit_string_starts_with", &__stride_jit_string_starts_with);
+  regSym("__stride_jit_string_ends_with", &__stride_jit_string_ends_with);
+  regSym("__stride_jit_string_equal", &__stride_jit_string_equal);
+  regSym("__stride_jit_string_compare", &__stride_jit_string_compare);
+  regSym("__stride_jit_string_length", &__stride_jit_string_length);
+  regSym("__stride_jit_string_is_empty", &__stride_jit_string_is_empty);
+  regSym("__stride_jit_string_parse_int", &__stride_jit_string_parse_int);
+  regSym("__stride_jit_string_parse_real", &__stride_jit_string_parse_real);
+  regSym("__stride_jit_string_println", &__stride_jit_string_println);
+  regSym("__stride_jit_string_print", &__stride_jit_string_print);
+  regSym("__stride_jit_string_tokenize", &__stride_jit_string_tokenize);
+  regSym("__stride_jit_string_concat2", &__stride_jit_string_concat2);
+
   llvm::cantFail(JIT->getMainJITDylib().define(llvm::orc::absoluteSymbols(M)));
 
   m_dataLayout = JIT->getDataLayout();
@@ -1279,10 +1382,12 @@ bool StrideEnvironment::compileObjectToDisk(std::string path) {
           f << "int *";
         } else if (domainFunc.type == DataType::BOOL) {
           f << "bool *";
+        } else if (domainFunc.type == DataType::STRING) {
+          f << "StrideStringView *";
           //        } else if (domainFunc.type == DataType::INT64) {
           //          f << "int64_t *";
         } else {
-          f << "INVALID";
+          f << "void *";
         }
         f << " " << domainFunc.name;
       }
@@ -1578,6 +1683,26 @@ template bool StrideEnvironment::setStateVar<uint64_t>(void *,
                                                        uint64_t,
                                                        std::optional<int>,
                                                        const std::string &);
+
+template std::optional<std::string>
+StrideEnvironment::getStateVar<std::string>(const void *, const std::string &,
+                                            std::optional<int>,
+                                            const std::string &) const;
+template bool StrideEnvironment::setStateVar<std::string>(void *,
+                                                          const std::string &,
+                                                          std::string,
+                                                          std::optional<int>,
+                                                          const std::string &);
+
+template std::optional<StrideStringView>
+StrideEnvironment::getStateVar<StrideStringView>(const void *, const std::string &,
+                                                 std::optional<int>,
+                                                 const std::string &) const;
+template bool StrideEnvironment::setStateVar<StrideStringView>(void *,
+                                                               const std::string &,
+                                                               StrideStringView,
+                                                               std::optional<int>,
+                                                               const std::string &);
 
 bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
                                        const std::string &targetTriple,

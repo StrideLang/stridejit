@@ -30,6 +30,7 @@ if (STRIDEJIT_BUILD_TESTS)
       logical_comparisons_tests.cpp
       multi_instance_function_tests.cpp
       function_test_runner_tests.cpp
+      string_tests.cpp
       # error_tests.cpp
     )
     add_executable(stridejit_tests ${TEST_SOURCES})
