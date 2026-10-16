@@ -902,7 +902,7 @@ std::optional<int32_t> StrideEnvironment::getTransitionIdForState(
 static void fillTypeInfo(llvm::Type *ty, const llvm::DataLayout *DL,
                          DataType &outType, std::string &outTypeName,
                          size_t &outElemSize) {
-  if (!ty) {
+  if (!ty || !ty->isSized() || ty->isVoidTy()) {
     outType = DataType::CUSTOM;
     outTypeName = "";
     outElemSize = 0;
@@ -1002,22 +1002,22 @@ StrideEnvironment::getFunctionArgs(const std::string &funcName) const {
     fillTypeInfo(arg.llvmType, DL, info.type, info.typeName, info.elementSize);
 
     auto blocksVal = funcDecl ? funcDecl->getPropertyValue("blocks") : nullptr;
-    auto blockDecl =
+    auto entityDecl =
         (funcDecl && blocksVal)
             ? ASTQuery::findDeclarationByName(
                   arg.name, {{funcDecl, blocksVal->getChildren()}}, nullptr)
             : nullptr;
     info.count = 1;
-    if (blockDecl) {
+    if (entityDecl) {
       int sz =
-          ASTQuery::getEntityDeclaredSize(blockDecl, {}, mStrideEnv.m_tree);
+          ASTQuery::getEntityDeclaredSize(entityDecl, {}, mStrideEnv.m_tree);
       if (sz > 0) {
         info.count = static_cast<size_t>(sz);
       } else {
         info.count = 0; // Undetermined dynamic size
-        if (blockDecl->getNodeType() == AST::ArrayDeclaration) {
+        if (entityDecl->getNodeType() == AST::ArrayDeclaration) {
           // FIXME this should be calculated much earlier than here!
-          auto arrayNode = blockDecl->getArrayIndex();
+          auto arrayNode = entityDecl->getArrayIndex();
           if (arrayNode && arrayNode->index() &&
               !arrayNode->index()->getChildren().empty()) {
             auto firstIdx = arrayNode->index()->getChildren()[0];
@@ -1344,7 +1344,13 @@ bool StrideEnvironment::compileInMemory() {
   regSym("__stride_jit_string_println", &__stride_jit_string_println);
   regSym("__stride_jit_string_print", &__stride_jit_string_print);
   regSym("__stride_jit_string_tokenize", &__stride_jit_string_tokenize);
-  regSym("__stride_jit_string_concat2", &__stride_jit_string_concat2);
+  regSym("__stride_jit_string_concat_n", &__stride_jit_string_concat_n);
+  regSym("__stride_jit_string_repeat", &__stride_jit_string_repeat);
+  regSym("__stride_jit_string_token_at", &__stride_jit_string_token_at);
+  regSym("__stride_jit_string_token_count", &__stride_jit_string_token_count);
+  regSym("__stride_string_token_at", &__stride_string_token_at);
+  regSym("__stride_string_token_count", &__stride_string_token_count);
+  regSym("__stride_string_repeat", &__stride_string_repeat);
 
   llvm::cantFail(JIT->getMainJITDylib().define(llvm::orc::absoluteSymbols(M)));
 

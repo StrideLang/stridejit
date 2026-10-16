@@ -26,6 +26,13 @@ _domainDefinition RootDomain {
         signal OutArrayElem { domain: RootDomain type: _StringType }
         signal OutConcat { domain: RootDomain type: _StringType }
         signal OutArraySub { domain: RootDomain type: _StringType }
+        signal OutConcat3 { domain: RootDomain type: _StringType }
+        signal OutConcat5 { domain: RootDomain type: _StringType }
+        signal OutConcat7 { domain: RootDomain type: _StringType }
+        signal OutPlus { domain: RootDomain type: _StringType }
+        signal OutRepeat { domain: RootDomain type: _StringType }
+        signal OutTokCount { domain: RootDomain type: _IntType }
+        signal OutTok1 { domain: RootDomain type: _StringType }
     ]
     domainFunctionCode: ''
 }
@@ -115,9 +122,14 @@ platformModule Parse@String_Real {
 }
 
 platformModule Concat {
-    inputs: [_StringType, _StringType]
+    inputs: [
+        constrainedList {
+            minItems: 2
+            anyOf: [_StringType]
+        }
+    ]
     outputs: [_StringType]
-    processing: "@__stride_jit_string_concat2"
+    processing: "@__stride_jit_string_concat_n"
     inherits: [_Signal]
 }
 
@@ -125,6 +137,27 @@ platformModule PrintLn {
     inputs: [_StringType]
     outputs: []
     processing: "@__stride_jit_string_println"
+    inherits: [_Signal]
+}
+
+platformModule Repeat {
+    inputs: [_StringType, _IntType]
+    outputs: [_StringType]
+    processing: "@__stride_jit_string_repeat"
+    inherits: [_Signal]
+}
+
+platformModule TokenAt {
+    inputs: [_StringType, _StringType, _IntType]
+    outputs: [_StringType]
+    processing: "@__stride_jit_string_token_at"
+    inherits: [_Signal]
+}
+
+platformModule TokenCount {
+    inputs: [_StringType, _StringType]
+    outputs: [_IntType]
+    processing: "@__stride_jit_string_token_count"
     inherits: [_Signal]
 }
 
@@ -183,4 +216,20 @@ string StrArray[3] { domain: RootDomain }
 
 StrArray[1] >> OutArrayElem;
 StrArray[2] >> OutArraySub;
+
+# 16. Multi-argument concat
+[ "A", "B", "C" ] >> Concat() >> OutConcat3;
+[ "1", "2", "3", "4", "5" ] >> Concat() >> OutConcat5;
+[ "A", "B", "C", "D", "E", "F", "G" ] >> Concat() >> OutConcat7;
+
+# 17. Binary string addition sugar
+"Hello " + "World" >> OutPlus;
+
+# 18. Repeat
+[ "=", 5 ] >> Repeat() >> OutRepeat;
+
+# 19. Tokenization queries
+[ "alpha,beta,gamma", "," ] >> TokenCount() >> OutTokCount;
+[ "alpha,beta,gamma", ",", 1 ] >> TokenAt() >> OutTok1;
+
 

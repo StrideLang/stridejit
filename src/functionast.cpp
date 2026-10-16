@@ -436,7 +436,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
 
     // Output ports are caller-allocated pointers, so they don't go through the
     // internal variable default initialization. A loop is reset on every
-    // execution, so write the declared default of each output block into its
+    // execution, so write the declared default of each output entity into its
     // pointer before entering the loop body.
     {
       std::shared_ptr<DeclarationNode> loopDecl;
@@ -622,7 +622,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
               llvm::ConstantInt::get(llvm::Type::getInt32Ty(*state.TheContext),
                                      llvm::APInt(32, int32_t(itStart)));
         } else {
-          LOG_ERROR() << "Invalid declaration for block '" << decl->getName()
+          LOG_ERROR() << "Invalid declaration for entity '" << decl->getName()
                       << "' . Ignoring" << std::endl;
           continue;
         }
@@ -1170,9 +1170,9 @@ CallExprAST::codegen(StrideCompiler &state) {
     int outArgCount = CallArgs.size();
     processArgGroup(state, InArgs, CalleeF, CallArgs, false);
 
-    // bundle main inputs if not external.
-    // Modules and Loops take a single block, so
-    // multiple inputs must be bundled into a single instance
+    // Group main inputs into array if not external.
+    // Modules and Loops take a single entity, so
+    // multiple inputs must be grouped into an array
 
     if (CallArgs.size() > outArgCount + 1) {
       size_t arraySize = CallArgs.size() - outArgCount;
@@ -1189,7 +1189,7 @@ CallExprAST::codegen(StrideCompiler &state) {
 
       llvm::Value *arraySizeValue = state.Builder->getInt32(arraySize);
       llvm::AllocaInst *arrayAlloc = state.Builder->CreateAlloca(
-          elemType, arraySizeValue, "bundle_intermediate");
+          elemType, arraySizeValue, "array_intermediate");
 
       for (size_t i = 0; i < arraySize; ++i) {
         llvm::Value *index = llvm::ConstantInt::get(
@@ -1203,13 +1203,13 @@ CallExprAST::codegen(StrideCompiler &state) {
           llvm::Type *loadType = CallArgs[outArgCount + i].second.has_value()
                                      ? CallArgs[outArgCount + i].second.value()
                                      : elemType;
-          val = state.Builder->CreateLoad(loadType, val, "bundle_elem");
+          val = state.Builder->CreateLoad(loadType, val, "array_elem");
         } else if (val->getType() != elemType) {
           if (val->getType()->isIntegerTy() && elemType->isFloatingPointTy()) {
-            val = state.Builder->CreateSIToFP(val, elemType, "bundle_cast");
+            val = state.Builder->CreateSIToFP(val, elemType, "array_cast");
           } else if (val->getType()->isFloatingPointTy() &&
                      elemType->isIntegerTy()) {
-            val = state.Builder->CreateFPToSI(val, elemType, "bundle_cast");
+            val = state.Builder->CreateFPToSI(val, elemType, "array_cast");
           }
         }
         state.Builder->CreateStore(val, gepPtr);
@@ -1219,13 +1219,47 @@ CallExprAST::codegen(StrideCompiler &state) {
       if (Logger::isDebugEnabled()) {
         std::string s;
         llvm::raw_string_ostream rso(s);
-        rso << "Bundled inputs into: ";
+        rso << "Grouped inputs into array: ";
         arrayAlloc->print(rso);
         LOG_DEBUG() << rso.str() << "\n";
       }
     }
   } else if (callType == CallableType::External) {
-    processArgGroup(state, InArgs, CalleeF, CallArgs);
+    if (CalleeF->hasFnAttribute("stride.constrained_list")) {
+      size_t numArgs = InArgs.size();
+      llvm::Type *elemType =
+          (!InArgsDataType.empty() && InArgsDataType[0] &&
+           !InArgsDataType[0]->isVoidTy())
+              ? InArgsDataType[0]
+              : state.typesMap["_StringType"];
+
+      llvm::Value *arraySizeValue = state.Builder->getInt32(numArgs);
+      llvm::AllocaInst *arrayAlloc = state.Builder->CreateAlloca(
+          elemType, arraySizeValue, "clist_array");
+      state.pointerElementTypes[arrayAlloc] = elemType;
+
+      for (size_t i = 0; i < numArgs; ++i) {
+        auto [argVal, argType] = InArgs[i]->codegen(state);
+        llvm::Type *valType =
+            (argType.has_value() && argType.value() &&
+             !argType.value()->isVoidTy())
+                ? argType.value()
+                : elemType;
+        if (argVal->getType()->isPointerTy()) {
+          argVal = state.Builder->CreateLoad(valType, argVal, "elem_val");
+        }
+        llvm::Value *index = llvm::ConstantInt::get(
+            llvm::Type::getInt32Ty(*state.TheContext), i);
+        llvm::Value *gepPtr = state.Builder->CreateInBoundsGEP(
+            elemType, arrayAlloc, index, "elem_ptr");
+        state.Builder->CreateStore(argVal, gepPtr);
+      }
+      CallArgs.push_back({arrayAlloc, elemType});
+      CallArgs.push_back({state.Builder->getInt32(numArgs),
+                          llvm::Type::getInt32Ty(*state.TheContext)});
+    } else {
+      processArgGroup(state, InArgs, CalleeF, CallArgs);
+    }
     // processArgGroup(state, InternalArgs, CalleeF, CallArgs)
     if (CalleeF->hasFnAttribute("stride.struct_out") && !OutArgs.empty()) {
       // Struct results are written through a trailing out pointer

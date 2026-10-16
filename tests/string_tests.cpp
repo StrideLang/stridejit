@@ -55,6 +55,22 @@ TEST(Strings, RuntimeHelpersDirect) {
   EXPECT_EQ(__stride_string_parse_int(StrideStringView{"12345", 5}, 0), 12345);
   EXPECT_EQ(__stride_string_parse_int(StrideStringView{"invalid", 7}, 99), 99);
   EXPECT_DOUBLE_EQ(__stride_string_parse_real(StrideStringView{"3.14159", 7}, 0.0), 3.14159);
+
+  // TokenAt & TokenCount
+  StrideStringView tokSrc{"one,two,three", 13};
+  StrideStringView tokDelim{",", 1};
+  EXPECT_EQ(__stride_string_token_count(tokSrc, tokDelim), 3);
+  EXPECT_EQ(__stride_string_token_at(tokSrc, tokDelim, 0).toString(), "one");
+  EXPECT_EQ(__stride_string_token_at(tokSrc, tokDelim, 1).toString(), "two");
+  EXPECT_EQ(__stride_string_token_at(tokSrc, tokDelim, 2).toString(), "three");
+  EXPECT_EQ(__stride_string_token_at(tokSrc, tokDelim, 3).length, 0);
+  EXPECT_EQ(__stride_string_token_at(tokSrc, tokDelim, -1).length, 0);
+
+  // Repeat
+  auto rep = __stride_string_repeat(StrideStringView{"abc", 3}, 3);
+  EXPECT_EQ(rep.toString(), "abcabcabc");
+  auto repZero = __stride_string_repeat(StrideStringView{"abc", 3}, 0);
+  EXPECT_EQ(repZero.length, 0);
 }
 
 TEST(Strings, TokenizeWithOverflow) {
@@ -86,8 +102,9 @@ TEST(Strings, TokenizeWithOverflow) {
 TEST(Strings, JITTokenizeAndConcatDirect) {
   StrideStringView a{"Hello, ", 7};
   StrideStringView b{"World!", 6};
+  StrideStringView views2[2] = {a, b};
   StrideStringView cat{};
-  __stride_jit_string_concat2(&a, &b, &cat);
+  __stride_jit_string_concat_n(views2, 2, &cat);
   EXPECT_EQ(cat.toString(), "Hello, World!");
 
   StrideStringView src{"one:two:three", 13};
@@ -101,6 +118,37 @@ TEST(Strings, JITTokenizeAndConcatDirect) {
   EXPECT_EQ(tokens[0].toString(), "one");
   EXPECT_EQ(tokens[1].toString(), "two");
   EXPECT_EQ(tokens[2].toString(), "three");
+
+  // Concat 3
+  StrideStringView c{"!", 1};
+  StrideStringView views3[3] = {a, b, c};
+  StrideStringView cat3{};
+  __stride_jit_string_concat_n(views3, 3, &cat3);
+  EXPECT_EQ(cat3.toString(), "Hello, World!!");
+
+  // Concat N (7 items)
+  StrideStringView views7[7] = {
+      StrideStringView{"A", 1}, StrideStringView{"B", 1},
+      StrideStringView{"C", 1}, StrideStringView{"D", 1},
+      StrideStringView{"E", 1}, StrideStringView{"F", 1},
+      StrideStringView{"G", 1}};
+  StrideStringView cat7{};
+  __stride_jit_string_concat_n(views7, 7, &cat7);
+  EXPECT_EQ(cat7.toString(), "ABCDEFG");
+
+  // Repeat
+  StrideStringView repOut{};
+  StrideStringView star{"*", 1};
+  __stride_jit_string_repeat(&star, 5, &repOut);
+  EXPECT_EQ(repOut.toString(), "*****");
+
+  // TokenAt & TokenCount
+  StrideStringView tokAtOut{};
+  __stride_jit_string_token_at(&src, &delim, 1, &tokAtOut);
+  EXPECT_EQ(tokAtOut.toString(), "two");
+
+  int32_t tokCnt = __stride_jit_string_token_count(&src, &delim);
+  EXPECT_EQ(tokCnt, 3);
 }
 
 TEST(Strings, JITCompilationAndExecution) {
@@ -125,8 +173,8 @@ TEST(Strings, JITCompilationAndExecution) {
   ASSERT_TRUE(strenv.setStateVar(state, "InStr", StrideStringView{"Hello World", 11}, std::nullopt, dom));
   ASSERT_TRUE(strenv.setStateVar(state, "PaddedStr", StrideStringView{"   Trimmed   ", 13}, std::nullopt, dom));
 
-  // state + 2 inputs + 16 outputs
-  void *args[19] = {state};
+  // state + 2 inputs + 23 outputs
+  void *args[32] = {state};
   int32_t res = strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(res, 0);
 
@@ -167,4 +215,15 @@ TEST(Strings, JITCompilationAndExecution) {
   EXPECT_EQ(str("OutArrayElem"), "Second");
   // 15. Substring written directly into array element StrArray[2]
   EXPECT_EQ(str("OutArraySub"), "Hello");
+  // 16. Multi-argument concat
+  EXPECT_EQ(str("OutConcat3"), "ABC");
+  EXPECT_EQ(str("OutConcat5"), "12345");
+  EXPECT_EQ(str("OutConcat7"), "ABCDEFG");
+  // 17. Binary string addition sugar
+  EXPECT_EQ(str("OutPlus"), "Hello World");
+  // 18. Repeat
+  EXPECT_EQ(str("OutRepeat"), "=====");
+  // 19. Tokenization queries
+  EXPECT_EQ(strenv.getStateVar<int32_t>(state, "OutTokCount", std::nullopt, dom).value_or(-1), 3);
+  EXPECT_EQ(str("OutTok1"), "beta");
 }

@@ -133,6 +133,15 @@ STRIDE_EXPORT int64_t __stride_string_tokenize(
     strd::StrideStringView src, strd::StrideStringView delim,
     strd::StrideStringView *outTokens, int64_t maxTokens, bool *outOverflow);
 
+STRIDE_EXPORT strd::StrideStringView __stride_string_token_at(
+    strd::StrideStringView src, strd::StrideStringView delim, int64_t index);
+
+STRIDE_EXPORT int64_t __stride_string_token_count(
+    strd::StrideStringView src, strd::StrideStringView delim);
+
+STRIDE_EXPORT strd::StrideStringView __stride_string_repeat(
+    strd::StrideStringView str, int64_t count);
+
 STRIDE_EXPORT void __stride_string_println(strd::StrideStringView str);
 
 STRIDE_EXPORT void __stride_string_print(strd::StrideStringView str);
@@ -194,10 +203,17 @@ STRIDE_EXPORT void __stride_jit_string_tokenize(
     const strd::StrideStringView *src, const strd::StrideStringView *delim,
     strd::StrideStringView *outTokens, int32_t maxTokens, int32_t *outCount,
     bool *outOverflow);
+STRIDE_EXPORT void __stride_jit_string_token_at(
+    const strd::StrideStringView *src, const strd::StrideStringView *delim,
+    int32_t index, strd::StrideStringView *out);
+STRIDE_EXPORT int32_t __stride_jit_string_token_count(
+    const strd::StrideStringView *src, const strd::StrideStringView *delim);
 STRIDE_EXPORT void
-__stride_jit_string_concat2(const strd::StrideStringView *a,
-                            const strd::StrideStringView *b,
-                            strd::StrideStringView *out);
+__stride_jit_string_concat_n(const strd::StrideStringView *views, int32_t count,
+                             strd::StrideStringView *out);
+STRIDE_EXPORT void
+__stride_jit_string_repeat(const strd::StrideStringView *str, int32_t count,
+                           strd::StrideStringView *out);
 
 }
 

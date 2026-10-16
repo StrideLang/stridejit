@@ -36,7 +36,7 @@ if (STRIDEJIT_BUILD_TESTS)
     add_executable(stridejit_tests ${TEST_SOURCES})
 
     set_target_properties(stridejit_tests PROPERTIES
-      CXX_STANDARD 17
+      CXX_STANDARD 20
       CXX_STANDARD_REQUIRED ON
     )
     add_test(NAME stridejit_tests COMMAND stridejit_tests)

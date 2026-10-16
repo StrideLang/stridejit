@@ -70,6 +70,31 @@ std::optional<ExternalFunction> StrideCompiler::getExternalFunction(
   for (const auto &externFunc : functionMap) {
     if (externFunc.first == strideName) {
       for (const auto &candidate : externFunc.second) {
+        if (candidate.isConstrainedList) {
+          if (!returnType ||
+              candidate.llvmFunctionType->getReturnType() == returnType) {
+            int nArgs = static_cast<int>(argTypes.size());
+            if (nArgs >= candidate.minItems &&
+                (candidate.maxItems < 0 || nArgs <= candidate.maxItems)) {
+              bool allTypesMatch = true;
+              if (candidate.elemType) {
+                for (int i = 0; i < nArgs; ++i) {
+                  if (argTypes[i] != candidate.elemType) {
+                    allTypesMatch = false;
+                    break;
+                  }
+                }
+              }
+              if (allTypesMatch) {
+                LOG_DEBUG() << "Found constrainedList external candidate for "
+                            << strideName << " with " << nArgs << " args"
+                            << std::endl;
+                return candidate;
+              }
+            }
+          }
+          continue;
+        }
         llvm::FunctionType *llvmFType = candidate.llvmFunctionType;
         //        LOG_INFO() << llvmFType->getReturnType() << std::endl;
         if (llvmFType->getReturnType() == returnType) {

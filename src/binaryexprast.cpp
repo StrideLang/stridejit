@@ -12,6 +12,22 @@ BinaryExprAST::BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS,
                              std::unique_ptr<ExprAST> RHS)
     : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
 
+static llvm::Function *getOrCreateFunction(StrideCompiler &state) {
+  llvm::BasicBlock *curBB = state.Builder->GetInsertBlock();
+  if (curBB && curBB->getParent()) {
+    return curBB->getParent();
+  }
+  llvm::FunctionType *fnTy = llvm::FunctionType::get(
+      llvm::Type::getVoidTy(*state.TheContext), false);
+  llvm::Function *fn = llvm::Function::Create(
+      fnTy, llvm::Function::ExternalLinkage, "__anon_expr",
+      state.TheModule.get());
+  llvm::BasicBlock *bb =
+      llvm::BasicBlock::Create(*state.TheContext, "entry", fn);
+  state.Builder->SetInsertPoint(bb);
+  return fn;
+}
+
 std::pair<llvm::Value *, std::optional<llvm::Type *>>
 BinaryExprAST::codegen(StrideCompiler &state) {
   LOG_INFO() << " == BinaryExprAST codegen " << std::string{Op} << std::endl;
@@ -29,8 +45,8 @@ BinaryExprAST::codegen(StrideCompiler &state) {
     }
     // Codegen the RHS.
     auto [Val, TypePtr] = RHS->codegen(state);
-    if (!Val)
-      return {nullptr, std::nullopt};
+    if (!Val || Val->getType()->isVoidTy() || !Val->getType()->isSized())
+      return {Val, std::nullopt};
     // Look up the name.
     llvm::Value *Variable = nullptr;
     std::optional<llvm::Type *> VariableType;
@@ -186,6 +202,15 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       } else
         state.Builder->CreateStore(loadInst, Variable);
     } else {
+      if (VariableType.has_value()) {
+        if (VariableType.value()->isIntegerTy(1) && Val->getType()->isDoubleTy()) {
+          Val = state.Builder->CreateFPToUI(
+              Val, llvm::Type::getInt1Ty(*state.TheContext), "fptoui");
+        } else if (VariableType.value()->isIntegerTy(32) && Val->getType()->isDoubleTy()) {
+          Val = state.Builder->CreateFPToSI(
+              Val, llvm::Type::getInt32Ty(*state.TheContext), "fptosi");
+        }
+      }
       if (state.NamedValues.find(LHSE->getName()) != state.NamedValues.end()) {
         if (state.NamedValues[LHSE->getName()]
                 .first->getType()
@@ -355,6 +380,45 @@ BinaryExprAST::codegen(StrideCompiler &state) {
     std::optional<llvm::Type *> Type;
     switch (Op) {
     case '+': {
+      if (*LType == state.typesMap["_StringType"] &&
+          *RType == state.typesMap["_StringType"]) {
+        llvm::Function *TheFunction = getOrCreateFunction(state);
+        llvm::Type *stringTy = state.typesMap["_StringType"];
+        llvm::ArrayType *arrayTy = llvm::ArrayType::get(stringTy, 2);
+        llvm::AllocaInst *arrayAlloc =
+            state.CreateEntryBlockAlloca(TheFunction, "concat_arr", arrayTy);
+        llvm::AllocaInst *allocOut =
+            state.CreateEntryBlockAlloca(TheFunction, "concat_out", stringTy);
+
+        llvm::Value *zero = llvm::ConstantInt::get(
+            llvm::Type::getInt32Ty(*state.TheContext), 0);
+        llvm::Value *one = llvm::ConstantInt::get(
+            llvm::Type::getInt32Ty(*state.TheContext), 1);
+        llvm::Value *elem0 = state.Builder->CreateInBoundsGEP(
+            arrayTy, arrayAlloc, {zero, zero}, "elem0");
+        llvm::Value *elem1 = state.Builder->CreateInBoundsGEP(
+            arrayTy, arrayAlloc, {zero, one}, "elem1");
+        state.Builder->CreateStore(L, elem0);
+        state.Builder->CreateStore(R, elem1);
+
+        llvm::Type *ptrTy = llvm::PointerType::get(*state.TheContext, 0);
+        llvm::Type *i32Ty = llvm::Type::getInt32Ty(*state.TheContext);
+        llvm::Function *concatFunc =
+            state.getFunctionInModule("__stride_jit_string_concat_n");
+        if (!concatFunc) {
+          llvm::FunctionType *fnTy = llvm::FunctionType::get(
+              llvm::Type::getVoidTy(*state.TheContext), {ptrTy, i32Ty, ptrTy},
+              false);
+          concatFunc = llvm::Function::Create(
+              fnTy, llvm::Function::ExternalLinkage,
+              "__stride_jit_string_concat_n", state.TheModule.get());
+        }
+        state.Builder->CreateCall(
+            concatFunc, {arrayAlloc, state.Builder->getInt32(2), allocOut});
+        Val = state.Builder->CreateLoad(stringTy, allocOut, "concat_res");
+        Type = stringTy;
+        break;
+      }
       if ((*LType)->isDoubleTy() && (*RType)->isDoubleTy()) {
         Val = state.Builder->CreateFAdd(L, R, "addtmp");
         Type = llvm::Type::getDoubleTy(*state.TheContext);
@@ -395,6 +459,34 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       break;
     }
     case ':': { // equal
+      if (*LType == state.typesMap["_StringType"] &&
+          *RType == state.typesMap["_StringType"]) {
+        llvm::Function *TheFunction = getOrCreateFunction(state);
+        llvm::Type *stringTy = state.typesMap["_StringType"];
+        llvm::AllocaInst *allocA =
+            state.CreateEntryBlockAlloca(TheFunction, "streq_a", stringTy);
+        llvm::AllocaInst *allocB =
+            state.CreateEntryBlockAlloca(TheFunction, "streq_b", stringTy);
+        state.Builder->CreateStore(L, allocA);
+        state.Builder->CreateStore(R, allocB);
+
+        llvm::Type *ptrTy = llvm::PointerType::get(*state.TheContext, 0);
+        llvm::Function *eqFunc =
+            state.getFunctionInModule("__stride_jit_string_equal");
+        if (!eqFunc) {
+          llvm::FunctionType *fnTy = llvm::FunctionType::get(
+              llvm::Type::getInt1Ty(*state.TheContext),
+              {ptrTy, ptrTy}, false);
+          eqFunc = llvm::Function::Create(
+              fnTy, llvm::Function::ExternalLinkage,
+              "__stride_jit_string_equal", state.TheModule.get());
+        }
+        L = state.Builder->CreateCall(eqFunc, {allocA, allocB}, "streq");
+        Val = state.Builder->CreateUIToFP(
+            L, llvm::Type::getDoubleTy(*state.TheContext), "booltmp");
+        Type = llvm::Type::getInt1Ty(*state.TheContext);
+        break;
+      }
       if ((*LType)->isDoubleTy() && (*RType)->isDoubleTy()) {
         L = state.Builder->CreateFCmpUEQ(L, R, "cmptmp");
       } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
@@ -408,6 +500,36 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       break;
     }
     case '!': { // not equal
+      if (*LType == state.typesMap["_StringType"] &&
+          *RType == state.typesMap["_StringType"]) {
+        llvm::Function *TheFunction = getOrCreateFunction(state);
+        llvm::Type *stringTy = state.typesMap["_StringType"];
+        llvm::AllocaInst *allocA =
+            state.CreateEntryBlockAlloca(TheFunction, "strne_a", stringTy);
+        llvm::AllocaInst *allocB =
+            state.CreateEntryBlockAlloca(TheFunction, "strne_b", stringTy);
+        state.Builder->CreateStore(L, allocA);
+        state.Builder->CreateStore(R, allocB);
+
+        llvm::Type *ptrTy = llvm::PointerType::get(*state.TheContext, 0);
+        llvm::Function *eqFunc =
+            state.getFunctionInModule("__stride_jit_string_equal");
+        if (!eqFunc) {
+          llvm::FunctionType *fnTy = llvm::FunctionType::get(
+              llvm::Type::getInt1Ty(*state.TheContext),
+              {ptrTy, ptrTy}, false);
+          eqFunc = llvm::Function::Create(
+              fnTy, llvm::Function::ExternalLinkage,
+              "__stride_jit_string_equal", state.TheModule.get());
+        }
+        llvm::Value *eqVal =
+            state.Builder->CreateCall(eqFunc, {allocA, allocB}, "streq");
+        L = state.Builder->CreateNot(eqVal, "strne");
+        Val = state.Builder->CreateUIToFP(
+            L, llvm::Type::getDoubleTy(*state.TheContext), "booltmp");
+        Type = llvm::Type::getInt1Ty(*state.TheContext);
+        break;
+      }
       if ((*LType)->isDoubleTy() && (*RType)->isDoubleTy()) {
         L = state.Builder->CreateFCmpUNE(L, R, "cmptmp");
       } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
@@ -421,6 +543,38 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       break;
     }
     case '<': {
+      if (*LType == state.typesMap["_StringType"] &&
+          *RType == state.typesMap["_StringType"]) {
+        llvm::Function *TheFunction = getOrCreateFunction(state);
+        llvm::Type *stringTy = state.typesMap["_StringType"];
+        llvm::AllocaInst *allocA =
+            state.CreateEntryBlockAlloca(TheFunction, "strlt_a", stringTy);
+        llvm::AllocaInst *allocB =
+            state.CreateEntryBlockAlloca(TheFunction, "strlt_b", stringTy);
+        state.Builder->CreateStore(L, allocA);
+        state.Builder->CreateStore(R, allocB);
+
+        llvm::Type *ptrTy = llvm::PointerType::get(*state.TheContext, 0);
+        llvm::Function *cmpFunc =
+            state.getFunctionInModule("__stride_jit_string_compare");
+        if (!cmpFunc) {
+          llvm::FunctionType *fnTy = llvm::FunctionType::get(
+              llvm::Type::getInt32Ty(*state.TheContext),
+              {ptrTy, ptrTy}, false);
+          cmpFunc = llvm::Function::Create(
+              fnTy, llvm::Function::ExternalLinkage,
+              "__stride_jit_string_compare", state.TheModule.get());
+        }
+        llvm::Value *cmpVal =
+            state.Builder->CreateCall(cmpFunc, {allocA, allocB}, "strcmp");
+        L = state.Builder->CreateICmpSLT(
+            cmpVal, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*state.TheContext), 0),
+            "cmptmp");
+        Val = state.Builder->CreateUIToFP(
+            L, llvm::Type::getDoubleTy(*state.TheContext), "booltmp");
+        Type = llvm::Type::getInt1Ty(*state.TheContext);
+        break;
+      }
       if ((*LType)->isDoubleTy() && (*RType)->isDoubleTy()) {
         L = state.Builder->CreateFCmpULT(L, R, "cmptmp");
       } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
@@ -434,6 +588,38 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       break;
     }
     case '>': {
+      if (*LType == state.typesMap["_StringType"] &&
+          *RType == state.typesMap["_StringType"]) {
+        llvm::Function *TheFunction = getOrCreateFunction(state);
+        llvm::Type *stringTy = state.typesMap["_StringType"];
+        llvm::AllocaInst *allocA =
+            state.CreateEntryBlockAlloca(TheFunction, "strgt_a", stringTy);
+        llvm::AllocaInst *allocB =
+            state.CreateEntryBlockAlloca(TheFunction, "strgt_b", stringTy);
+        state.Builder->CreateStore(L, allocA);
+        state.Builder->CreateStore(R, allocB);
+
+        llvm::Type *ptrTy = llvm::PointerType::get(*state.TheContext, 0);
+        llvm::Function *cmpFunc =
+            state.getFunctionInModule("__stride_jit_string_compare");
+        if (!cmpFunc) {
+          llvm::FunctionType *fnTy = llvm::FunctionType::get(
+              llvm::Type::getInt32Ty(*state.TheContext),
+              {ptrTy, ptrTy}, false);
+          cmpFunc = llvm::Function::Create(
+              fnTy, llvm::Function::ExternalLinkage,
+              "__stride_jit_string_compare", state.TheModule.get());
+        }
+        llvm::Value *cmpVal =
+            state.Builder->CreateCall(cmpFunc, {allocA, allocB}, "strcmp");
+        L = state.Builder->CreateICmpSGT(
+            cmpVal, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*state.TheContext), 0),
+            "cmptmp");
+        Val = state.Builder->CreateUIToFP(
+            L, llvm::Type::getDoubleTy(*state.TheContext), "booltmp");
+        Type = llvm::Type::getInt1Ty(*state.TheContext);
+        break;
+      }
       if ((*LType)->isDoubleTy() && (*RType)->isDoubleTy()) {
         L = state.Builder->CreateFCmpUGT(L, R, "cmptmp");
       } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {

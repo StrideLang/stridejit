@@ -235,6 +235,86 @@ STRIDE_EXPORT int64_t __stride_string_tokenize(
   return tokenCount;
 }
 
+STRIDE_EXPORT StrideStringView __stride_string_token_at(
+    StrideStringView src, StrideStringView delim, int64_t index) {
+  if (!src.data || src.length <= 0 || index < 0) {
+    return StrideStringView{nullptr, 0};
+  }
+  const char *delimPtr = (delim.data && delim.length > 0) ? delim.data : " ";
+  int32_t delimLen = (delim.data && delim.length > 0) ? delim.length : 1;
+  StrideStringView delimView{delimPtr, delimLen};
+
+  int64_t curIdx = 0;
+  int64_t start = 0;
+  while (start <= src.length) {
+    int64_t found = -1;
+    if (start < src.length) {
+      found = __stride_string_find(src, delimView, start);
+    }
+    int64_t tokenEnd = (found >= 0) ? found : src.length;
+    int64_t tokenLen = tokenEnd - start;
+
+    if (curIdx == index) {
+      return StrideStringView{src.data + start, static_cast<int32_t>(tokenLen)};
+    }
+    curIdx++;
+    if (found < 0)
+      break;
+    start = found + delimLen;
+  }
+  return StrideStringView{nullptr, 0};
+}
+
+STRIDE_EXPORT int64_t __stride_string_token_count(
+    StrideStringView src, StrideStringView delim) {
+  if (!src.data || src.length <= 0) {
+    return 0;
+  }
+  const char *delimPtr = (delim.data && delim.length > 0) ? delim.data : " ";
+  int32_t delimLen = (delim.data && delim.length > 0) ? delim.length : 1;
+  StrideStringView delimView{delimPtr, delimLen};
+
+  int64_t count = 0;
+  int64_t start = 0;
+  while (start <= src.length) {
+    int64_t found = -1;
+    if (start < src.length) {
+      found = __stride_string_find(src, delimView, start);
+    }
+    count++;
+    if (!found || found < 0)
+      break;
+    start = found + delimLen;
+  }
+  return count;
+}
+
+STRIDE_EXPORT StrideStringView __stride_string_repeat(
+    StrideStringView str, int64_t count) {
+  if (!str.data || str.length <= 0 || count <= 0) {
+    return StrideStringView{"", 0};
+  }
+  int64_t total = static_cast<int64_t>(str.length) * count;
+  if (total > 65535) {
+    total = 65535;
+    count = total / str.length;
+  }
+  static thread_local char buffer[65536];
+  static thread_local size_t offset = 0;
+  if (offset + static_cast<size_t>(total) + 1 > sizeof(buffer)) {
+    offset = 0;
+  }
+  char *dest = buffer + offset;
+  offset += static_cast<size_t>(total) + 1;
+  char *p = dest;
+  for (int64_t i = 0; i < count; ++i) {
+    std::memcpy(p, str.data, static_cast<size_t>(str.length));
+    p += str.length;
+  }
+  *p = '\0';
+  return StrideStringView{dest, static_cast<int32_t>(p - dest)};
+}
+
 STRIDE_EXPORT void __stride_string_println(StrideStringView str) {
   if (str.data && str.length > 0) {
     std::cout.write(str.data, str.length);
@@ -413,15 +493,45 @@ STRIDE_EXPORT void __stride_jit_string_tokenize(
   }
 }
 
-STRIDE_EXPORT void
-__stride_jit_string_concat2(const StrideStringView *a,
-                            const StrideStringView *b,
-                            StrideStringView *out) {
+STRIDE_EXPORT void __stride_jit_string_token_at(
+    const StrideStringView *src, const StrideStringView *delim,
+    int32_t index, StrideStringView *out) {
   if (!out)
     return;
-  int32_t lenA = (a && a->data && a->length > 0) ? a->length : 0;
-  int32_t lenB = (b && b->data && b->length > 0) ? b->length : 0;
-  int32_t totalLen = lenA + lenB;
+  if (!src || !src->data || src->length <= 0) {
+    *out = StrideStringView{nullptr, 0};
+    return;
+  }
+  StrideStringView defDelim{" ", 1};
+  *out = __stride_string_token_at(
+      *src, (delim && delim->data) ? *delim : defDelim, index);
+}
+
+STRIDE_EXPORT int32_t __stride_jit_string_token_count(
+    const StrideStringView *src, const StrideStringView *delim) {
+  if (!src || !src->data || src->length <= 0) {
+    return 0;
+  }
+  StrideStringView defDelim{" ", 1};
+  return static_cast<int32_t>(__stride_string_token_count(
+      *src, (delim && delim->data) ? *delim : defDelim));
+}
+
+STRIDE_EXPORT void
+__stride_jit_string_concat_n(const StrideStringView *views, int32_t count,
+                             StrideStringView *out) {
+  if (!out)
+    return;
+  if (!views || count <= 0) {
+    *out = StrideStringView{"", 0};
+    return;
+  }
+  int32_t totalLen = 0;
+  for (int32_t i = 0; i < count; ++i) {
+    if (views[i].data && views[i].length > 0) {
+      totalLen += views[i].length;
+    }
+  }
   if (totalLen == 0) {
     *out = StrideStringView{"", 0};
     return;
@@ -433,14 +543,28 @@ __stride_jit_string_concat2(const StrideStringView *a,
   }
   char *dest = buffer + offset;
   offset += static_cast<size_t>(totalLen) + 1;
-  if (lenA > 0) {
-    std::memcpy(dest, a->data, static_cast<size_t>(lenA));
-  }
-  if (lenB > 0) {
-    std::memcpy(dest + lenA, b->data, static_cast<size_t>(lenB));
+  size_t cur = 0;
+  for (int32_t i = 0; i < count; ++i) {
+    if (views[i].data && views[i].length > 0) {
+      std::memcpy(dest + cur, views[i].data,
+                  static_cast<size_t>(views[i].length));
+      cur += static_cast<size_t>(views[i].length);
+    }
   }
   dest[totalLen] = '\0';
   *out = StrideStringView{dest, totalLen};
+}
+
+STRIDE_EXPORT void
+__stride_jit_string_repeat(const StrideStringView *str, int32_t count,
+                           StrideStringView *out) {
+  if (!out)
+    return;
+  if (!str || !str->data || str->length <= 0 || count <= 0) {
+    *out = StrideStringView{"", 0};
+    return;
+  }
+  *out = __stride_string_repeat(*str, count);
 }
 
 }

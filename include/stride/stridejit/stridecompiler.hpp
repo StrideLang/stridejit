@@ -76,7 +76,11 @@ enum class DataType { DOUBLE, BOOL, INT32, INT64, STRING, CUSTOM, STATE };
 
 struct ExternalFunction {
   std::string name;
-  llvm::FunctionType *llvmFunctionType;
+  llvm::FunctionType *llvmFunctionType{nullptr};
+  bool isConstrainedList{false};
+  llvm::Type *elemType{nullptr};
+  int minItems{0};
+  int maxItems{-1};
 };
 
 struct DomainArg {

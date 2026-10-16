@@ -139,7 +139,7 @@ public:
 private:
   static bool
   processPreviousFunction(std::shared_ptr<FunctionNode> prevFuncCall,
-                          std::shared_ptr<DeclarationNode> blockDecl,
+                          std::shared_ptr<DeclarationNode> decl,
                           std::unique_ptr<ExprAST> currentExpr,
                           StrideGenerator::GeneratedCode &generated,
                           std::string domainName, const ScopeStack &scope,

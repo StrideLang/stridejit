@@ -173,6 +173,62 @@ TEST(BinaryExprAST, InequalityDouble) {
   // EXPECT_TRUE(v->getType()->isIntegerTy(1));
 }
 
+TEST(BinaryExprAST, StringAddition) {
+  strd::StrideCompiler state;
+  auto lhs = std::make_unique<strd::StringExprAST>("Hello ");
+  auto rhs = std::make_unique<strd::StringExprAST>("World");
+  strd::BinaryExprAST bin('+', std::move(lhs), std::move(rhs));
+
+  auto [v, t] = bin.codegen(state);
+  ASSERT_NE(v, nullptr);
+  EXPECT_EQ(t.value(), state.typesMap["_StringType"]);
+}
+
+TEST(BinaryExprAST, StringEquality) {
+  strd::StrideCompiler state;
+  auto lhs = std::make_unique<strd::StringExprAST>("Test");
+  auto rhs = std::make_unique<strd::StringExprAST>("Test");
+  strd::BinaryExprAST bin(':', std::move(lhs), std::move(rhs));
+
+  auto [v, t] = bin.codegen(state);
+  ASSERT_NE(v, nullptr);
+  EXPECT_EQ(t.value(), llvm::Type::getInt1Ty(*state.TheContext));
+}
+
+TEST(BinaryExprAST, StringInequality) {
+  strd::StrideCompiler state;
+  auto lhs = std::make_unique<strd::StringExprAST>("Test");
+  auto rhs = std::make_unique<strd::StringExprAST>("Other");
+  strd::BinaryExprAST bin('!', std::move(lhs), std::move(rhs));
+
+  auto [v, t] = bin.codegen(state);
+  ASSERT_NE(v, nullptr);
+  EXPECT_EQ(t.value(), llvm::Type::getInt1Ty(*state.TheContext));
+}
+
+TEST(BinaryExprAST, StringLessThan) {
+  strd::StrideCompiler state;
+  auto lhs = std::make_unique<strd::StringExprAST>("A");
+  auto rhs = std::make_unique<strd::StringExprAST>("B");
+  strd::BinaryExprAST bin('<', std::move(lhs), std::move(rhs));
+
+  auto [v, t] = bin.codegen(state);
+  ASSERT_NE(v, nullptr);
+  EXPECT_EQ(t.value(), llvm::Type::getInt1Ty(*state.TheContext));
+}
+
+TEST(BinaryExprAST, StringGreaterThan) {
+  strd::StrideCompiler state;
+  auto lhs = std::make_unique<strd::StringExprAST>("B");
+  auto rhs = std::make_unique<strd::StringExprAST>("A");
+  strd::BinaryExprAST bin('>', std::move(lhs), std::move(rhs));
+
+  auto [v, t] = bin.codegen(state);
+  ASSERT_NE(v, nullptr);
+  EXPECT_EQ(t.value(), llvm::Type::getInt1Ty(*state.TheContext));
+}
+
+
 // TODO complete implementation of operators.
 
 // TEST(BinaryExprAST, LogicalAndBool) {
