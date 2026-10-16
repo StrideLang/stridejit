@@ -559,25 +559,36 @@ void StrideGenerator::processStateStreams(
   // 2. Evaluate streams and track them in the state machine structs
   for (auto &fs : sm.flattenedStates) {
     if (fs.stateDecl == stateNode) {
-      auto updateGuardProp = stateNode->getPropertyValue("updateGuard");
-      if (updateGuardProp && updateGuardProp->getNodeType() == AST::List) {
-        fs.updateGuardCode = generateStreamsForNodes(
-            updateGuardProp->getChildren(), scope, state, domainName);
-      }
-      auto onEntryProp = stateNode->getPropertyValue("onEntry");
-      if (onEntryProp && onEntryProp->getNodeType() == AST::List) {
-        fs.onEntryCode = generateStreamsForNodes(onEntryProp->getChildren(),
-                                                 scope, state, domainName);
-      }
-      auto onProcessProp = stateNode->getPropertyValue("onProcess");
-      if (onProcessProp && onProcessProp->getNodeType() == AST::List) {
-        fs.onProcessCode = generateStreamsForNodes(onProcessProp->getChildren(),
-                                                   scope, state, domainName);
-      }
-      auto onExitProp = stateNode->getPropertyValue("onExit");
-      if (onExitProp && onExitProp->getNodeType() == AST::List) {
-        fs.onExitCode = generateStreamsForNodes(onExitProp->getChildren(),
-                                                scope, state, domainName);
+      auto streamBlocks =
+          ASTQuery::getContainedStreamBlocks(stateNode, scope, tree);
+      for (const auto &block : streamBlocks) {
+        std::vector<ASTNode> streamNodes(block.streams.begin(),
+                                         block.streams.end());
+        if (block.executionStage == "updateGuard") {
+          auto code = generateStreamsForNodes(streamNodes, scope, state,
+                                              domainName);
+          fs.updateGuardCode.insert(fs.updateGuardCode.end(),
+                                    std::make_move_iterator(code.begin()),
+                                    std::make_move_iterator(code.end()));
+        } else if (block.executionStage == "onEntry") {
+          auto code =
+              generateStreamsForNodes(streamNodes, scope, state, domainName);
+          fs.onEntryCode.insert(fs.onEntryCode.end(),
+                                std::make_move_iterator(code.begin()),
+                                std::make_move_iterator(code.end()));
+        } else if (block.executionStage == "onProcess") {
+          auto code =
+              generateStreamsForNodes(streamNodes, scope, state, domainName);
+          fs.onProcessCode.insert(fs.onProcessCode.end(),
+                                  std::make_move_iterator(code.begin()),
+                                  std::make_move_iterator(code.end()));
+        } else if (block.executionStage == "onExit") {
+          auto code =
+              generateStreamsForNodes(streamNodes, scope, state, domainName);
+          fs.onExitCode.insert(fs.onExitCode.end(),
+                               std::make_move_iterator(code.begin()),
+                               std::make_move_iterator(code.end()));
+        }
       }
 
       // Codegenerate transition streams
@@ -593,10 +604,19 @@ void StrideGenerator::processStateStreams(
                         << std::endl;
             }
           }
-          auto onTransProp = t.transitionDecl->getPropertyValue("onTransition");
-          if (onTransProp && onTransProp->getNodeType() == AST::List) {
-            t.onTransitionCode = generateStreamsForNodes(
-                onTransProp->getChildren(), scope, state, domainName);
+          auto tBlocks =
+              ASTQuery::getContainedStreamBlocks(t.transitionDecl, scope, tree);
+          for (const auto &tb : tBlocks) {
+            if (tb.executionStage == "onTransition" ||
+                tb.propertyName == "onTransition") {
+              std::vector<ASTNode> streamNodes(tb.streams.begin(),
+                                               tb.streams.end());
+              auto code = generateStreamsForNodes(streamNodes, scope, state,
+                                                  domainName);
+              t.onTransitionCode.insert(t.onTransitionCode.end(),
+                                        std::make_move_iterator(code.begin()),
+                                        std::make_move_iterator(code.end()));
+            }
           }
         }
       }
@@ -705,6 +725,21 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
                     scalarDefaultVal =
                         llvm::ConstantInt::get(scalarType, val ? 1 : 0);
                   }
+                } else if (defaultNode->getNodeType() == AST::String) {
+                  std::string val =
+                      std::static_pointer_cast<ValueNode>(defaultNode)
+                          ->getStringValue();
+                  llvm::Constant *strPtr = llvm::cast<llvm::Constant>(
+                      state.Builder->CreateGlobalStringPtr(
+                          val, "str_lit", 0, state.TheModule.get()));
+                  llvm::Constant *lenVal = llvm::ConstantInt::get(
+                      llvm::Type::getInt32Ty(*state.TheContext),
+                      static_cast<int32_t>(val.size()));
+                  if (scalarType->isStructTy()) {
+                    scalarDefaultVal = llvm::ConstantStruct::get(
+                        llvm::cast<llvm::StructType>(scalarType),
+                        {strPtr, lenVal});
+                  }
                 }
 
                 if (scalarDefaultVal) {
@@ -778,7 +813,8 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
                       std::static_pointer_cast<DeclarationNode>(blockNode);
                   std::string objType = varDecl->getEntityType();
                   if (objType == "switch" || objType == "signal" ||
-                      objType == "trigger" || objType == "constant") {
+                      objType == "trigger" || objType == "constant" ||
+                      objType == "string") {
                     registerVarDeclAsDynamicField(varDecl);
                   }
                 }
@@ -794,13 +830,14 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
             auto varDecl = std::static_pointer_cast<DeclarationNode>(childNode);
             std::string objType = varDecl->getEntityType();
             if (objType == "switch" || objType == "signal" ||
-                objType == "trigger" || objType == "constant") {
+                objType == "trigger" || objType == "constant" ||
+                objType == "string") {
               auto domainProp = varDecl->getPropertyValue("domain");
               bool belongsToDomain = false;
               if (domainProp && domainProp->getNodeType() == AST::Entity) {
                 belongsToDomain =
                     (ASTQuery::getNodeName(domainProp) == domainName);
-              } else if (!domainProp) {
+              } else if (!domainProp && objType != "constant") {
                 belongsToDomain = true;
               }
 
@@ -1117,92 +1154,85 @@ void StrideGenerator::collectInputArgs(
       }
       auto listNodes = prevList->getChildren();
       auto nodeIt = listNodes.begin();
-      if (v->getType() == ListExprAST::Type::MUTABLE_CONSISTENT ||
-          v->getType() == ListExprAST::Type::IMMUTABLE_CONSISTENT) {
-        for (auto elemExpr = v->elements().begin();
-             elemExpr != v->elements().end(); elemExpr++) {
-          args.MainIn.args.emplace_back(std::move(*elemExpr));
-          ASTNode currentChildNode =
-              (nodeIt != listNodes.end()) ? *nodeIt : nullptr;
-          if (nodeIt != listNodes.end()) {
-            nodeIt++;
+      for (auto elemExpr = v->elements().begin();
+           elemExpr != v->elements().end(); elemExpr++) {
+        args.MainIn.args.emplace_back(std::move(*elemExpr));
+        ASTNode currentChildNode =
+            (nodeIt != listNodes.end()) ? *nodeIt : nullptr;
+        if (nodeIt != listNodes.end()) {
+          nodeIt++;
+        }
+        std::string typeStr;
+        if (currentChildNode) {
+          auto typecastNode =
+              currentChildNode->getCompilerProperty("typecast");
+          if (typecastNode && typecastNode->getNodeType() == AST::String) {
+            typeStr = std::static_pointer_cast<ValueNode>(typecastNode)
+                          ->getStringValue();
+          } else {
+            typeStr = CodeAnalysis::resolveNodeOutDataType(currentChildNode,
+                                                           scope, tree);
           }
-          std::string typeStr;
-          if (currentChildNode) {
-            auto typecastNode =
-                currentChildNode->getCompilerProperty("typecast");
-            if (typecastNode && typecastNode->getNodeType() == AST::String) {
-              typeStr = std::static_pointer_cast<ValueNode>(typecastNode)
-                            ->getStringValue();
-            } else {
-              typeStr = CodeAnalysis::resolveNodeOutDataType(currentChildNode,
-                                                             scope, tree);
-            }
-          }
-          if (!typeStr.empty()) {
-            if (typeStr == "_IntType") {
-              args.MainIn.argTypes.push_back(
-                  llvm::Type::getInt32Ty(*state.TheContext));
-            } else if (typeStr == "_SwitchType") {
-              args.MainIn.argTypes.push_back(
-                  llvm::Type::getInt1Ty(*state.TheContext));
-            } else if (typeStr == "_StringType") {
-              args.MainIn.argTypes.push_back(
-                  state.typesMap["_StringType"]);
-            } else {
-              args.MainIn.argTypes.push_back(
-                  llvm::Type::getDoubleTy(*state.TheContext));
-            }
-          } else if (currentChildNode) {
-            auto elemDecl = ASTQuery::findDeclarationByName(
-                ASTQuery::getNodeName(currentChildNode), scope, tree);
-
-            if (elemDecl) {
-              args.MainIn.argTypes.push_back(
-                  state.getLLVMTypeForCodegenEntity(elemDecl, funcDecl, func));
-            } else if (currentChildNode->getNodeType() == AST::Int) {
-              // TODO get types from framework
-              args.MainIn.argTypes.push_back(
-                  llvm::Type::getInt32Ty(*state.TheContext));
-            } else if (currentChildNode->getNodeType() == AST::Real) {
-              args.MainIn.argTypes.push_back(
-                  llvm::Type::getDoubleTy(*state.TheContext));
-            } else if (currentChildNode->getNodeType() == AST::String) {
-              args.MainIn.argTypes.push_back(
-                  state.typesMap["_StringType"]);
-            } else if (currentChildNode->getNodeType() == AST::MemberAccess) {
-              auto pp =
-                  std::static_pointer_cast<MemberAccessNode>(currentChildNode);
-              if (pp->getPropertyName() == "size") {
-                args.MainIn.argTypes.push_back(
-                    llvm::Type::getInt32Ty(*state.TheContext));
-              } else if (pp->getPropertyName() == "rate") {
-                args.MainIn.argTypes.push_back(
-                    llvm::Type::getDoubleTy(*state.TheContext));
-              } else {
-                LOG_ERROR()
-                    << ":Port property not supported: " << pp->getPropertyName()
-                    << std::endl;
-                args.MainIn.argTypes.push_back(
-                    llvm::Type::getDoubleTy(*state.TheContext));
-              }
-            } else {
-              // Fallback. We shouldn't get here when things are fully
-              // implemented
-              args.MainIn.argTypes.push_back(
-                  state.getLLVMTypeForCodegenEntity(elemDecl, funcDecl, func));
-              LOG_ERROR() << "Unsupported type for: "
-                          << currentChildNode->toText() << std::endl;
-            }
+        }
+        if (!typeStr.empty()) {
+          if (typeStr == "_IntType") {
+            args.MainIn.argTypes.push_back(
+                llvm::Type::getInt32Ty(*state.TheContext));
+          } else if (typeStr == "_SwitchType") {
+            args.MainIn.argTypes.push_back(
+                llvm::Type::getInt1Ty(*state.TheContext));
+          } else if (typeStr == "_StringType") {
+            args.MainIn.argTypes.push_back(
+                state.typesMap["_StringType"]);
           } else {
             args.MainIn.argTypes.push_back(
                 llvm::Type::getDoubleTy(*state.TheContext));
           }
+        } else if (currentChildNode) {
+          auto elemDecl = ASTQuery::findDeclarationByName(
+              ASTQuery::getNodeName(currentChildNode), scope, tree);
+
+          if (elemDecl) {
+            args.MainIn.argTypes.push_back(
+                state.getLLVMTypeForCodegenEntity(elemDecl, funcDecl, func));
+          } else if (currentChildNode->getNodeType() == AST::Int) {
+            // TODO get types from framework
+            args.MainIn.argTypes.push_back(
+                llvm::Type::getInt32Ty(*state.TheContext));
+          } else if (currentChildNode->getNodeType() == AST::Real) {
+            args.MainIn.argTypes.push_back(
+                llvm::Type::getDoubleTy(*state.TheContext));
+          } else if (currentChildNode->getNodeType() == AST::String) {
+            args.MainIn.argTypes.push_back(
+                state.typesMap["_StringType"]);
+          } else if (currentChildNode->getNodeType() == AST::MemberAccess) {
+            auto pp =
+                std::static_pointer_cast<MemberAccessNode>(currentChildNode);
+            if (pp->getPropertyName() == "size") {
+              args.MainIn.argTypes.push_back(
+                  llvm::Type::getInt32Ty(*state.TheContext));
+            } else if (pp->getPropertyName() == "rate") {
+              args.MainIn.argTypes.push_back(
+                  llvm::Type::getDoubleTy(*state.TheContext));
+            } else {
+              LOG_ERROR()
+                  << ":Port property not supported: " << pp->getPropertyName()
+                  << std::endl;
+              args.MainIn.argTypes.push_back(
+                  llvm::Type::getDoubleTy(*state.TheContext));
+            }
+          } else {
+            // Fallback. We shouldn't get here when things are fully
+            // implemented
+            args.MainIn.argTypes.push_back(
+                state.getLLVMTypeForCodegenEntity(elemDecl, funcDecl, func));
+            LOG_ERROR() << "Unsupported type for: "
+                        << currentChildNode->toText() << std::endl;
+          }
+        } else {
+          args.MainIn.argTypes.push_back(
+              llvm::Type::getDoubleTy(*state.TheContext));
         }
-      } else {
-        // Not supported
-        LOG_ERROR() << "ERROR: List type not supported" << std::endl;
-        assert(0 == 1);
       }
       exprs.pop_back();
 
@@ -1303,18 +1333,40 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
     current = next;
     next = streamIt.next();
     auto domainName = CodeAnalysis::getNodeDomainName(current, scope, tree);
-    if (domainName.size() == 0) {
-      auto streamPtr = stream;
-      // FIXME resolve downstream domains correctly
-      // FIXME this should be done in the resolver, not here
-      auto connection =
-          CodeAnalysis::resolveConnectionEntity(next, scope, tree, true);
-      if (connection) {
-        domainName = CodeAnalysis::getNodeDomainName(connection, scope, tree);
-        if (domainName.size() == 0) {
-          domainName = "RootDomain";
+    if (domainName.empty()) {
+      // Look downstream along the stream to find the target domain
+      StreamNodeIterator lookaheadIt(stream);
+      while (auto n = lookaheadIt.next()) {
+        if (n == current) {
+          break;
         }
-      } else {
+      }
+      while (auto downstream = lookaheadIt.next()) {
+        auto d = CodeAnalysis::getNodeDomainName(downstream, scope, tree);
+        if (d.empty()) {
+          auto conn =
+              CodeAnalysis::resolveConnectionEntity(downstream, scope, tree, true);
+          if (conn) {
+            d = CodeAnalysis::getNodeDomainName(conn, scope, tree);
+          }
+        }
+        if (!d.empty()) {
+          domainName = d;
+          break;
+        }
+      }
+      if (domainName.empty()) {
+        for (auto it = scope.rbegin(); it != scope.rend(); ++it) {
+          if (it->first) {
+            auto d = CodeAnalysis::getNodeDomainName(it->first, scope, tree);
+            if (!d.empty()) {
+              domainName = d;
+              break;
+            }
+          }
+        }
+      }
+      if (domainName.empty()) {
         domainName = "RootDomain";
       }
     }
@@ -1484,7 +1536,10 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                                                args.MainIn.argTypes);
       }
 
-      auto nextExpr = createExpr(next);
+      std::unique_ptr<ExprAST> nextExpr = nullptr;
+      if (next && next->getNodeType() != AST::Function) {
+        nextExpr = createExpr(next);
+      }
       if (nextExpr) {
         ASTNode outputNode = nullptr;
         if (typeTree && typeTree->instance) {
@@ -1755,7 +1810,33 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               } else if (funcDecl->getEntityType() == "loop") {
                 callexpr->callType = CallableType::Loop;
               } else {
-                LOG_INFO() << " ERROR: Can't set callable type" << std::endl;
+                auto typeDecl =
+                    ASTQuery::findTypeDeclaration(funcDecl, scope, tree);
+                if (typeDecl) {
+                  auto inherited =
+                      ASTQuery::getInheritedTypes(typeDecl, scope, tree);
+                  bool resolved = false;
+                  for (const auto &p : inherited) {
+                    if (p->getName() == "_Reaction") {
+                      callexpr->callType = CallableType::Reaction;
+                      resolved = true;
+                      break;
+                    } else if (p->getName() == "_Loop") {
+                      callexpr->callType = CallableType::Loop;
+                      resolved = true;
+                      break;
+                    } else if (p->getName() == "_Module") {
+                      callexpr->callType = CallableType::Module;
+                      resolved = true;
+                      break;
+                    }
+                  }
+                  if (!resolved) {
+                    LOG_INFO() << " ERROR: Can't set callable type" << std::endl;
+                  }
+                } else {
+                  LOG_INFO() << " ERROR: Can't set callable type" << std::endl;
+                }
               }
             } else {
               LOG_INFO() << " ERROR: Can't set callable type" << std::endl;
@@ -1965,25 +2046,22 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
   }
 
   std::vector<std::unique_ptr<ExprAST>> collected;
-  // Generate function code by going through streams.
-  auto streams = funcDecl->getPropertyValue("streams");
-  if (streams) {
-    for (const auto &streamNode : streams->getChildren()) {
-      if (streamNode->getNodeType() == AST::Stream) {
-        auto stream = std::static_pointer_cast<StreamNode>(streamNode);
-        auto code = createStreamCode(stream, tree, functionScope, state);
-        for (auto &domainCode : code) {
-          while (domainCode.second.expr.size() > 0) {
-            collected.push_back(std::move(domainCode.second.expr.front()));
-            domainCode.second.expr.erase(domainCode.second.expr.begin());
-          }
-          // FIXME nested functions need to have their name mangled/hashed as
-          // they move to the global namespace
-          for (const auto &f : domainCode.second.functions) {
-            f->codegen(state);
-          }
+  // Generate function code by going through stream blocks.
+  auto streamBlocks =
+      ASTQuery::getContainedStreamBlocks(funcDecl, functionScope, tree);
+  for (const auto &block : streamBlocks) {
+    for (const auto &stream : block.streams) {
+      auto code = createStreamCode(stream, tree, functionScope, state);
+      for (auto &domainCode : code) {
+        while (domainCode.second.expr.size() > 0) {
+          collected.push_back(std::move(domainCode.second.expr.front()));
+          domainCode.second.expr.erase(domainCode.second.expr.begin());
         }
-      } else {
+        // FIXME nested functions need to have their name mangled/hashed as
+        // they move to the global namespace
+        for (const auto &f : domainCode.second.functions) {
+          f->codegen(state);
+        }
       }
     }
   }
@@ -2141,7 +2219,35 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
   } else if (funcDecl->getEntityType() == "platformModule") {
     newfunc->callType = CallableType::External;
   } else {
-    LOG_ERROR() << "Callable type unsuported" << std::endl;
+    auto typeDecl =
+        ASTQuery::findTypeDeclaration(funcDecl, functionScope, tree);
+    if (typeDecl) {
+      auto inherited =
+          ASTQuery::getInheritedTypes(typeDecl, functionScope, tree);
+      bool resolved = false;
+      for (const auto &p : inherited) {
+        if (p->getName() == "_Reaction") {
+          newfunc->callType = CallableType::Reaction;
+          resolved = true;
+          break;
+        } else if (p->getName() == "_Loop") {
+          newfunc->callType = CallableType::Loop;
+          resolved = true;
+          break;
+        } else if (p->getName() == "_Module") {
+          newfunc->callType = CallableType::Module;
+          resolved = true;
+          break;
+        }
+      }
+      if (!resolved) {
+        LOG_ERROR() << "Callable type unsupported: "
+                    << funcDecl->getEntityType() << std::endl;
+      }
+    } else {
+      LOG_ERROR() << "Callable type unsupported: " << funcDecl->getEntityType()
+                  << std::endl;
+    }
   }
 
   auto terminateWhenNode = funcDecl->getPropertyValue("terminateWhen");

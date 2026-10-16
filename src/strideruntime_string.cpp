@@ -257,87 +257,146 @@ STRIDE_EXPORT void __stride_string_print(StrideStringView str) {
 STRIDE_EXPORT void
 __stride_jit_string_substring(const StrideStringView *src, int32_t start,
                               int32_t len, StrideStringView *out) {
+  if (!out)
+    return;
+  if (!src || !src->data || src->length <= 0) {
+    *out = StrideStringView{nullptr, 0};
+    return;
+  }
   *out = __stride_string_substring(*src, start, len);
 }
 
 STRIDE_EXPORT void __stride_jit_string_trim(const StrideStringView *src,
                                             const StrideStringView *chars,
                                             StrideStringView *out) {
-  *out = __stride_string_trim(*src, *chars);
+  if (!out)
+    return;
+  if (!src || !src->data || src->length <= 0) {
+    *out = StrideStringView{nullptr, 0};
+    return;
+  }
+  StrideStringView defChars{" \t\r\n", 4};
+  *out = __stride_string_trim(*src, (chars && chars->data) ? *chars : defChars);
 }
 
 STRIDE_EXPORT void __stride_jit_string_trim_left(const StrideStringView *src,
                                                  const StrideStringView *chars,
                                                  StrideStringView *out) {
-  *out = __stride_string_trim_left(*src, *chars);
+  if (!out)
+    return;
+  if (!src || !src->data || src->length <= 0) {
+    *out = StrideStringView{nullptr, 0};
+    return;
+  }
+  StrideStringView defChars{" \t\r\n", 4};
+  *out = __stride_string_trim_left(*src, (chars && chars->data) ? *chars : defChars);
 }
 
 STRIDE_EXPORT void __stride_jit_string_trim_right(const StrideStringView *src,
-                                                  const StrideStringView *chars,
-                                                  StrideStringView *out) {
-  *out = __stride_string_trim_right(*src, *chars);
+                                                   const StrideStringView *chars,
+                                                   StrideStringView *out) {
+  if (!out)
+    return;
+  if (!src || !src->data || src->length <= 0) {
+    *out = StrideStringView{nullptr, 0};
+    return;
+  }
+  StrideStringView defChars{" \t\r\n", 4};
+  *out = __stride_string_trim_right(*src, (chars && chars->data) ? *chars : defChars);
 }
 
 STRIDE_EXPORT int32_t __stride_jit_string_find(const StrideStringView *haystack,
                                                const StrideStringView *needle,
                                                int32_t start) {
+  if (!haystack || !needle)
+    return -1;
   return static_cast<int32_t>(__stride_string_find(*haystack, *needle, start));
 }
 
 STRIDE_EXPORT int32_t __stride_jit_string_find_last(
     const StrideStringView *haystack, const StrideStringView *needle) {
+  if (!haystack || !needle)
+    return -1;
   return static_cast<int32_t>(__stride_string_find_last(*haystack, *needle));
 }
 
 STRIDE_EXPORT bool __stride_jit_string_contains(const StrideStringView *haystack,
                                                 const StrideStringView *needle) {
+  if (!haystack || !needle)
+    return false;
   return __stride_string_contains(*haystack, *needle);
 }
 
 STRIDE_EXPORT bool
 __stride_jit_string_starts_with(const StrideStringView *str,
                                 const StrideStringView *prefix) {
+  if (!str || !prefix)
+    return false;
   return __stride_string_starts_with(*str, *prefix);
 }
 
 STRIDE_EXPORT bool __stride_jit_string_ends_with(const StrideStringView *str,
                                                  const StrideStringView *suffix) {
+  if (!str || !suffix)
+    return false;
   return __stride_string_ends_with(*str, *suffix);
 }
 
 STRIDE_EXPORT bool __stride_jit_string_equal(const StrideStringView *a,
                                              const StrideStringView *b) {
+  if (!a || !b)
+    return a == b;
   return __stride_string_equal(*a, *b);
 }
 
 STRIDE_EXPORT int32_t __stride_jit_string_compare(const StrideStringView *a,
                                                   const StrideStringView *b) {
+  if (!a && !b)
+    return 0;
+  if (!a)
+    return -1;
+  if (!b)
+    return 1;
   return static_cast<int32_t>(__stride_string_compare(*a, *b));
 }
 
 STRIDE_EXPORT int32_t __stride_jit_string_length(const StrideStringView *str) {
-  return static_cast<int32_t>(__stride_string_length(*str));
+  if (!str || !str->data || str->length < 0)
+    return 0;
+  return static_cast<int32_t>(str->length);
 }
 
 STRIDE_EXPORT bool __stride_jit_string_is_empty(const StrideStringView *str) {
-  return __stride_string_is_empty(*str);
+  if (!str || !str->data || str->length == 0)
+    return true;
+  return false;
 }
 
 STRIDE_EXPORT int32_t __stride_jit_string_parse_int(const StrideStringView *str,
                                                     int32_t defaultVal) {
+  if (!str || !str->data || str->length == 0)
+    return defaultVal;
   return static_cast<int32_t>(__stride_string_parse_int(*str, defaultVal));
 }
 
 STRIDE_EXPORT double __stride_jit_string_parse_real(const StrideStringView *str,
                                                     double defaultVal) {
+  if (!str || !str->data || str->length == 0)
+    return defaultVal;
   return __stride_string_parse_real(*str, defaultVal);
 }
 
 STRIDE_EXPORT void __stride_jit_string_println(const StrideStringView *str) {
+  if (!str || !str->data || str->length == 0) {
+    std::cout << std::endl;
+    return;
+  }
   __stride_string_println(*str);
 }
 
 STRIDE_EXPORT void __stride_jit_string_print(const StrideStringView *str) {
+  if (!str || !str->data || str->length == 0)
+    return;
   __stride_string_print(*str);
 }
 

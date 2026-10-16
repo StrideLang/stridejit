@@ -87,6 +87,12 @@ void StrideEnvironment::initializeJIT() {
 }
 
 void StrideEnvironment::prepareTree(ASTNode tree) {
+  if (!tree || tree->getCompilerProperty("isPrepared")) {
+    return;
+  }
+  tree->setCompilerProperty("isPrepared",
+                            std::make_shared<ValueNode>(true, "", 0));
+
   auto systemNodes = ASTQuery::getSystemNodes(tree);
   if (systemNodes.size() == 0) {
     auto systemNode =
@@ -229,6 +235,8 @@ bool StrideEnvironment::generateIr(const std::vector<std::string> &paths,
 
 bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
   initializeJIT();
+
+  prepareTree(root);
 
   ScopeStack globalScope;
   {

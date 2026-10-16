@@ -182,8 +182,36 @@ void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
       return;
     }
   }
-  // TODO initialize
-  llvm::Constant *Initializer = llvm::UndefValue::get(Type);
+  llvm::Constant *Initializer = nullptr;
+  auto valProp = globalDecl->getPropertyValue("value");
+  if (!valProp) {
+    valProp = globalDecl->getPropertyValue("default");
+  }
+  if (valProp) {
+    if (valProp->getNodeType() == AST::Int) {
+      int64_t v = std::static_pointer_cast<ValueNode>(valProp)->getIntValue();
+      if (Type->isIntegerTy(32)) {
+        Initializer = llvm::ConstantInt::get(Type, static_cast<int32_t>(v));
+      } else if (Type->isIntegerTy()) {
+        Initializer = llvm::ConstantInt::get(Type, v);
+      } else if (Type->isFloatingPointTy()) {
+        Initializer = llvm::ConstantFP::get(Type, static_cast<double>(v));
+      }
+    } else if (valProp->getNodeType() == AST::Real) {
+      double v = std::static_pointer_cast<ValueNode>(valProp)->getRealValue();
+      if (Type->isFloatingPointTy()) {
+        Initializer = llvm::ConstantFP::get(Type, v);
+      } else if (Type->isIntegerTy(32)) {
+        Initializer = llvm::ConstantInt::get(Type, static_cast<int32_t>(v));
+      }
+    } else if (valProp->getNodeType() == AST::Switch) {
+      bool v = std::static_pointer_cast<ValueNode>(valProp)->getSwitchValue();
+      Initializer = llvm::ConstantInt::get(Type, v ? 1 : 0);
+    }
+  }
+  if (!Initializer) {
+    Initializer = llvm::Constant::getNullValue(Type);
+  }
 
   llvm::GlobalVariable *MyGlobal = new llvm::GlobalVariable(
       *TheModule, Type,
@@ -576,7 +604,8 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
             std::string val = std::static_pointer_cast<ValueNode>(defaultNode)
                                   ->getStringValue();
             llvm::Constant *strPtr = llvm::cast<llvm::Constant>(
-                Builder->CreateGlobalStringPtr(val, "str_lit"));
+                Builder->CreateGlobalStringPtr(val, "str_lit", 0,
+                                               TheModule.get()));
             llvm::Constant *lenVal = llvm::ConstantInt::get(
                 llvm::Type::getInt32Ty(*TheContext), val.size());
             if (scalarType->isStructTy()) {
