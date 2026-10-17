@@ -98,6 +98,28 @@ message("${LLVM_DIR}")
 endif()
 
 
+# StrideRuntime (standalone static runtime library for AOT & JIT) ------------
+set(STRIDERUNTIME_SRC
+  src/strideruntime_string.cpp
+)
+
+set(STRIDERUNTIME_HEADERS
+  include/stride/stridejit/strideruntime_string.h
+)
+
+add_library(StrideRuntime STATIC
+  ${STRIDERUNTIME_SRC} ${STRIDERUNTIME_HEADERS}
+  doc/runtime_library.md
+)
+target_include_directories(StrideRuntime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+if (MSVC)
+  # Enable function-level linking (/Gy) so the linker (/OPT:REF) strips unused runtime symbols
+  target_compile_options(StrideRuntime PRIVATE /Gy)
+else()
+  # Place each function and data item into its own section so --gc-sections / -dead_strip strips unused symbols
+  target_compile_options(StrideRuntime PRIVATE -fPIC -ffunction-sections -fdata-sections)
+endif()
+
 # StrideJIT ------------------------------
 set(STRIDEJIT_SRC
   src/exprast.cpp
@@ -110,7 +132,6 @@ set(STRIDEJIT_SRC
   src/strideenvironment.cpp
   src/stridecompiler.cpp
   src/stridegenerator.cpp
-  src/strideruntime_string.cpp
 )
 
 set(STRIDEJIT_HEADERS
@@ -135,7 +156,7 @@ add_library(StrideJit
 if (NOT MSVC)
   target_compile_options(StrideJit PRIVATE -fPIC)
 endif()
-target_link_libraries(StrideJit PUBLIC StrideParser StrideUtils StrideCodegen)
+target_link_libraries(StrideJit PUBLIC StrideRuntime StrideParser StrideUtils StrideCodegen)
 target_include_directories(StrideJit PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # Link against LLVM libraries -----------------------

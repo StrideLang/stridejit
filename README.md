@@ -30,3 +30,9 @@ To automatically fetch and compile LLVM 22 from source:
 cmake -B build -G Ninja -DSTRIDEJIT_BUILD_LLVM=ON
 cmake --build build
 ```
+
+## Documentation
+
+* **[StrideRuntime Static Library (`doc/runtime_library.md`)](doc/runtime_library.md)**: Usage guide for in-memory JIT and Ahead-of-Time (AOT) object linking, dead-code stripping, ABI data types (`StrideStringView`, `StrideFormatArg`), and complete runtime function reference.
+* **[Code Generation (`doc/code_geneartion.md`)](doc/code_geneartion.md)**: Domain memory layout, persistence, and code generator state structs.
+

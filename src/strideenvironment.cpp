@@ -1882,9 +1882,39 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
   ss << "#include <stdint.h>\n";
   ss << "#include <stdbool.h>\n";
   ss << "#include <stddef.h>\n\n";
+  ss << "#ifdef STRIDERUNTIME_STRING_H\n";
+  ss << "using StrideStringView = strd::StrideStringView;\n";
+  ss << "#elif !defined(STRIDE_STRING_VIEW_DEFINED)\n";
+  ss << "#define STRIDE_STRING_VIEW_DEFINED\n";
+  ss << "typedef struct StrideStringView {\n";
+  ss << "  const char *data;\n";
+  ss << "  int32_t length;\n";
+  ss << "} StrideStringView;\n";
+  ss << "#endif\n\n";
   ss << "#ifdef __cplusplus\n";
   ss << "extern \"C\" {\n";
   ss << "#endif\n\n";
+
+  auto strTyIt = mStrideEnv.typesMap.find("_StringType");
+  llvm::Type *strTy =
+      (strTyIt != mStrideEnv.typesMap.end()) ? strTyIt->second : nullptr;
+  auto llvmTypeToCType = [&](llvm::Type *ty) -> std::string {
+    if (!ty)
+      return "double";
+    if (ty == strTy)
+      return "StrideStringView";
+    if (ty->isIntegerTy(1))
+      return "bool";
+    if (ty->isIntegerTy(32))
+      return "int32_t";
+    if (ty->isIntegerTy(64))
+      return "int64_t";
+    if (ty->isFloatTy())
+      return "float";
+    if (ty->isDoubleTy())
+      return "double";
+    return "double";
+  };
 
   // Collect target domain names
   std::vector<std::string> domains;
@@ -2004,19 +2034,7 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
           if (!first)
             ss << ", ";
           first = false;
-          std::string typeName = "double";
-          if (arg.llvmType) {
-            if (arg.llvmType->isIntegerTy(1))
-              typeName = "bool";
-            else if (arg.llvmType->isIntegerTy(32))
-              typeName = "int32_t";
-            else if (arg.llvmType->isIntegerTy(64))
-              typeName = "int64_t";
-            else if (arg.llvmType->isFloatTy())
-              typeName = "float";
-            else if (arg.llvmType->isDoubleTy())
-              typeName = "double";
-          }
+          std::string typeName = llvmTypeToCType(arg.llvmType);
           ss << typeName << "* " << arg.name;
         }
         ss << ");\n\n";
@@ -2068,19 +2086,7 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
             ss << ", ";
           first = false;
           bool isOut = (outputNames.count(arg.name) > 0);
-          std::string typeName = "double";
-          if (arg.llvmType) {
-            if (arg.llvmType->isIntegerTy(1))
-              typeName = "bool";
-            else if (arg.llvmType->isIntegerTy(32))
-              typeName = "int32_t";
-            else if (arg.llvmType->isIntegerTy(64))
-              typeName = "int64_t";
-            else if (arg.llvmType->isFloatTy())
-              typeName = "float";
-            else if (arg.llvmType->isDoubleTy())
-              typeName = "double";
-          }
+          std::string typeName = llvmTypeToCType(arg.llvmType);
           if (isOut) {
             ss << typeName << "* " << arg.name;
           } else {
@@ -2140,57 +2146,21 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
       if (!first)
         ss << ", ";
       first = false;
-      std::string typeName = "double";
-      if (arg.llvmType) {
-        if (arg.llvmType->isIntegerTy(1))
-          typeName = "bool";
-        else if (arg.llvmType->isIntegerTy(32))
-          typeName = "int32_t";
-        else if (arg.llvmType->isIntegerTy(64))
-          typeName = "int64_t";
-        else if (arg.llvmType->isFloatTy())
-          typeName = "float";
-        else if (arg.llvmType->isDoubleTy())
-          typeName = "double";
-      }
+      std::string typeName = llvmTypeToCType(arg.llvmType);
       ss << typeName << "* " << arg.name;
     }
     for (const auto &arg : proto->getInArgs()) {
       if (!first)
         ss << ", ";
       first = false;
-      std::string typeName = "double";
-      if (arg.llvmType) {
-        if (arg.llvmType->isIntegerTy(1))
-          typeName = "bool";
-        else if (arg.llvmType->isIntegerTy(32))
-          typeName = "int32_t";
-        else if (arg.llvmType->isIntegerTy(64))
-          typeName = "int64_t";
-        else if (arg.llvmType->isFloatTy())
-          typeName = "float";
-        else if (arg.llvmType->isDoubleTy())
-          typeName = "double";
-      }
+      std::string typeName = llvmTypeToCType(arg.llvmType);
       ss << "const " << typeName << "* " << arg.name;
     }
     for (const auto &arg : proto->getPropertyArgs()) {
       if (!first)
         ss << ", ";
       first = false;
-      std::string typeName = "double";
-      if (arg.llvmType) {
-        if (arg.llvmType->isIntegerTy(1))
-          typeName = "bool";
-        else if (arg.llvmType->isIntegerTy(32))
-          typeName = "int32_t";
-        else if (arg.llvmType->isIntegerTy(64))
-          typeName = "int64_t";
-        else if (arg.llvmType->isFloatTy())
-          typeName = "float";
-        else if (arg.llvmType->isDoubleTy())
-          typeName = "double";
-      }
+      std::string typeName = llvmTypeToCType(arg.llvmType);
       ss << "const " << typeName << "* " << arg.name;
     }
     for (const auto &arg : proto->getInternalArgs()) {
@@ -2203,38 +2173,14 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
       if (!first)
         ss << ", ";
       first = false;
-      std::string typeName = "double";
-      if (arg.llvmType) {
-        if (arg.llvmType->isIntegerTy(1))
-          typeName = "bool";
-        else if (arg.llvmType->isIntegerTy(32))
-          typeName = "int32_t";
-        else if (arg.llvmType->isIntegerTy(64))
-          typeName = "int64_t";
-        else if (arg.llvmType->isFloatTy())
-          typeName = "float";
-        else if (arg.llvmType->isDoubleTy())
-          typeName = "double";
-      }
+      std::string typeName = llvmTypeToCType(arg.llvmType);
       ss << typeName << "* " << arg.name;
     }
     for (const auto &arg : proto->getUsedMemberAccesses()) {
       if (!first)
         ss << ", ";
       first = false;
-      std::string typeName = "double";
-      if (arg.llvmType) {
-        if (arg.llvmType->isIntegerTy(1))
-          typeName = "bool";
-        else if (arg.llvmType->isIntegerTy(32))
-          typeName = "int32_t";
-        else if (arg.llvmType->isIntegerTy(64))
-          typeName = "int64_t";
-        else if (arg.llvmType->isFloatTy())
-          typeName = "float";
-        else if (arg.llvmType->isDoubleTy())
-          typeName = "double";
-      }
+      std::string typeName = llvmTypeToCType(arg.llvmType);
       ss << typeName << " " << arg.name;
     }
     if (first) {

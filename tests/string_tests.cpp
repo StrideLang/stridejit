@@ -1,4 +1,5 @@
 #include "gtest/gtest.h"
+#include <filesystem>
 
 #include "stride/stridejit/strideenvironment.hpp"
 #include "stride/stridejit/strideruntime_string.h"
@@ -255,3 +256,31 @@ TEST(Strings, JITCompilationAndExecution) {
   EXPECT_EQ(str("OutConstCat"), "Greetings, Hello World");
   EXPECT_EQ(str("OutConstFmt"), "Greetings #7!");
 }
+
+TEST(Strings, ObjectAndHeaderEmission) {
+  StrideEnvironment strenv;
+  bool ok = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "StringsTest.stride");
+  ASSERT_TRUE(ok);
+
+  std::string headerStr = strenv.generateCHeaderString("RootDomain");
+  EXPECT_FALSE(headerStr.empty());
+  EXPECT_NE(headerStr.find("StrideStringView"), std::string::npos);
+  EXPECT_NE(headerStr.find("RootDomain_process"), std::string::npos);
+  EXPECT_NE(headerStr.find("const StrideStringView* InStr"), std::string::npos);
+  EXPECT_NE(headerStr.find("StrideStringView* OutFmt1"), std::string::npos);
+
+  std::filesystem::path tempDir =
+      std::filesystem::temp_directory_path() / "stride_string_obj_test";
+  std::filesystem::create_directories(tempDir);
+
+  std::string headerPath = (tempDir / "strings_test.h").string();
+  EXPECT_TRUE(strenv.emitCHeader(headerPath, "RootDomain"));
+  EXPECT_TRUE(std::filesystem::exists(headerPath));
+
+  std::string objPath = (tempDir / "strings_test.o").string();
+  EXPECT_TRUE(strenv.emitObjectFile(objPath));
+  EXPECT_TRUE(std::filesystem::exists(objPath));
+  EXPECT_GT(std::filesystem::file_size(objPath), 0u);
+
+  std::filesystem::remove_all(tempDir);
+}
