@@ -1363,6 +1363,7 @@ bool StrideEnvironment::compileInMemory() {
   regSym("__stride_jit_string_print", &__stride_jit_string_print);
   regSym("__stride_jit_string_tokenize", &__stride_jit_string_tokenize);
   regSym("__stride_jit_string_concat_n", &__stride_jit_string_concat_n);
+  regSym("__stride_jit_string_format", &__stride_jit_string_format);
   regSym("__stride_jit_string_repeat", &__stride_jit_string_repeat);
   regSym("__stride_jit_string_token_at", &__stride_jit_string_token_at);
   regSym("__stride_jit_string_token_count", &__stride_jit_string_token_count);

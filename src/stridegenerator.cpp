@@ -672,6 +672,9 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
               llvm::Constant *defaultVal =
                   llvm::Constant::getNullValue(varType);
               auto defaultNode = varDecl->getPropertyValue("default");
+              if (!defaultNode) {
+                defaultNode = varDecl->getPropertyValue("value");
+              }
               if (defaultNode) {
                 llvm::Type *scalarType = varType->isArrayTy()
                                              ? varType->getArrayElementType()
@@ -1503,6 +1506,18 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       collectPropertyArgs(args, typeTree, state, generated[domainName].expr,
                           scope, tree, funcDecl, func);
 
+      if (funcDecl->getEntityType() == "platformModule" && func) {
+        if (auto fmtProp = func->getPropertyValue("format")) {
+          auto fmtExpr = createExpr(fmtProp);
+          if (fmtExpr) {
+            args.MainIn.args.insert(args.MainIn.args.begin(),
+                                    std::move(fmtExpr));
+            args.MainIn.argTypes.insert(args.MainIn.argTypes.begin(),
+                                        state.typesMap["_StringType"]);
+          }
+        }
+      }
+
       // find if function is external
       std::optional<ExternalFunction> externFunc;
 
@@ -1593,6 +1608,11 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
             }
             if (externFunc->isConstrainedList) {
               newFunc->addFnAttr("stride.constrained_list");
+              newFunc->addFnAttr("stride.variadic_prefix",
+                                 std::to_string(externFunc->prefixTypes.size()));
+              if (externFunc->isHeterogeneousVariadic) {
+                newFunc->addFnAttr("stride.variadic_heterogeneous");
+              }
             }
             generated[domainName].externalFunctions.push_back(newFunc);
           }
@@ -2280,55 +2300,77 @@ void StrideGenerator::generatePlatformFunctionSignature(
       frameworkScope.push_back(decl);
     }
     bool isConstrainedList = false;
+    bool isHeterogeneousVariadic = false;
     llvm::Type *elemType = nullptr;
+    std::vector<llvm::Type *> prefixTypes;
+    std::vector<llvm::Type *> variadicTypes;
     int minItems = 0;
     int maxItems = -1;
 
     for (const auto &input : inputList->getChildren()) {
       if (input->getNodeType() == AST::Declaration) {
         auto declChild = std::static_pointer_cast<DeclarationNode>(input);
-        if (declChild->getEntityType() == "constrainedList") {
+        if (declChild->getEntityType() == "variadic" ||
+            declChild->getEntityType() == "constrainedList") {
           isConstrainedList = true;
-          if (auto minNode = declChild->getPropertyValue("minItems")) {
-            if (minNode->getNodeType() == AST::Int) {
-              minItems = static_cast<int>(
-                  std::static_pointer_cast<ValueNode>(minNode)->getIntValue());
-            }
+          if (declChild->getEntityType() == "variadic") {
+            minItems = 1;
           }
-          if (auto maxNode = declChild->getPropertyValue("maxItems")) {
-            if (maxNode->getNodeType() == AST::Int) {
-              maxItems = static_cast<int>(
-                  std::static_pointer_cast<ValueNode>(maxNode)->getIntValue());
-            }
+          ASTNode minNode = declChild->getPropertyValue("min");
+          if (!minNode) {
+            minNode = declChild->getPropertyValue("minItems");
           }
-          ASTNode elemTypeNode = declChild->getPropertyValue("anyOf");
+          if (minNode && minNode->getNodeType() == AST::Int) {
+            minItems = static_cast<int>(
+                std::static_pointer_cast<ValueNode>(minNode)->getIntValue());
+          }
+          ASTNode maxNode = declChild->getPropertyValue("max");
+          if (!maxNode) {
+            maxNode = declChild->getPropertyValue("maxItems");
+          }
+          if (maxNode && maxNode->getNodeType() == AST::Int) {
+            maxItems = static_cast<int>(
+                std::static_pointer_cast<ValueNode>(maxNode)->getIntValue());
+          }
+          ASTNode elemTypeNode = declChild->getPropertyValue("types");
+          if (!elemTypeNode) {
+            elemTypeNode = declChild->getPropertyValue("anyOf");
+          }
           if (!elemTypeNode) {
             elemTypeNode = declChild->getPropertyValue("allowed");
           }
+          auto addAllowedTypeName = [&](const std::string &typeName) {
+            if (!typeName.empty() &&
+                state.typesMap.find(typeName) != state.typesMap.end()) {
+              variadicTypes.push_back(state.typesMap[typeName]);
+            }
+          };
           if (elemTypeNode) {
-            std::string elemTypeName;
-            if (elemTypeNode->getNodeType() == AST::List &&
-                !elemTypeNode->getChildren().empty()) {
-              auto firstChild = elemTypeNode->getChildren()[0];
-              if (firstChild->getNodeType() == AST::Entity) {
-                elemTypeName =
-                    std::static_pointer_cast<EntityNode>(firstChild)->getName();
-              } else if (firstChild->getNodeType() == AST::String) {
-                elemTypeName =
-                    std::static_pointer_cast<ValueNode>(firstChild)
-                        ->getStringValue();
+            if (elemTypeNode->getNodeType() == AST::List) {
+              for (const auto &child : elemTypeNode->getChildren()) {
+                if (child->getNodeType() == AST::Entity) {
+                  addAllowedTypeName(
+                      std::static_pointer_cast<EntityNode>(child)->getName());
+                } else if (child->getNodeType() == AST::String) {
+                  addAllowedTypeName(
+                      std::static_pointer_cast<ValueNode>(child)
+                          ->getStringValue());
+                }
               }
             } else if (elemTypeNode->getNodeType() == AST::Entity) {
-              elemTypeName =
-                  std::static_pointer_cast<EntityNode>(elemTypeNode)->getName();
+              addAllowedTypeName(
+                  std::static_pointer_cast<EntityNode>(elemTypeNode)
+                      ->getName());
             } else if (elemTypeNode->getNodeType() == AST::String) {
-              elemTypeName =
+              addAllowedTypeName(
                   std::static_pointer_cast<ValueNode>(elemTypeNode)
-                      ->getStringValue();
+                      ->getStringValue());
             }
-            if (!elemTypeName.empty() &&
-                state.typesMap.find(elemTypeName) != state.typesMap.end()) {
-              elemType = state.typesMap[elemTypeName];
+          }
+          if (!variadicTypes.empty()) {
+            elemType = variadicTypes[0];
+            if (variadicTypes.size() > 1) {
+              isHeterogeneousVariadic = true;
             }
           }
           parameters.push_back(llvm::PointerType::get(*state.TheContext, 0));
@@ -2340,6 +2382,7 @@ void StrideGenerator::generatePlatformFunctionSignature(
         auto inputType = inputBlock->getName();
         if (state.typesMap.find(inputType) != state.typesMap.end()) {
           parameters.push_back(state.typesMap[inputType]);
+          prefixTypes.push_back(state.typesMap[inputType]);
         } else {
           LOG_ERROR() << "Input Type not mapped: " << inputType << std::endl;
         }
@@ -2384,7 +2427,10 @@ void StrideGenerator::generatePlatformFunctionSignature(
     extFunc.name = name;
     extFunc.llvmFunctionType = FT;
     extFunc.isConstrainedList = isConstrainedList;
+    extFunc.isHeterogeneousVariadic = isHeterogeneousVariadic;
     extFunc.elemType = elemType;
+    extFunc.prefixTypes = std::move(prefixTypes);
+    extFunc.variadicTypes = std::move(variadicTypes);
     extFunc.minItems = minItems;
     extFunc.maxItems = maxItems;
 

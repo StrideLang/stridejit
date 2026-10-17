@@ -1226,37 +1226,159 @@ CallExprAST::codegen(StrideCompiler &state) {
     }
   } else if (callType == CallableType::External) {
     if (CalleeF->hasFnAttribute("stride.constrained_list")) {
-      size_t numArgs = InArgs.size();
-      llvm::Type *elemType =
-          (!InArgsDataType.empty() && InArgsDataType[0] &&
-           !InArgsDataType[0]->isVoidTy())
-              ? InArgsDataType[0]
-              : state.typesMap["_StringType"];
-
-      llvm::Value *arraySizeValue = state.Builder->getInt32(numArgs);
-      llvm::AllocaInst *arrayAlloc = state.Builder->CreateAlloca(
-          elemType, arraySizeValue, "clist_array");
-      state.pointerElementTypes[arrayAlloc] = elemType;
-
-      for (size_t i = 0; i < numArgs; ++i) {
-        auto [argVal, argType] = InArgs[i]->codegen(state);
-        llvm::Type *valType =
-            (argType.has_value() && argType.value() &&
-             !argType.value()->isVoidTy())
-                ? argType.value()
-                : elemType;
-        if (argVal->getType()->isPointerTy()) {
-          argVal = state.Builder->CreateLoad(valType, argVal, "elem_val");
-        }
-        llvm::Value *index = llvm::ConstantInt::get(
-            llvm::Type::getInt32Ty(*state.TheContext), i);
-        llvm::Value *gepPtr = state.Builder->CreateInBoundsGEP(
-            elemType, arrayAlloc, index, "elem_ptr");
-        state.Builder->CreateStore(argVal, gepPtr);
+      size_t prefixCount = 0;
+      if (CalleeF->hasFnAttribute("stride.variadic_prefix")) {
+        auto attr = CalleeF->getFnAttribute("stride.variadic_prefix");
+        prefixCount = std::stoull(attr.getValueAsString().str());
       }
-      CallArgs.push_back({arrayAlloc, elemType});
-      CallArgs.push_back({state.Builder->getInt32(numArgs),
-                          llvm::Type::getInt32Ty(*state.TheContext)});
+      if (prefixCount > 0 && prefixCount <= InArgs.size()) {
+        std::vector<std::unique_ptr<ExprAST>> prefixArgs;
+        prefixArgs.reserve(prefixCount);
+        for (size_t i = 0; i < prefixCount; ++i) {
+          prefixArgs.push_back(std::move(InArgs[i]));
+        }
+        processArgGroup(state, prefixArgs, CalleeF, CallArgs);
+        for (size_t i = 0; i < prefixCount; ++i) {
+          InArgs[i] = std::move(prefixArgs[i]);
+        }
+      }
+
+      size_t numVarArgs =
+          (InArgs.size() >= prefixCount) ? (InArgs.size() - prefixCount) : 0;
+      llvm::Type *i32Ty = llvm::Type::getInt32Ty(*state.TheContext);
+
+      if (CalleeF->hasFnAttribute("stride.variadic_heterogeneous")) {
+        llvm::Type *doubleTy = llvm::Type::getDoubleTy(*state.TheContext);
+        llvm::Type *strTy = state.typesMap["_StringType"];
+        llvm::StructType *fmtArgTy = llvm::StructType::get(
+            *state.TheContext, {i32Ty, i32Ty, doubleTy, strTy});
+
+        llvm::Value *arraySizeValue = state.Builder->getInt32(numVarArgs);
+        llvm::AllocaInst *arrayAlloc = state.Builder->CreateAlloca(
+            fmtArgTy, arraySizeValue, "varg_fmt_array");
+        state.pointerElementTypes[arrayAlloc] = fmtArgTy;
+
+        for (size_t k = 0; k < numVarArgs; ++k) {
+          size_t argIdx = prefixCount + k;
+          auto [argVal, argType] = InArgs[argIdx]->codegen(state);
+          llvm::Type *valType =
+              (argType.has_value() && argType.value() &&
+               !argType.value()->isVoidTy())
+                  ? argType.value()
+                  : ((argIdx < InArgsDataType.size() &&
+                      InArgsDataType[argIdx] &&
+                      !InArgsDataType[argIdx]->isVoidTy())
+                         ? InArgsDataType[argIdx]
+                         : argVal->getType());
+          if (argVal->getType()->isPointerTy()) {
+            if (auto *varExpr =
+                    dynamic_cast<VariableExprAST *>(InArgs[argIdx].get())) {
+              auto indeces = varExpr->getIndices();
+              if (!indeces.empty()) {
+                std::vector<llvm::Value *> idxList;
+                auto idx = indeces[0];
+                if (const size_t *intIdx = std::get_if<size_t>(&idx)) {
+                  idxList.push_back(llvm::ConstantInt::get(
+                      *state.TheContext, llvm::APInt(64, *intIdx)));
+                } else if (const std::string *strIdx =
+                               std::get_if<std::string>(&idx)) {
+                  auto it = state.NamedValues.find(*strIdx);
+                  if (it != state.NamedValues.end()) {
+                    llvm::Value *indexVal = it->second.first;
+                    if (indexVal->getType()->isPointerTy()) {
+                      indexVal = state.Builder->CreateLoad(
+                          it->second.second.value(), indexVal, *strIdx);
+                    }
+                    idxList.push_back(indexVal);
+                  }
+                }
+                llvm::Type *gepElemType = valType;
+                if (gepElemType->isArrayTy()) {
+                  gepElemType = static_cast<llvm::ArrayType *>(gepElemType)
+                                    ->getElementType();
+                  valType = gepElemType;
+                }
+                argVal = state.Builder->CreateGEP(gepElemType, argVal, idxList);
+              }
+            }
+            argVal = state.Builder->CreateLoad(valType, argVal, "varg_val");
+          }
+
+          llvm::Value *elemPtr = state.Builder->CreateInBoundsGEP(
+              fmtArgTy, arrayAlloc, state.Builder->getInt32(k),
+              "varg_elem_ptr");
+          llvm::Value *tagPtr = state.Builder->CreateStructGEP(
+              fmtArgTy, elemPtr, 0, "varg_tag_ptr");
+
+          if (valType == strTy || argVal->getType() == strTy) {
+            state.Builder->CreateStore(state.Builder->getInt32(3), tagPtr);
+            llvm::Value *strFieldPtr = state.Builder->CreateStructGEP(
+                fmtArgTy, elemPtr, 3, "varg_str_ptr");
+            state.Builder->CreateStore(argVal, strFieldPtr);
+          } else if (valType->isFloatingPointTy() ||
+                     argVal->getType()->isFloatingPointTy()) {
+            state.Builder->CreateStore(state.Builder->getInt32(1), tagPtr);
+            llvm::Value *realFieldPtr = state.Builder->CreateStructGEP(
+                fmtArgTy, elemPtr, 2, "varg_real_ptr");
+            if (argVal->getType() != doubleTy) {
+              argVal = state.Builder->CreateFPCast(argVal, doubleTy,
+                                                   "varg_fpcast");
+            }
+            state.Builder->CreateStore(argVal, realFieldPtr);
+          } else if (valType->isIntegerTy(1) ||
+                     argVal->getType()->isIntegerTy(1)) {
+            state.Builder->CreateStore(state.Builder->getInt32(2), tagPtr);
+            llvm::Value *intFieldPtr = state.Builder->CreateStructGEP(
+                fmtArgTy, elemPtr, 1, "varg_bool_ptr");
+            llvm::Value *extVal =
+                state.Builder->CreateZExt(argVal, i32Ty, "varg_zext");
+            state.Builder->CreateStore(extVal, intFieldPtr);
+          } else {
+            state.Builder->CreateStore(state.Builder->getInt32(0), tagPtr);
+            llvm::Value *intFieldPtr = state.Builder->CreateStructGEP(
+                fmtArgTy, elemPtr, 1, "varg_int_ptr");
+            if (argVal->getType() != i32Ty &&
+                argVal->getType()->isIntegerTy()) {
+              argVal = state.Builder->CreateIntCast(argVal, i32Ty, true,
+                                                    "varg_intcast");
+            }
+            state.Builder->CreateStore(argVal, intFieldPtr);
+          }
+        }
+        CallArgs.push_back({arrayAlloc, fmtArgTy});
+        CallArgs.push_back({state.Builder->getInt32(numVarArgs), i32Ty});
+      } else {
+        llvm::Type *elemType =
+            (prefixCount < InArgsDataType.size() &&
+             InArgsDataType[prefixCount] &&
+             !InArgsDataType[prefixCount]->isVoidTy())
+                ? InArgsDataType[prefixCount]
+                : state.typesMap["_StringType"];
+
+        llvm::Value *arraySizeValue = state.Builder->getInt32(numVarArgs);
+        llvm::AllocaInst *arrayAlloc = state.Builder->CreateAlloca(
+            elemType, arraySizeValue, "clist_array");
+        state.pointerElementTypes[arrayAlloc] = elemType;
+
+        for (size_t k = 0; k < numVarArgs; ++k) {
+          size_t argIdx = prefixCount + k;
+          auto [argVal, argType] = InArgs[argIdx]->codegen(state);
+          llvm::Type *valType =
+              (argType.has_value() && argType.value() &&
+               !argType.value()->isVoidTy())
+                  ? argType.value()
+                  : elemType;
+          if (argVal->getType()->isPointerTy()) {
+            argVal = state.Builder->CreateLoad(valType, argVal, "elem_val");
+          }
+          llvm::Value *index = llvm::ConstantInt::get(i32Ty, k);
+          llvm::Value *gepPtr = state.Builder->CreateInBoundsGEP(
+              elemType, arrayAlloc, index, "elem_ptr");
+          state.Builder->CreateStore(argVal, gepPtr);
+        }
+        CallArgs.push_back({arrayAlloc, elemType});
+        CallArgs.push_back({state.Builder->getInt32(numVarArgs), i32Ty});
+      }
     } else {
       processArgGroup(state, InArgs, CalleeF, CallArgs);
     }

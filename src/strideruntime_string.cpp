@@ -567,4 +567,177 @@ __stride_jit_string_repeat(const StrideStringView *str, int32_t count,
   *out = __stride_string_repeat(*str, count);
 }
 
+STRIDE_EXPORT void
+__stride_jit_string_format(const StrideStringView *fmt,
+                           const StrideFormatArg *args, int32_t count,
+                           StrideStringView *out) {
+  if (!out)
+    return;
+  if (!fmt || !fmt->data || fmt->length <= 0) {
+    *out = StrideStringView{"", 0};
+    return;
+  }
+
+  static thread_local char buffer[65536];
+  static thread_local size_t offset = 0;
+  // Reset ring buffer offset if less than 4KB remains
+  if (offset + 4096 > sizeof(buffer)) {
+    offset = 0;
+  }
+  char *dest = buffer + offset;
+  size_t maxAvail = sizeof(buffer) - offset - 1;
+  size_t written = 0;
+
+  auto appendBytes = [&](const char *src, size_t len) {
+    if (!src || len == 0 || written >= maxAvail)
+      return;
+    size_t toCopy = (written + len > maxAvail) ? (maxAvail - written) : len;
+    std::memcpy(dest + written, src, toCopy);
+    written += toCopy;
+  };
+
+  const char *p = fmt->data;
+  const char *end = fmt->data + fmt->length;
+  int32_t argIdx = 0;
+
+  while (p < end) {
+    if (*p == '{') {
+      if (p + 1 < end && *(p + 1) == '{') {
+        appendBytes("{", 1);
+        p += 2;
+        continue;
+      }
+      const char *closeBrace = p + 1;
+      while (closeBrace < end && *closeBrace != '}') {
+        ++closeBrace;
+      }
+      if (closeBrace < end && *closeBrace == '}') {
+        const char *specStart = p + 1;
+        size_t specLen = static_cast<size_t>(closeBrace - specStart);
+        p = closeBrace + 1;
+
+        if (args && argIdx < count) {
+          const StrideFormatArg &arg = args[argIdx++];
+          bool zeroPad = false;
+          int width = 0;
+          int precision = -1;
+          char typeChar = '\0';
+
+          if (specLen > 0 && *specStart == ':') {
+            const char *s = specStart + 1;
+            const char *sEnd = specStart + specLen;
+            if (s < sEnd && *s == '0') {
+              zeroPad = true;
+              ++s;
+            }
+            while (s < sEnd && *s >= '0' && *s <= '9') {
+              width = width * 10 + (*s - '0');
+              ++s;
+            }
+            if (s < sEnd && *s == '.') {
+              ++s;
+              precision = 0;
+              while (s < sEnd && *s >= '0' && *s <= '9') {
+                precision = precision * 10 + (*s - '0');
+                ++s;
+              }
+            }
+            if (s < sEnd) {
+              typeChar = *s;
+            }
+          }
+
+          char numBuf[128];
+          int n = 0;
+          switch (arg.typeTag) {
+          case STRIDE_FMT_ARG_INT: {
+            if (typeChar == 'x' || typeChar == 'X') {
+              const char *fmtSpec =
+                  zeroPad ? (typeChar == 'X' ? "%0*X" : "%0*x")
+                          : (typeChar == 'X' ? "%*X" : "%*x");
+              n = std::snprintf(numBuf, sizeof(numBuf), fmtSpec, width,
+                                static_cast<uint32_t>(arg.intVal));
+            } else {
+              const char *fmtSpec = zeroPad ? "%0*d" : "%*d";
+              n = std::snprintf(numBuf, sizeof(numBuf), fmtSpec, width,
+                                arg.intVal);
+            }
+            if (n > 0) {
+              appendBytes(numBuf, static_cast<size_t>(n));
+            }
+            break;
+          }
+          case STRIDE_FMT_ARG_REAL: {
+            if (precision >= 0) {
+              const char *fmtSpec = zeroPad ? "%0*.*f" : "%*.*f";
+              n = std::snprintf(numBuf, sizeof(numBuf), fmtSpec, width,
+                                precision, arg.realVal);
+            } else if (typeChar == 'f') {
+              const char *fmtSpec = zeroPad ? "%0*f" : "%*f";
+              n = std::snprintf(numBuf, sizeof(numBuf), fmtSpec, width,
+                                arg.realVal);
+            } else if (typeChar == 'e' || typeChar == 'E') {
+              const char *fmtSpec = (typeChar == 'E') ? "%*E" : "%*e";
+              n = std::snprintf(numBuf, sizeof(numBuf), fmtSpec, width,
+                                arg.realVal);
+            } else {
+              n = std::snprintf(numBuf, sizeof(numBuf), "%*g", width,
+                                arg.realVal);
+            }
+            if (n > 0) {
+              appendBytes(numBuf, static_cast<size_t>(n));
+            }
+            break;
+          }
+          case STRIDE_FMT_ARG_SWITCH: {
+            if (typeChar == 'd') {
+              appendBytes(arg.intVal ? "1" : "0", 1);
+            } else if (typeChar == 'b') {
+              if (arg.intVal)
+                appendBytes("true", 4);
+              else
+                appendBytes("false", 5);
+            } else {
+              if (arg.intVal)
+                appendBytes("on", 2);
+              else
+                appendBytes("off", 3);
+            }
+            break;
+          }
+          case STRIDE_FMT_ARG_STRING: {
+            int32_t sLen = (arg.strVal.data && arg.strVal.length > 0)
+                               ? arg.strVal.length
+                               : 0;
+            if (width > sLen) {
+              int pad = width - sLen;
+              for (int i = 0; i < pad; ++i) {
+                appendBytes(" ", 1);
+              }
+            }
+            if (sLen > 0) {
+              appendBytes(arg.strVal.data, static_cast<size_t>(sLen));
+            }
+            break;
+          }
+          default:
+            break;
+          }
+        }
+        continue;
+      }
+    } else if (*p == '}' && p + 1 < end && *(p + 1) == '}') {
+      appendBytes("}", 1);
+      p += 2;
+      continue;
+    }
+    appendBytes(p, 1);
+    ++p;
+  }
+
+  dest[written] = '\0';
+  offset += written + 1;
+  *out = StrideStringView{dest, static_cast<int32_t>(written)};
+}
+
 }

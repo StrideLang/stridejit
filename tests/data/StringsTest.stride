@@ -33,6 +33,11 @@ _domainDefinition RootDomain {
         signal OutRepeat { domain: RootDomain type: _StringType }
         signal OutTokCount { domain: RootDomain type: _IntType }
         signal OutTok1 { domain: RootDomain type: _StringType }
+        signal OutFmt1 { domain: RootDomain type: _StringType }
+        signal OutFmt2 { domain: RootDomain type: _StringType }
+        signal OutConstStr { domain: RootDomain type: _StringType }
+        signal OutConstCat { domain: RootDomain type: _StringType }
+        signal OutConstFmt { domain: RootDomain type: _StringType }
     ]
     domainFunctionCode: ''
 }
@@ -123,13 +128,32 @@ platformModule Parse@String_Real {
 
 platformModule Concat {
     inputs: [
-        constrainedList {
-            minItems: 2
-            anyOf: [_StringType]
+        variadic {
+            types: [_StringType]
+            min: 2
         }
     ]
     outputs: [_StringType]
     processing: "@__stride_jit_string_concat_n"
+    inherits: [_Signal]
+}
+
+platformModule Format {
+    inputs: [
+        _StringType,
+        variadic {
+            types: [_IntType, _RealType, _SwitchType, _StringType]
+            min: 1
+        }
+    ]
+    outputs: [_StringType]
+    ports: [
+        portPropertyPort FormatProp {
+            name: 'format'
+            block: FormatString
+        }
+    ]
+    processing: "@__stride_jit_string_format"
     inherits: [_Signal]
 }
 
@@ -232,4 +256,13 @@ StrArray[2] >> OutArraySub;
 [ "alpha,beta,gamma", "," ] >> TokenCount() >> OutTokCount;
 [ "alpha,beta,gamma", ",", 1 ] >> TokenAt() >> OutTok1;
 
+# 20. Format (template placeholder formatting)
+[ "Player {}: Score {:04d}, HP {:.1f}%, Alive {}", "Hero", 42, 98.6, on ] >> Format() >> OutFmt1;
+[ "Boss", 9000 ] >> Format(format: "[{}] Power: {:d}") >> OutFmt2;
 
+# 21. Constant with string value
+constant Greeting { value: "Greetings" }
+
+Greeting >> OutConstStr;
+[ Greeting, ", ", InStr ] >> Concat() >> OutConstCat;
+[ Greeting, 7 ] >> Format(format: "{} #{}!") >> OutConstFmt;

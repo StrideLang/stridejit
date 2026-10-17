@@ -73,23 +73,48 @@ std::optional<ExternalFunction> StrideCompiler::getExternalFunction(
         if (candidate.isConstrainedList) {
           if (!returnType ||
               candidate.llvmFunctionType->getReturnType() == returnType) {
-            int nArgs = static_cast<int>(argTypes.size());
-            if (nArgs >= candidate.minItems &&
-                (candidate.maxItems < 0 || nArgs <= candidate.maxItems)) {
-              bool allTypesMatch = true;
-              if (candidate.elemType) {
-                for (int i = 0; i < nArgs; ++i) {
-                  if (argTypes[i] != candidate.elemType) {
-                    allTypesMatch = false;
-                    break;
-                  }
+            size_t prefixCount = candidate.prefixTypes.size();
+            if (argTypes.size() >= prefixCount) {
+              bool prefixMatch = true;
+              for (size_t p = 0; p < prefixCount; ++p) {
+                if (argTypes[p] != candidate.prefixTypes[p]) {
+                  prefixMatch = false;
+                  break;
                 }
               }
-              if (allTypesMatch) {
-                LOG_DEBUG() << "Found constrainedList external candidate for "
-                            << strideName << " with " << nArgs << " args"
-                            << std::endl;
-                return candidate;
+              int nVarArgs =
+                  static_cast<int>(argTypes.size() - prefixCount);
+              if (prefixMatch && nVarArgs >= candidate.minItems &&
+                  (candidate.maxItems < 0 || nVarArgs <= candidate.maxItems)) {
+                bool allTypesMatch = true;
+                if (!candidate.variadicTypes.empty()) {
+                  for (size_t i = prefixCount; i < argTypes.size(); ++i) {
+                    bool matchedOne = false;
+                    for (auto *allowedTy : candidate.variadicTypes) {
+                      if (argTypes[i] == allowedTy) {
+                        matchedOne = true;
+                        break;
+                      }
+                    }
+                    if (!matchedOne) {
+                      allTypesMatch = false;
+                      break;
+                    }
+                  }
+                } else if (candidate.elemType) {
+                  for (size_t i = prefixCount; i < argTypes.size(); ++i) {
+                    if (argTypes[i] != candidate.elemType) {
+                      allTypesMatch = false;
+                      break;
+                    }
+                  }
+                }
+                if (allTypesMatch) {
+                  LOG_DEBUG() << "Found variadic external candidate for "
+                              << strideName << " with " << nVarArgs
+                              << " varargs" << std::endl;
+                  return candidate;
+                }
               }
             }
           }
@@ -232,6 +257,22 @@ void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
     } else if (valProp->getNodeType() == AST::Switch) {
       bool v = std::static_pointer_cast<ValueNode>(valProp)->getSwitchValue();
       Initializer = llvm::ConstantInt::get(Type, v ? 1 : 0);
+    } else if (valProp->getNodeType() == AST::String && Type->isStructTy()) {
+      std::string s =
+          std::static_pointer_cast<ValueNode>(valProp)->getStringValue();
+      auto *strConst = llvm::ConstantDataArray::getString(*TheContext, s, true);
+      auto *strGlobal = new llvm::GlobalVariable(
+          *TheModule, strConst->getType(), true,
+          llvm::GlobalValue::PrivateLinkage, strConst, ".str.const");
+      llvm::Constant *zero =
+          llvm::ConstantInt::get(llvm::Type::getInt32Ty(*TheContext), 0);
+      llvm::Constant *indices[] = {zero, zero};
+      llvm::Constant *ptrConst = llvm::ConstantExpr::getInBoundsGetElementPtr(
+          strConst->getType(), strGlobal, indices);
+      llvm::Constant *lenConst = llvm::ConstantInt::get(
+          llvm::Type::getInt32Ty(*TheContext), static_cast<int32_t>(s.size()));
+      Initializer = llvm::ConstantStruct::get(
+          llvm::cast<llvm::StructType>(Type), {ptrConst, lenConst});
     }
   }
   if (!Initializer) {
@@ -305,6 +346,19 @@ StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl) {
   }
   if (decl->getEntityType() == "string") {
     return typesMap["_StringType"];
+  }
+  if (decl->getEntityType() == "constant") {
+    if (auto valProp = decl->getPropertyValue("value")) {
+      if (valProp->getNodeType() == strd::AST::String) {
+        return typesMap["_StringType"];
+      } else if (valProp->getNodeType() == strd::AST::Int) {
+        return typesMap["_IntType"];
+      } else if (valProp->getNodeType() == strd::AST::Switch) {
+        return typesMap["_SwitchType"];
+      } else if (valProp->getNodeType() == strd::AST::Real) {
+        return typesMap["_RealType"];
+      }
+    }
   }
   auto typePropNode = decl->getPropertyValue("type");
   std::string type = "_RealType";

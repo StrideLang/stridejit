@@ -78,7 +78,10 @@ struct ExternalFunction {
   std::string name;
   llvm::FunctionType *llvmFunctionType{nullptr};
   bool isConstrainedList{false};
+  bool isHeterogeneousVariadic{false};
   llvm::Type *elemType{nullptr};
+  std::vector<llvm::Type *> prefixTypes;
+  std::vector<llvm::Type *> variadicTypes;
   int minItems{0};
   int maxItems{-1};
 };

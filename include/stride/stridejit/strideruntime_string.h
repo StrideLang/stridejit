@@ -78,6 +78,31 @@ static_assert(offsetof(StrideStringView, length) == sizeof(void *),
 static_assert(sizeof(StrideStringView) == 2 * sizeof(void *),
               "StrideStringView must be {ptr, i32} with natural padding");
 
+enum StrideFormatArgType : int32_t {
+  STRIDE_FMT_ARG_INT = 0,
+  STRIDE_FMT_ARG_REAL = 1,
+  STRIDE_FMT_ARG_SWITCH = 2,
+  STRIDE_FMT_ARG_STRING = 3,
+};
+
+struct StrideFormatArg {
+  int32_t typeTag{0};
+  int32_t intVal{0};
+  double realVal{0.0};
+  StrideStringView strVal{};
+};
+
+static_assert(std::is_standard_layout<StrideFormatArg>::value,
+              "StrideFormatArg must be standard-layout");
+static_assert(offsetof(StrideFormatArg, typeTag) == 0,
+              "StrideFormatArg::typeTag must be at offset 0");
+static_assert(offsetof(StrideFormatArg, intVal) == 4,
+              "StrideFormatArg::intVal must be at offset 4");
+static_assert(offsetof(StrideFormatArg, realVal) == 8,
+              "StrideFormatArg::realVal must be at offset 8");
+static_assert(offsetof(StrideFormatArg, strVal) == 16,
+              "StrideFormatArg::strVal must be at offset 16");
+
 } // namespace strd
 
 extern "C" {
@@ -213,6 +238,10 @@ __stride_jit_string_concat_n(const strd::StrideStringView *views, int32_t count,
                              strd::StrideStringView *out);
 STRIDE_EXPORT void
 __stride_jit_string_repeat(const strd::StrideStringView *str, int32_t count,
+                           strd::StrideStringView *out);
+STRIDE_EXPORT void
+__stride_jit_string_format(const strd::StrideStringView *fmt,
+                           const strd::StrideFormatArg *args, int32_t count,
                            strd::StrideStringView *out);
 
 }

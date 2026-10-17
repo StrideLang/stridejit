@@ -149,6 +149,27 @@ TEST(Strings, JITTokenizeAndConcatDirect) {
 
   int32_t tokCnt = __stride_jit_string_token_count(&src, &delim);
   EXPECT_EQ(tokCnt, 3);
+
+  // Format direct
+  StrideStringView fmtTpl{"Player {}: Score {:04d}, HP {:.1f}%, Alive {}", 45};
+  StrideFormatArg fmtArgs[4] = {};
+  fmtArgs[0].typeTag = STRIDE_FMT_ARG_STRING;
+  fmtArgs[0].strVal = StrideStringView{"Hero", 4};
+  fmtArgs[1].typeTag = STRIDE_FMT_ARG_INT;
+  fmtArgs[1].intVal = 42;
+  fmtArgs[2].typeTag = STRIDE_FMT_ARG_REAL;
+  fmtArgs[2].realVal = 98.6;
+  fmtArgs[3].typeTag = STRIDE_FMT_ARG_SWITCH;
+  fmtArgs[3].intVal = 1;
+  StrideStringView fmtOut{};
+  __stride_jit_string_format(&fmtTpl, fmtArgs, 4, &fmtOut);
+  EXPECT_EQ(fmtOut.toString(), "Player Hero: Score 0042, HP 98.6%, Alive on");
+
+  StrideStringView fmtBoolTpl{"Bool: {:b}, Int: {:d}", 21};
+  StrideFormatArg fmtBoolArgs[2] = {fmtArgs[3], fmtArgs[3]};
+  StrideStringView fmtBoolOut{};
+  __stride_jit_string_format(&fmtBoolTpl, fmtBoolArgs, 2, &fmtBoolOut);
+  EXPECT_EQ(fmtBoolOut.toString(), "Bool: true, Int: 1");
 }
 
 TEST(Strings, JITCompilationAndExecution) {
@@ -173,8 +194,8 @@ TEST(Strings, JITCompilationAndExecution) {
   ASSERT_TRUE(strenv.setStateVar(state, "InStr", StrideStringView{"Hello World", 11}, std::nullopt, dom));
   ASSERT_TRUE(strenv.setStateVar(state, "PaddedStr", StrideStringView{"   Trimmed   ", 13}, std::nullopt, dom));
 
-  // state + 2 inputs + 23 outputs
-  void *args[32] = {state};
+  // state + 2 inputs + 28 outputs
+  void *args[40] = {state};
   int32_t res = strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(res, 0);
 
@@ -226,4 +247,11 @@ TEST(Strings, JITCompilationAndExecution) {
   // 19. Tokenization queries
   EXPECT_EQ(strenv.getStateVar<int32_t>(state, "OutTokCount", std::nullopt, dom).value_or(-1), 3);
   EXPECT_EQ(str("OutTok1"), "beta");
+  // 20. Format
+  EXPECT_EQ(str("OutFmt1"), "Player Hero: Score 0042, HP 98.6%, Alive on");
+  EXPECT_EQ(str("OutFmt2"), "[Boss] Power: 9000");
+  // 21. Constant with string value
+  EXPECT_EQ(str("OutConstStr"), "Greetings");
+  EXPECT_EQ(str("OutConstCat"), "Greetings, Hello World");
+  EXPECT_EQ(str("OutConstFmt"), "Greetings #7!");
 }
