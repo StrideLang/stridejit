@@ -1,0 +1,5 @@
+.strdcache/
+*.scache
+build/
+.qtcreator/
+.vscode/

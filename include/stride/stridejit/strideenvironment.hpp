@@ -31,6 +31,7 @@
 
 #include "stride/parser/ast.h"
 #include "stride/stridejit/stridecompiler.hpp"
+#include "stride/utils/cachemanager.h"
 #include "stride/utils/logger.h"
 
 // llvm forward declarations
@@ -115,6 +116,31 @@ public:
   const std::vector<std::string> &getIncludePaths() const {
     return m_includePaths;
   }
+
+  // AST Caching Controls (.strdcache)
+  void enableCaching(bool enabled) {
+    CacheManager::instance().setEnabled(enabled);
+  }
+  bool isCachingEnabled() const {
+    return CacheManager::instance().isEnabled();
+  }
+  void setCacheDirectory(const std::string &dirPath) {
+    CacheManager::instance().setCacheDirectory(dirPath);
+  }
+  std::string getCacheDirectory() const {
+    return CacheManager::instance().getCacheDirectory().generic_string();
+  }
+  void clearCache(const std::string &sourceOrCacheDir = "") {
+    if (sourceOrCacheDir.empty()) {
+      CacheManager::instance().clearCache();
+    } else {
+      CacheManager::instance().clearCache(sourceOrCacheDir);
+    }
+  }
+  CacheStats getCacheStats() const {
+    return CacheManager::instance().getStats();
+  }
+  void resetCacheStats() { CacheManager::instance().resetStats(); }
 
   // IR generator
   bool generateIr(std::string path, bool emitAllFunctions = false);

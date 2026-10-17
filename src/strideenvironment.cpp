@@ -141,14 +141,6 @@ bool StrideEnvironment::generateAllRootFunctions(ASTNode root) {
 }
 
 bool StrideEnvironment::generateIr(std::string path, bool emitAllFunctions) {
-  ASTNode tree = AST::parseFile(path.c_str());
-  if (!tree) {
-    for (auto &error : AST::getParseErrors()) {
-      LOG_ERROR() << error.getErrorText() << std::endl;
-    }
-    return false;
-  }
-
   std::filesystem::path filePath(path);
   if (filePath.has_parent_path()) {
     std::string parentDir = filePath.parent_path().generic_string();
@@ -158,7 +150,18 @@ bool StrideEnvironment::generateIr(std::string path, bool emitAllFunctions) {
     }
   }
 
-  prepareTree(tree);
+  ASTNode tree =
+      CacheManager::instance().loadCachedAST(filePath, {}, "prepared_JIT");
+  if (!tree) {
+    tree = AST::parseFile(path.c_str());
+    if (!tree) {
+      for (auto &error : AST::getParseErrors()) {
+        LOG_ERROR() << error.getErrorText() << std::endl;
+      }
+      return false;
+    }
+    prepareTree(tree);
+  }
   return generateIr(tree, emitAllFunctions);
 }
 
@@ -184,15 +187,19 @@ bool StrideEnvironment::generateIr(const std::vector<std::string> &paths,
   }
 
   for (const auto &p : paths) {
-    ASTNode tree = AST::parseFile(p.c_str());
+    ASTNode tree =
+        CacheManager::instance().loadCachedAST(p, {}, "prepared_JIT");
     if (!tree) {
-      for (auto &error : AST::getParseErrors()) {
-        LOG_ERROR() << error.getErrorText() << std::endl;
+      tree = AST::parseFile(p.c_str());
+      if (!tree) {
+        for (auto &error : AST::getParseErrors()) {
+          LOG_ERROR() << error.getErrorText() << std::endl;
+        }
+        return false;
       }
-      return false;
+      prepareTree(tree);
     }
 
-    prepareTree(tree);
     m_trees.push_back(tree);
 
     // Each file is compiled in its isolated scope into the shared LLVM Module
@@ -215,9 +222,14 @@ bool StrideEnvironment::generateIr(const std::vector<std::string> &paths,
       }
     }
 
+    bool wasPreprocessed = tree->getCompilerProperty("preprocessed") != nullptr;
     if (!ASTFunctions::preprocess(tree, &globalScope)) {
       return false;
     }
+    if (!wasPreprocessed && ASTQuery::getImportNodes(tree).empty()) {
+      CacheManager::instance().saveCachedAST(p, tree, {}, "prepared_JIT");
+    }
+
     StrideGenerator::compile(tree, globalScope, mStrideEnv);
 
     if (emitAllFunctions) {
@@ -258,8 +270,14 @@ bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
     }
   }
 
+  bool wasPreprocessed = root->getCompilerProperty("preprocessed") != nullptr;
   if (!ASTFunctions::preprocess(root, &globalScope)) {
     return false;
+  }
+  if (!wasPreprocessed && !root->getFilename().empty() &&
+      ASTQuery::getImportNodes(root).empty()) {
+    CacheManager::instance().saveCachedAST(root->getFilename(), root, {},
+                                           "prepared_JIT");
   }
   m_trees.push_back(root);
   StrideGenerator::compile(root, globalScope, mStrideEnv);
