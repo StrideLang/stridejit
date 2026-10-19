@@ -16,7 +16,7 @@ signal State2Entered { domain: RootDomain type: _IntType default: 0 }
 
 reaction RecordReaction {
     ports: [
-        propertyInputPort LocPort { name: "loc" block: Loc }
+        propertyInputPort LocPort { name: "loc" block: Loc allowedTypes: _IntType }
     ]
     blocks: [
         signal Loc { type: _IntType }

@@ -21,11 +21,14 @@ public:
   }
 };
 
+#include "testcacheguard.hpp"
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   ::testing::TestEventListeners &listeners =
       ::testing::UnitTest::GetInstance()->listeners();
   listeners.Append(new BufferedLogTestListener());
+  listeners.Append(new strd::test::DisableCacheTestListener());
   return RUN_ALL_TESTS();
 }
 

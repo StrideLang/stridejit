@@ -54,9 +54,11 @@
 // #include "llvm/ExecutionEngine/Orc/ObjectTransformLayer.h"
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 
-// #include "llvm/Support/InitLLVM.h"
+#include "llvm/Bitcode/BitcodeWriter.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/TargetParser/Host.h"
 
 using namespace strd;
 
@@ -141,6 +143,7 @@ bool StrideEnvironment::generateAllRootFunctions(ASTNode root) {
 }
 
 bool StrideEnvironment::generateIr(std::string path, bool emitAllFunctions) {
+  m_primarySourcePath = path;
   std::filesystem::path filePath(path);
   if (filePath.has_parent_path()) {
     std::string parentDir = filePath.parent_path().generic_string();
@@ -246,6 +249,9 @@ bool StrideEnvironment::generateIr(const std::vector<std::string> &paths,
 }
 
 bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
+  if (m_primarySourcePath.empty() && root && !root->getFilename().empty()) {
+    m_primarySourcePath = root->getFilename();
+  }
   initializeJIT();
 
   prepareTree(root);
@@ -1263,10 +1269,40 @@ int32_t StrideEnvironment::invoke(const std::string &funcName,
   return invoke(funcName, params.data());
 }
 
+std::string StrideEnvironment::getJitObjectTag() const {
+  return "jit_obj_" + llvm::sys::getDefaultTargetTriple() + "_" +
+         (m_optimizeCode ? "O2" : "O0");
+}
+
 bool StrideEnvironment::compileInMemory() {
-  if (m_optimizeCode && !m_moduleOptimized) {
-    optimizeModule();
+  std::vector<uint8_t> cachedObjBytes;
+  std::string objTag = getJitObjectTag();
+  std::vector<std::filesystem::path> deps;
+  for (const auto &p : m_includePaths) {
+    deps.emplace_back(p);
   }
+
+  bool haveCachedObj = false;
+  if (m_cacheObjectCode && !m_primarySourcePath.empty() &&
+      CacheManager::instance().isEnabled()) {
+    haveCachedObj = CacheManager::instance().loadCachedBinary(
+        m_primarySourcePath, cachedObjBytes, deps, objTag, ".obj");
+  }
+
+  if (!haveCachedObj) {
+    if (m_optimizeCode && !m_moduleOptimized) {
+      optimizeModule();
+    }
+    if (m_cacheBitcode && !m_primarySourcePath.empty() &&
+        CacheManager::instance().isEnabled() && mStrideEnv.TheModule) {
+      std::string bcBuf;
+      llvm::raw_string_ostream bcStream(bcBuf);
+      llvm::WriteBitcodeToFile(*mStrideEnv.TheModule, bcStream);
+      CacheManager::instance().saveCachedBinary(
+          m_primarySourcePath, bcBuf.data(), bcBuf.size(), deps, objTag, ".bc");
+    }
+  }
+
   initializeJIT();
 
   auto JTMB = llvm::orc::JITTargetMachineBuilder::detectHost();
@@ -1374,10 +1410,51 @@ bool StrideEnvironment::compileInMemory() {
   llvm::cantFail(JIT->getMainJITDylib().define(llvm::orc::absoluteSymbols(M)));
 
   m_dataLayout = JIT->getDataLayout();
-  TSCtx = llvm::orc::ThreadSafeContext(std::move(mStrideEnv.TheContext));
-  if (auto Err = JIT->addIRModule(llvm::orc::ThreadSafeModule(
-          std::move(mStrideEnv.TheModule), TSCtx))) {
-    return false;
+
+  if (haveCachedObj && !cachedObjBytes.empty()) {
+    auto memBuf = llvm::MemoryBuffer::getMemBufferCopy(
+        llvm::StringRef(reinterpret_cast<const char *>(cachedObjBytes.data()),
+                        cachedObjBytes.size()));
+    if (auto Err = JIT->addObjectFile(std::move(memBuf))) {
+      LOG_ERROR() << "Failed to add cached object file to JIT: "
+                  << llvm::toString(std::move(Err)) << std::endl;
+    } else {
+      return true;
+    }
+  }
+
+  if (m_cacheObjectCode && !m_primarySourcePath.empty() &&
+      CacheManager::instance().isEnabled() && mStrideEnv.TheModule) {
+    if (auto hostJTMB = llvm::orc::JITTargetMachineBuilder::detectHost()) {
+      if (auto TM = hostJTMB->createTargetMachine()) {
+        llvm::legacy::PassManager pass;
+        llvm::SmallVector<char, 0> objBuf;
+        llvm::raw_svector_ostream dest(objBuf);
+        if (!(*TM)->addPassesToEmitFile(pass, dest, nullptr,
+                                        llvm::CodeGenFileType::ObjectFile)) {
+          pass.run(*mStrideEnv.TheModule);
+          CacheManager::instance().saveCachedBinary(
+              m_primarySourcePath, objBuf.data(), objBuf.size(), deps, objTag,
+              ".obj");
+          auto memBuf = llvm::MemoryBuffer::getMemBufferCopy(
+              llvm::StringRef(objBuf.data(), objBuf.size()));
+          if (auto Err = JIT->addObjectFile(std::move(memBuf))) {
+            LOG_ERROR() << "Failed to add compiled object file to JIT: "
+                        << llvm::toString(std::move(Err)) << std::endl;
+            return false;
+          }
+          return true;
+        }
+      }
+    }
+  }
+
+  if (mStrideEnv.TheModule && mStrideEnv.TheContext) {
+    TSCtx = llvm::orc::ThreadSafeContext(std::move(mStrideEnv.TheContext));
+    if (auto Err = JIT->addIRModule(llvm::orc::ThreadSafeModule(
+            std::move(mStrideEnv.TheModule), TSCtx))) {
+      return false;
+    }
   }
   return true;
 }

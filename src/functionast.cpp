@@ -1977,6 +1977,69 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
         rhs = CallArgs.size() > 1 ? CallArgs[1].first : nullptr;
       }
 
+      if (lhs && rhs) {
+        if (lhs->getType()->isIntegerTy() && rhs->getType()->isIntegerTy()) {
+          // If both are integers, match bitwidths and use the integer version of the platform instruction
+          unsigned lBits = lhs->getType()->getIntegerBitWidth();
+          unsigned rBits = rhs->getType()->getIntegerBitWidth();
+          if (lBits < rBits) {
+            lhs = state.Builder->CreateIntCast(lhs, rhs->getType(), true, "intcast");
+          } else if (rBits < lBits) {
+            rhs = state.Builder->CreateIntCast(rhs, lhs->getType(), true, "intcast");
+          }
+
+          if (instr.rfind("fcmp ogt", 0) == 0 || instr.rfind("fcmp ugt", 0) == 0) {
+            instr = "icmp sgt" + instr.substr(8);
+          } else if (instr.rfind("fcmp oge", 0) == 0 || instr.rfind("fcmp uge", 0) == 0) {
+            instr = "icmp sge" + instr.substr(8);
+          } else if (instr.rfind("fcmp olt", 0) == 0 || instr.rfind("fcmp ult", 0) == 0) {
+            instr = "icmp slt" + instr.substr(8);
+          } else if (instr.rfind("fcmp ole", 0) == 0 || instr.rfind("fcmp ule", 0) == 0) {
+            instr = "icmp sle" + instr.substr(8);
+          } else if (instr.rfind("fcmp oeq", 0) == 0 || instr.rfind("fcmp ueq", 0) == 0) {
+            instr = "icmp eq" + instr.substr(8);
+          } else if (instr.rfind("fcmp one", 0) == 0 || instr.rfind("fcmp une", 0) == 0) {
+            instr = "icmp ne" + instr.substr(8);
+          } else if (instr.rfind("fadd", 0) == 0) {
+            instr = "add" + instr.substr(4);
+          } else if (instr.rfind("fsub", 0) == 0) {
+            instr = "sub" + instr.substr(4);
+          } else if (instr.rfind("fmul", 0) == 0) {
+            instr = "mul" + instr.substr(4);
+          } else if (instr.rfind("fdiv", 0) == 0) {
+            instr = "sdiv" + instr.substr(4);
+          } else if (instr.rfind("frem", 0) == 0) {
+            instr = "srem" + instr.substr(4);
+          }
+        } else {
+          bool isFloatOp = (instr.rfind("fcmp", 0) == 0 ||
+                            instr.rfind("fadd", 0) == 0 ||
+                            instr.rfind("fsub", 0) == 0 ||
+                            instr.rfind("fmul", 0) == 0 ||
+                            instr.rfind("fdiv", 0) == 0 ||
+                            instr.rfind("frem", 0) == 0);
+          if (isFloatOp) {
+            if (lhs->getType()->isIntegerTy() && rhs->getType()->isFloatingPointTy()) {
+              lhs = state.Builder->CreateSIToFP(lhs, rhs->getType(), "sitofp");
+            } else if (rhs->getType()->isIntegerTy() && lhs->getType()->isFloatingPointTy()) {
+              rhs = state.Builder->CreateSIToFP(rhs, lhs->getType(), "sitofp");
+            } else if (lhs->getType() != rhs->getType()) {
+              if (lhs->getType()->isFloatTy() && rhs->getType()->isDoubleTy()) {
+                lhs = state.Builder->CreateFPExt(lhs, rhs->getType(), "fpext");
+              } else if (rhs->getType()->isFloatTy() && lhs->getType()->isDoubleTy()) {
+                rhs = state.Builder->CreateFPExt(rhs, lhs->getType(), "fpext");
+              }
+            }
+          } else {
+            if (lhs->getType()->isFloatingPointTy() && rhs->getType()->isIntegerTy()) {
+              lhs = state.Builder->CreateFPToSI(lhs, rhs->getType(), "fptosi");
+            } else if (rhs->getType()->isFloatingPointTy() && lhs->getType()->isIntegerTy()) {
+              rhs = state.Builder->CreateFPToSI(rhs, lhs->getType(), "fptosi");
+            }
+          }
+        }
+      }
+
       if (instr.rfind("icmp sgt", 0) == 0) {
       outval = state.Builder->CreateICmpSGT(lhs, rhs);
       outtype = llvm::Type::getInt1Ty(*state.TheContext);
