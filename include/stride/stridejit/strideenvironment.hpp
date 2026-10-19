@@ -142,6 +142,14 @@ public:
   }
   void resetCacheStats() { CacheManager::instance().resetStats(); }
 
+  void enableObjectCaching(bool enabled) { m_cacheObjectCode = enabled; }
+  bool isObjectCachingEnabled() const { return m_cacheObjectCode; }
+  void enableBitcodeCaching(bool enabled) { m_cacheBitcode = enabled; }
+  bool isBitcodeCachingEnabled() const { return m_cacheBitcode; }
+  void setPrimarySourcePath(const std::string &path) { m_primarySourcePath = path; }
+  const std::string &getPrimarySourcePath() const { return m_primarySourcePath; }
+  std::string getJitObjectTag() const;
+
   // IR generator
   bool generateIr(std::string path, bool emitAllFunctions = false);
   bool generateIr(const std::vector<std::string> &paths,
@@ -279,10 +287,13 @@ private:
 
   // Configuration
   std::string m_strideRoot;
+  std::string m_primarySourcePath;
   std::vector<std::string> m_includePaths;
   std::vector<ASTNode> m_trees;
   bool m_optimizeCode{true};
   bool m_moduleOptimized{false};
+  bool m_cacheObjectCode{true};
+  bool m_cacheBitcode{true};
 };
 
 template <typename T> T *StrideEnvironment::getGlobal(std::string varName) {

@@ -587,18 +587,15 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
           //  allocated and set to their default value
           type = state.typesMap["_SwitchType"];
           auto defaultNode = decl->getPropertyValue("default");
-          if (defaultNode) {
-            if (defaultNode->getNodeType() == AST::Switch) {
-              bool val = std::static_pointer_cast<ValueNode>(defaultNode)
-                             ->getSwitchValue();
-              defaultValue = llvm::ConstantInt::get(
-                  llvm::Type::getInt1Ty(*state.TheContext),
-                  llvm::APInt(1, val ? 1 : 0));
-            } else {
-              LOG_ERROR() << "Invalid default for switch" << std::endl;
-            }
+          if (defaultNode && defaultNode->getNodeType() == AST::Switch) {
+            bool val = std::static_pointer_cast<ValueNode>(defaultNode)
+                           ->getSwitchValue();
+            defaultValue = llvm::ConstantInt::get(
+                llvm::Type::getInt1Ty(*state.TheContext),
+                llvm::APInt(1, val ? 1 : 0));
           } else {
-            LOG_ERROR() << "No default for switch" << std::endl;
+            defaultValue = llvm::ConstantInt::get(
+                llvm::Type::getInt1Ty(*state.TheContext), llvm::APInt(1, 0));
           }
         } else if (decl->getEntityType() == "iterator") {
           LOG_INFO() << "iterator" << std::endl;
@@ -704,10 +701,40 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   if (callType == CallableType::Loop) {
     llvm::Value *EndCond = nullptr;
     if (terminateWhenName.size() > 0) {
-      EndCond = state.NamedValues[terminateWhenName].first;
-      if (EndCond->getType()->isPointerTy()) {
-        EndCond = state.Builder->CreateLoad(
-            llvm::Type::getInt1Ty(*state.TheContext), EndCond, "term_cond");
+      if (state.NamedValues.find(terminateWhenName) !=
+          state.NamedValues.end()) {
+        EndCond = state.NamedValues[terminateWhenName].first;
+        if (EndCond && EndCond->getType()->isPointerTy()) {
+          auto elemType =
+              state.NamedValues[terminateWhenName].second.has_value()
+                  ? state.NamedValues[terminateWhenName].second.value()
+                  : llvm::Type::getInt1Ty(*state.TheContext);
+          EndCond = state.Builder->CreateLoad(elemType, EndCond, "term_cond");
+        }
+      } else if (state.globalExists(terminateWhenName)) {
+        auto global = state.getGlobal(terminateWhenName);
+        auto elemType = global.second.has_value()
+                            ? global.second.value()
+                            : llvm::Type::getInt1Ty(*state.TheContext);
+        EndCond =
+            state.Builder->CreateLoad(elemType, global.first, "term_cond");
+      }
+      if (EndCond) {
+        if (EndCond->getType()->isIntegerTy() &&
+            !EndCond->getType()->isIntegerTy(1)) {
+          EndCond = state.Builder->CreateICmpNE(
+              EndCond, llvm::ConstantInt::get(EndCond->getType(), 0),
+              "term_bool");
+        } else if (EndCond->getType()->isDoubleTy()) {
+          EndCond = state.Builder->CreateFCmpONE(
+              EndCond,
+              llvm::ConstantFP::get(*state.TheContext, llvm::APFloat(0.0)),
+              "term_bool");
+        }
+      } else {
+        LOG_ERROR() << "terminateWhen variable '" << terminateWhenName
+                    << "' not found in loop NamedValues or globals"
+                    << std::endl;
       }
     } else if (itIncrement != 0) {
       auto *newIteratorValue = state.Builder->CreateAdd(
@@ -1975,6 +2002,69 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
           lhs = CallArgs.size() > 0 ? CallArgs[0].first : nullptr;
         }
         rhs = CallArgs.size() > 1 ? CallArgs[1].first : nullptr;
+      }
+
+      if (lhs && rhs) {
+        if (lhs->getType()->isIntegerTy() && rhs->getType()->isIntegerTy()) {
+          // If both are integers, match bitwidths and use the integer version of the platform instruction
+          unsigned lBits = lhs->getType()->getIntegerBitWidth();
+          unsigned rBits = rhs->getType()->getIntegerBitWidth();
+          if (lBits < rBits) {
+            lhs = state.Builder->CreateIntCast(lhs, rhs->getType(), true, "intcast");
+          } else if (rBits < lBits) {
+            rhs = state.Builder->CreateIntCast(rhs, lhs->getType(), true, "intcast");
+          }
+
+          if (instr.rfind("fcmp ogt", 0) == 0 || instr.rfind("fcmp ugt", 0) == 0) {
+            instr = "icmp sgt" + instr.substr(8);
+          } else if (instr.rfind("fcmp oge", 0) == 0 || instr.rfind("fcmp uge", 0) == 0) {
+            instr = "icmp sge" + instr.substr(8);
+          } else if (instr.rfind("fcmp olt", 0) == 0 || instr.rfind("fcmp ult", 0) == 0) {
+            instr = "icmp slt" + instr.substr(8);
+          } else if (instr.rfind("fcmp ole", 0) == 0 || instr.rfind("fcmp ule", 0) == 0) {
+            instr = "icmp sle" + instr.substr(8);
+          } else if (instr.rfind("fcmp oeq", 0) == 0 || instr.rfind("fcmp ueq", 0) == 0) {
+            instr = "icmp eq" + instr.substr(8);
+          } else if (instr.rfind("fcmp one", 0) == 0 || instr.rfind("fcmp une", 0) == 0) {
+            instr = "icmp ne" + instr.substr(8);
+          } else if (instr.rfind("fadd", 0) == 0) {
+            instr = "add" + instr.substr(4);
+          } else if (instr.rfind("fsub", 0) == 0) {
+            instr = "sub" + instr.substr(4);
+          } else if (instr.rfind("fmul", 0) == 0) {
+            instr = "mul" + instr.substr(4);
+          } else if (instr.rfind("fdiv", 0) == 0) {
+            instr = "sdiv" + instr.substr(4);
+          } else if (instr.rfind("frem", 0) == 0) {
+            instr = "srem" + instr.substr(4);
+          }
+        } else {
+          bool isFloatOp = (instr.rfind("fcmp", 0) == 0 ||
+                            instr.rfind("fadd", 0) == 0 ||
+                            instr.rfind("fsub", 0) == 0 ||
+                            instr.rfind("fmul", 0) == 0 ||
+                            instr.rfind("fdiv", 0) == 0 ||
+                            instr.rfind("frem", 0) == 0);
+          if (isFloatOp) {
+            if (lhs->getType()->isIntegerTy() && rhs->getType()->isFloatingPointTy()) {
+              lhs = state.Builder->CreateSIToFP(lhs, rhs->getType(), "sitofp");
+            } else if (rhs->getType()->isIntegerTy() && lhs->getType()->isFloatingPointTy()) {
+              rhs = state.Builder->CreateSIToFP(rhs, lhs->getType(), "sitofp");
+            } else if (lhs->getType() != rhs->getType()) {
+              if (lhs->getType()->isFloatTy() && rhs->getType()->isDoubleTy()) {
+                lhs = state.Builder->CreateFPExt(lhs, rhs->getType(), "fpext");
+              } else if (rhs->getType()->isFloatTy() && lhs->getType()->isDoubleTy()) {
+                rhs = state.Builder->CreateFPExt(rhs, lhs->getType(), "fpext");
+              }
+            }
+          } else {
+            if (lhs->getType()->isFloatingPointTy() && rhs->getType()->isIntegerTy()) {
+              lhs = state.Builder->CreateFPToSI(lhs, rhs->getType(), "fptosi");
+            } else if (rhs->getType()->isFloatingPointTy() && lhs->getType()->isIntegerTy()) {
+              rhs = state.Builder->CreateFPToSI(rhs, lhs->getType(), "fptosi");
+            }
+          }
+        }
       }
 
       if (instr.rfind("icmp sgt", 0) == 0) {
