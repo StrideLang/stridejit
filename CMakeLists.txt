@@ -93,6 +93,8 @@ message("${LLVM_DIR}")
     OrcJIT
     ExecutionEngine
     MIRParser
+    Object
+    BitReader
     ${LLVM_TARGETS_TO_BUILD}
   )
 endif()
@@ -170,6 +172,8 @@ if (STRIDEJIT_BUILD_LLVM)
     LLVMOrcJIT
     LLVMExecutionEngine
     LLVMMIRParser
+    LLVMObject
+    LLVMBitReader
     LLVMAArch64AsmParser
     LLVMAArch64CodeGen
     LLVMX86AsmParser
