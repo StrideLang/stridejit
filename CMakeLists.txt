@@ -113,7 +113,7 @@ add_library(StrideRuntime STATIC
   ${STRIDERUNTIME_SRC} ${STRIDERUNTIME_HEADERS}
   doc/runtime_library.md
 )
-target_include_directories(StrideRuntime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(StrideRuntime PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
 if (MSVC)
   # Enable function-level linking (/Gy) so the linker (/OPT:REF) strips unused runtime symbols
   target_compile_options(StrideRuntime PRIVATE /Gy)
