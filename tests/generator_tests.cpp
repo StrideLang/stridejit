@@ -182,6 +182,20 @@ TEST(StrideGeneratorTest, ResolveFunctionOverload_FromFile) {
   llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
       strenv.getFunction("TestDomain_process");
   EXPECT_TRUE((bool)EntrySym);
+
+  auto statePtr = strenv.allocateSharedState("TestDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+
+  strenv.setStateVar(statePtr.get(), "InInt", 10, std::nullopt, "TestDomain");
+  strenv.setStateVar(statePtr.get(), "InReal", 10.0, std::nullopt, "TestDomain");
+  strenv.invoke("TestDomain_process", args);
+
+  auto outInt = strenv.getStateVar<int>(statePtr.get(), "OutInt", std::nullopt, "TestDomain").value_or(0);
+  auto outReal = strenv.getStateVar<double>(statePtr.get(), "OutReal", std::nullopt, "TestDomain").value_or(0.0);
+
+  EXPECT_EQ(outInt, 12);
+  EXPECT_DOUBLE_EQ(outReal, 12.5);
 }
 
 } // namespace
