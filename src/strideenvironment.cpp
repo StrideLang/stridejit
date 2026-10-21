@@ -252,7 +252,6 @@ bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
   if (m_primarySourcePath.empty() && root && !root->getFilename().empty()) {
     m_primarySourcePath = root->getFilename();
   }
-  initializeJIT();
 
   prepareTree(root);
 
@@ -286,6 +285,9 @@ bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
                                            "prepared_JIT");
   }
   m_trees.push_back(root);
+
+  initializeJIT();
+
   StrideGenerator::compile(root, globalScope, mStrideEnv);
 
   if (emitAllFunctions) {
@@ -1357,9 +1359,9 @@ bool StrideEnvironment::compileInMemory() {
   llvm::orc::MangleAndInterner Mangle(JIT->getExecutionSession(),
                                       JIT->getDataLayout());
   auto regSym = [&](const char *name, auto *fnPtr) {
-    M[Mangle(name)] = llvm::orc::ExecutorSymbolDef(
-        llvm::orc::ExecutorAddr::fromPtr(fnPtr),
-        llvm::JITSymbolFlags::Exported);
+    M[Mangle(name)] =
+        llvm::orc::ExecutorSymbolDef(llvm::orc::ExecutorAddr::fromPtr(fnPtr),
+                                     llvm::JITSymbolFlags::Exported);
   };
   regSym("__stride_Greater_d_dd", &__stride_Greater_d_dd);
   regSym("__stride_string_substring", &__stride_string_substring);
@@ -1750,8 +1752,7 @@ StrideEnvironment::getStateVar<int8_t>(const void *, const std::string &,
                                        const std::string &) const;
 template bool StrideEnvironment::setStateVar<int8_t>(void *,
                                                      const std::string &,
-                                                     int8_t,
-                                                     std::optional<int>,
+                                                     int8_t, std::optional<int>,
                                                      const std::string &);
 
 template std::optional<uint8_t>
@@ -1805,14 +1806,13 @@ template bool StrideEnvironment::setStateVar<std::string>(void *,
                                                           const std::string &);
 
 template std::optional<StrideStringView>
-StrideEnvironment::getStateVar<StrideStringView>(const void *, const std::string &,
+StrideEnvironment::getStateVar<StrideStringView>(const void *,
+                                                 const std::string &,
                                                  std::optional<int>,
                                                  const std::string &) const;
-template bool StrideEnvironment::setStateVar<StrideStringView>(void *,
-                                                               const std::string &,
-                                                               StrideStringView,
-                                                               std::optional<int>,
-                                                               const std::string &);
+template bool StrideEnvironment::setStateVar<StrideStringView>(
+    void *, const std::string &, StrideStringView, std::optional<int>,
+    const std::string &);
 
 bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
                                        const std::string &targetTriple,

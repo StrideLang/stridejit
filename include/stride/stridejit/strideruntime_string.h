@@ -22,9 +22,8 @@ struct StrideStringView {
   int32_t length{0};
 
   std::string toString() const {
-    return (data && length > 0)
-               ? std::string(data, static_cast<size_t>(length))
-               : std::string();
+    return (data && length > 0) ? std::string(data, static_cast<size_t>(length))
+                                : std::string();
   }
 
   bool operator==(const StrideStringView &other) const {
@@ -53,9 +52,7 @@ struct StrideStringView {
     return toString() == other;
   }
 
-  bool operator!=(const char *other) const {
-    return !(*this == other);
-  }
+  bool operator!=(const char *other) const { return !(*this == other); }
 };
 
 // ABI contract: the JIT's _StringType is the LLVM struct { ptr, i32 }. The
@@ -158,14 +155,15 @@ STRIDE_EXPORT int64_t __stride_string_tokenize(
     strd::StrideStringView src, strd::StrideStringView delim,
     strd::StrideStringView *outTokens, int64_t maxTokens, bool *outOverflow);
 
-STRIDE_EXPORT strd::StrideStringView __stride_string_token_at(
-    strd::StrideStringView src, strd::StrideStringView delim, int64_t index);
+STRIDE_EXPORT strd::StrideStringView
+__stride_string_token_at(strd::StrideStringView src,
+                         strd::StrideStringView delim, int64_t index);
 
-STRIDE_EXPORT int64_t __stride_string_token_count(
-    strd::StrideStringView src, strd::StrideStringView delim);
+STRIDE_EXPORT int64_t __stride_string_token_count(strd::StrideStringView src,
+                                                  strd::StrideStringView delim);
 
-STRIDE_EXPORT strd::StrideStringView __stride_string_repeat(
-    strd::StrideStringView str, int64_t count);
+STRIDE_EXPORT strd::StrideStringView
+__stride_string_repeat(strd::StrideStringView str, int64_t count);
 
 STRIDE_EXPORT void __stride_string_println(strd::StrideStringView str);
 
@@ -193,12 +191,12 @@ STRIDE_EXPORT void
 __stride_jit_string_trim_right(const strd::StrideStringView *src,
                                const strd::StrideStringView *chars,
                                strd::StrideStringView *out);
-STRIDE_EXPORT int32_t __stride_jit_string_find(
-    const strd::StrideStringView *haystack,
-    const strd::StrideStringView *needle, int32_t start);
-STRIDE_EXPORT int32_t __stride_jit_string_find_last(
-    const strd::StrideStringView *haystack,
-    const strd::StrideStringView *needle);
+STRIDE_EXPORT int32_t
+__stride_jit_string_find(const strd::StrideStringView *haystack,
+                         const strd::StrideStringView *needle, int32_t start);
+STRIDE_EXPORT int32_t
+__stride_jit_string_find_last(const strd::StrideStringView *haystack,
+                              const strd::StrideStringView *needle);
 STRIDE_EXPORT bool
 __stride_jit_string_contains(const strd::StrideStringView *haystack,
                              const strd::StrideStringView *needle);
@@ -228,22 +226,22 @@ STRIDE_EXPORT void __stride_jit_string_tokenize(
     const strd::StrideStringView *src, const strd::StrideStringView *delim,
     strd::StrideStringView *outTokens, int32_t maxTokens, int32_t *outCount,
     bool *outOverflow);
-STRIDE_EXPORT void __stride_jit_string_token_at(
-    const strd::StrideStringView *src, const strd::StrideStringView *delim,
-    int32_t index, strd::StrideStringView *out);
+STRIDE_EXPORT void
+__stride_jit_string_token_at(const strd::StrideStringView *src,
+                             const strd::StrideStringView *delim, int32_t index,
+                             strd::StrideStringView *out);
 STRIDE_EXPORT int32_t __stride_jit_string_token_count(
     const strd::StrideStringView *src, const strd::StrideStringView *delim);
 STRIDE_EXPORT void
 __stride_jit_string_concat_n(const strd::StrideStringView *views, int32_t count,
                              strd::StrideStringView *out);
-STRIDE_EXPORT void
-__stride_jit_string_repeat(const strd::StrideStringView *str, int32_t count,
-                           strd::StrideStringView *out);
-STRIDE_EXPORT void
-__stride_jit_string_format(const strd::StrideStringView *fmt,
-                           const strd::StrideFormatArg *args, int32_t count,
-                           strd::StrideStringView *out);
-
+STRIDE_EXPORT void __stride_jit_string_repeat(const strd::StrideStringView *str,
+                                              int32_t count,
+                                              strd::StrideStringView *out);
+STRIDE_EXPORT void __stride_jit_string_format(const strd::StrideStringView *fmt,
+                                              const strd::StrideFormatArg *args,
+                                              int32_t count,
+                                              strd::StrideStringView *out);
 }
 
 #endif // STRIDERUNTIME_STRING_H

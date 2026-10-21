@@ -36,14 +36,15 @@ TEST(Basic, Assignment) {
         std::static_pointer_cast<strd::ValueNode>(left)->getRealValue());
   }
   if (right->getNodeType() == strd::AST::Entity) {
-    strenv.mStrideEnv.NamedValues[std::static_pointer_cast<strd::EntityNode>(right)
-                                 ->getName()] = n1->codegen(strenv.mStrideEnv);
+    strenv.mStrideEnv
+        .NamedValues[std::static_pointer_cast<strd::EntityNode>(right)
+                         ->getName()] = n1->codegen(strenv.mStrideEnv);
   }
   // llvm::Type *type =strenv.state.NamedValues["G"].second;
 
   EXPECT_TRUE(strenv.mStrideEnv.NamedValues["G"].second.value()->isDoubleTy());
-  llvm::ConstantFP *CFP =
-      llvm::dyn_cast<llvm::ConstantFP>(strenv.mStrideEnv.NamedValues["G"].first);
+  llvm::ConstantFP *CFP = llvm::dyn_cast<llvm::ConstantFP>(
+      strenv.mStrideEnv.NamedValues["G"].first);
   EXPECT_NE(CFP, nullptr);
   EXPECT_EQ(CFP->getValue().convertToDouble(), 3.3);
 }
@@ -141,9 +142,10 @@ TEST(Basic, PassThru) {
 
   strenv.setStateVar(statePtr.get(), "In", 1, std::nullopt, "TestDomain");
   strenv.invoke("TestDomain_process", args);
-  double out =
-      strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "TestDomain")
-          .value_or(0);
+  double out = strenv
+                   .getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                         "TestDomain")
+                   .value_or(0);
 
   EXPECT_FLOAT_EQ(out, 1.0);
 }
@@ -165,7 +167,8 @@ TEST(Basic, DomainVariable) {
   strenv.setStateVar(statePtr.get(), "In", 6, std::nullopt, "TestDomain");
   strenv.invoke("TestDomain_process", args);
 
-  auto A = strenv.getStateVar<int32_t>(statePtr.get(), "A", std::nullopt, "TestDomain");
+  auto A = strenv.getStateVar<int32_t>(statePtr.get(), "A", std::nullopt,
+                                       "TestDomain");
   EXPECT_TRUE(A.has_value());
   EXPECT_EQ(*A, 6);
 }
@@ -188,7 +191,8 @@ TEST(JIT, BlockDefaults) {
   strenv.invoke("TestDomain_init", args);
   strenv.invoke("TestDomain_process", args);
 
-  auto out = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "TestDomain");
+  auto out = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                         "TestDomain");
   EXPECT_TRUE(out.has_value());
   EXPECT_EQ(out.value_or(0), 6);
 }
@@ -206,20 +210,26 @@ TEST(JIT, DomainInit) {
   void *args[] = {statePtr.get()};
 
   strenv.invoke("RootDomain_init", args);
-  auto In = strenv.getStateVar<int32_t>(statePtr.get(), "In", std::nullopt, "RootDomain");
-  auto In2 = strenv.getStateVar<int32_t>(statePtr.get(), "In2", std::nullopt, "RootDomain");
+  auto In = strenv.getStateVar<int32_t>(statePtr.get(), "In", std::nullopt,
+                                        "RootDomain");
+  auto In2 = strenv.getStateVar<int32_t>(statePtr.get(), "In2", std::nullopt,
+                                         "RootDomain");
   EXPECT_EQ(In.value_or(0), 3);
   EXPECT_EQ(In2.value_or(0), 10);
 
   strenv.invoke("RootDomain_process", args);
-  In = strenv.getStateVar<int32_t>(statePtr.get(), "In", std::nullopt, "RootDomain");
-  In2 = strenv.getStateVar<int32_t>(statePtr.get(), "In2", std::nullopt, "RootDomain");
+  In = strenv.getStateVar<int32_t>(statePtr.get(), "In", std::nullopt,
+                                   "RootDomain");
+  In2 = strenv.getStateVar<int32_t>(statePtr.get(), "In2", std::nullopt,
+                                    "RootDomain");
   EXPECT_EQ(In.value_or(0), 5);
   EXPECT_EQ(In2.value_or(0), 11);
 
   strenv.invoke("RootDomain_init", args);
-  In = strenv.getStateVar<int32_t>(statePtr.get(), "In", std::nullopt, "RootDomain");
-  In2 = strenv.getStateVar<int32_t>(statePtr.get(), "In2", std::nullopt, "RootDomain");
+  In = strenv.getStateVar<int32_t>(statePtr.get(), "In", std::nullopt,
+                                   "RootDomain");
+  In2 = strenv.getStateVar<int32_t>(statePtr.get(), "In2", std::nullopt,
+                                    "RootDomain");
   EXPECT_EQ(In.value_or(0), 3);
   EXPECT_EQ(In2.value_or(0), 10);
 }
@@ -242,13 +252,19 @@ TEST(JIT, ExternalFunctions) {
     strenv.setStateVar(statePtr.get(), "Out", true, std::nullopt, "RootDomain");
     strenv.invoke("RootDomain_init", args);
     // out should get initialized to false
-    auto out = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(true);
+    auto out = strenv
+                   .getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                         "RootDomain")
+                   .value_or(true);
     EXPECT_EQ(out, false);
   }
 
   strenv.setStateVar(statePtr.get(), "Out", false, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  auto out = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(false);
+  auto out = strenv
+                 .getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                       "RootDomain")
+                 .value_or(false);
   EXPECT_EQ(out, true);
 }
 
@@ -286,13 +302,19 @@ TEST(JIT, Bundles) {
 
   strenv.invoke("RootDomain_process", args);
 
-  auto In1 = strenv.getStateVar<double>(statePtr.get(), "In", 1, "RootDomain").value_or(0.0);
-  auto In2 = strenv.getStateVar<double>(statePtr.get(), "In", 2, "RootDomain").value_or(0.0);
-  auto In3 = strenv.getStateVar<double>(statePtr.get(), "In", 3, "RootDomain").value_or(0.0);
+  auto In1 = strenv.getStateVar<double>(statePtr.get(), "In", 1, "RootDomain")
+                 .value_or(0.0);
+  auto In2 = strenv.getStateVar<double>(statePtr.get(), "In", 2, "RootDomain")
+                 .value_or(0.0);
+  auto In3 = strenv.getStateVar<double>(statePtr.get(), "In", 3, "RootDomain")
+                 .value_or(0.0);
 
-  auto Out2 = strenv.getStateVar<double>(statePtr.get(), "Out", 2, "RootDomain").value_or(0.0);
-  auto Out3 = strenv.getStateVar<double>(statePtr.get(), "Out", 3, "RootDomain").value_or(0.0);
-  auto Out4 = strenv.getStateVar<double>(statePtr.get(), "Out", 4, "RootDomain").value_or(0.0);
+  auto Out2 = strenv.getStateVar<double>(statePtr.get(), "Out", 2, "RootDomain")
+                  .value_or(0.0);
+  auto Out3 = strenv.getStateVar<double>(statePtr.get(), "Out", 3, "RootDomain")
+                  .value_or(0.0);
+  auto Out4 = strenv.getStateVar<double>(statePtr.get(), "Out", 4, "RootDomain")
+                  .value_or(0.0);
 
   // Stride code: In[1] >> Out[2];
   EXPECT_DOUBLE_EQ(In1, Out2);
@@ -322,9 +344,12 @@ TEST(JIT, BundleDynamicIndex) {
 
   strenv.invoke("RootDomain_process", args);
 
-  auto Out2 = strenv.getStateVar<double>(statePtr.get(), "Out", 2, "RootDomain").value_or(0.0);
-  auto Out3 = strenv.getStateVar<double>(statePtr.get(), "Out", 3, "RootDomain").value_or(0.0);
-  auto Out4 = strenv.getStateVar<double>(statePtr.get(), "Out", 4, "RootDomain").value_or(0.0);
+  auto Out2 = strenv.getStateVar<double>(statePtr.get(), "Out", 2, "RootDomain")
+                  .value_or(0.0);
+  auto Out3 = strenv.getStateVar<double>(statePtr.get(), "Out", 3, "RootDomain")
+                  .value_or(0.0);
+  auto Out4 = strenv.getStateVar<double>(statePtr.get(), "Out", 4, "RootDomain")
+                  .value_or(0.0);
 
   // Stride code: In[Index] >> Out[3];
   EXPECT_DOUBLE_EQ(Out3, 4.2);
@@ -342,9 +367,12 @@ TEST(JIT, BundleDynamicIndex) {
 
   strenv.invoke("RootDomain_process", args);
 
-  Out3 = strenv.getStateVar<double>(statePtr.get(), "Out", 3, "RootDomain").value_or(0.0);
-  Out4 = strenv.getStateVar<double>(statePtr.get(), "Out", 4, "RootDomain").value_or(0.0);
-  auto Out5 = strenv.getStateVar<double>(statePtr.get(), "Out", 5, "RootDomain").value_or(0.0);
+  Out3 = strenv.getStateVar<double>(statePtr.get(), "Out", 3, "RootDomain")
+             .value_or(0.0);
+  Out4 = strenv.getStateVar<double>(statePtr.get(), "Out", 4, "RootDomain")
+             .value_or(0.0);
+  auto Out5 = strenv.getStateVar<double>(statePtr.get(), "Out", 5, "RootDomain")
+                  .value_or(0.0);
 
   // Stride code: In[Index] >> Out[3];
   EXPECT_DOUBLE_EQ(Out3, 9.1);
@@ -366,7 +394,7 @@ TEST(JIT, Stream) {
   auto statePtr = strenv.allocateSharedState("TestDomain");
   ASSERT_NE(statePtr.get(), nullptr);
   void *args[] = {statePtr.get()};
-  
+
   strenv.invoke("TestDomain_process", args);
 }
 
@@ -385,17 +413,26 @@ TEST(JIT, IO) {
 
   strenv.setStateVar(statePtr.get(), "In", 0.0, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  auto out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  auto out = strenv
+                 .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                      "RootDomain")
+                 .value_or(0.0);
   EXPECT_EQ(out, 1.0);
 
   strenv.setStateVar(statePtr.get(), "In", 3.14159, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  out = strenv
+            .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                 "RootDomain")
+            .value_or(0.0);
   EXPECT_FLOAT_EQ(out, cos(3.14159));
 
   strenv.setStateVar(statePtr.get(), "In", 1.0, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  out = strenv
+            .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                 "RootDomain")
+            .value_or(0.0);
   EXPECT_FLOAT_EQ(out, cos(1.0));
 }
 
@@ -413,7 +450,10 @@ TEST(JIT, MathFunction) {
   void *args[] = {statePtr.get()};
 
   strenv.invoke("RootDomain_process", args);
-  auto out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  auto out = strenv
+                 .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                      "RootDomain")
+                 .value_or(0.0);
   EXPECT_EQ(out, 1.0);
 }
 
@@ -432,17 +472,26 @@ TEST(JIT, TwoStreams) {
 
   strenv.setStateVar(statePtr.get(), "In", 0.0, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  auto out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  auto out = strenv
+                 .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                      "RootDomain")
+                 .value_or(0.0);
   EXPECT_EQ(out, cos(cos(0.0)));
 
   strenv.setStateVar(statePtr.get(), "In", 3.14159, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  out = strenv
+            .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                 "RootDomain")
+            .value_or(0.0);
   EXPECT_FLOAT_EQ(out, cos(cos(3.14159)));
 
   strenv.setStateVar(statePtr.get(), "In", 1.0, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  out = strenv
+            .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                 "RootDomain")
+            .value_or(0.0);
   EXPECT_FLOAT_EQ(out, cos(cos(1.0)));
 }
 
@@ -460,12 +509,18 @@ TEST(JIT, List) {
 
   strenv.setStateVar(statePtr.get(), "In", 0.0, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  auto out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  auto out = strenv
+                 .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                      "RootDomain")
+                 .value_or(0.0);
   EXPECT_EQ(out, 0.0);
 
   strenv.setStateVar(statePtr.get(), "In", 10.0, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  out = strenv
+            .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                 "RootDomain")
+            .value_or(0.0);
   EXPECT_EQ(out, 1.0);
 }
 
@@ -483,17 +538,26 @@ TEST(JIT, SwitchOut) {
 
   strenv.setStateVar(statePtr.get(), "In", 0.0, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  auto out = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(false);
+  auto out = strenv
+                 .getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                       "RootDomain")
+                 .value_or(false);
   EXPECT_FALSE(out);
 
   strenv.setStateVar(statePtr.get(), "In", 10.0, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  out = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(false);
+  out = strenv
+            .getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                  "RootDomain")
+            .value_or(false);
   EXPECT_TRUE(out);
 
   strenv.setStateVar(statePtr.get(), "In", 1.0, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  out = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(false);
+  out = strenv
+            .getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                  "RootDomain")
+            .value_or(false);
   EXPECT_FALSE(out);
 }
 
@@ -511,7 +575,10 @@ TEST(JIT, Module) {
   void *args[] = {statePtr.get()};
 
   strenv.invoke("RootDomain_process", args);
-  auto out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  auto out = strenv
+                 .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                      "RootDomain")
+                 .value_or(0.0);
   EXPECT_EQ(out, 5);
 }
 
@@ -530,7 +597,10 @@ TEST(JIT, Domains) {
 
   strenv.setStateVar(statePtr.get(), "In", 1.0, std::nullopt, "TestDomain");
   strenv.invoke("TestDomain_process", args);
-  auto out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "TestDomain").value_or(0.0);
+  auto out = strenv
+                 .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                      "TestDomain")
+                 .value_or(0.0);
   EXPECT_EQ(out, 1);
 }
 
@@ -565,7 +635,10 @@ TEST(JIT, ModuleInternal) {
   void *args[] = {statePtr.get()};
 
   strenv.invoke("TestDomain_process", args);
-  auto out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "TestDomain").value_or(0.0);
+  auto out = strenv
+                 .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                      "TestDomain")
+                 .value_or(0.0);
   EXPECT_EQ(out, 5);
 }
 
@@ -583,7 +656,10 @@ TEST(JIT, Reaction) {
   void *args[] = {statePtr.get()};
 
   strenv.invoke("TestDomain_process", args);
-  auto Out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "TestDomain").value_or(0.0);
+  auto Out = strenv
+                 .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                      "TestDomain")
+                 .value_or(0.0);
   EXPECT_EQ(Out, 3);
 }
 
@@ -591,7 +667,8 @@ TEST(JIT, ReactionSingleStream) {
 
   strd::StrideEnvironment strenv;
 
-  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "reaction_single_stream.stride");
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                               "reaction_single_stream.stride");
   EXPECT_TRUE(ret);
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
@@ -601,7 +678,10 @@ TEST(JIT, ReactionSingleStream) {
   void *args[] = {statePtr.get()};
 
   strenv.invoke("TestDomain_process", args);
-  auto Out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "TestDomain").value_or(0.0);
+  auto Out = strenv
+                 .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                      "TestDomain")
+                 .value_or(0.0);
   EXPECT_EQ(Out, 3);
 }
 
@@ -621,11 +701,16 @@ TEST(JIT, IntegerType) {
   void *args[] = {statePtr.get()};
 
   strenv.invoke("RootDomain_process", args);
-  auto S = strenv.getStateVar<double>(statePtr.get(), "S", std::nullopt, "RootDomain").value_or(0.0);
+  auto S =
+      strenv
+          .getStateVar<double>(statePtr.get(), "S", std::nullopt, "RootDomain")
+          .value_or(0.0);
   EXPECT_EQ(S, 0);
 
   strenv.invoke("RootDomain_process", args);
-  S = strenv.getStateVar<double>(statePtr.get(), "S", std::nullopt, "RootDomain").value_or(0.0);
+  S = strenv
+          .getStateVar<double>(statePtr.get(), "S", std::nullopt, "RootDomain")
+          .value_or(0.0);
   EXPECT_EQ(S, 3);
 }
 
@@ -644,11 +729,17 @@ TEST(JIT, ReactionCondition) {
   void *args[] = {statePtr.get()};
 
   strenv.invoke("TestDomain_process", args);
-  auto Out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "TestDomain").value_or(0.0);
+  auto Out = strenv
+                 .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                      "TestDomain")
+                 .value_or(0.0);
   EXPECT_EQ(Out, 0);
 
   strenv.invoke("TestDomain_process", args);
-  Out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "TestDomain").value_or(0.0);
+  Out = strenv
+            .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                 "TestDomain")
+            .value_or(0.0);
   EXPECT_EQ(Out, 3);
 }
 
@@ -666,14 +757,16 @@ TEST(JIT, ReactionTerminateWhen) {
   void *args[] = {statePtr.get()};
 
   strenv.invoke("TestDomain_process", args);
-  auto Out = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
-                                        "TestDomain")
+  auto Out = strenv
+                 .getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                       "TestDomain")
                  .value_or(0);
   EXPECT_EQ(Out, 2);
 
-  auto Done = strenv.getStateVar<bool>(statePtr.get(), "Done", std::nullopt,
-                                       "TestDomain")
-                  .value_or(false);
+  auto Done =
+      strenv
+          .getStateVar<bool>(statePtr.get(), "Done", std::nullopt, "TestDomain")
+          .value_or(false);
   EXPECT_TRUE(Done);
 }
 
@@ -693,31 +786,52 @@ TEST(JIT, Reset) {
   strenv.invoke("RootDomain_init", args);
 
   strenv.invoke("RootDomain_process", args);
-  auto In = strenv.getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain").value_or(0.0);
+  auto In =
+      strenv
+          .getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain")
+          .value_or(0.0);
   EXPECT_EQ(In, 5.0);
 
   strenv.invoke("RootDomain_process", args);
-  In = strenv.getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain").value_or(0.0);
+  In =
+      strenv
+          .getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain")
+          .value_or(0.0);
   EXPECT_EQ(In, 7.0);
 
   strenv.invoke("RootDomain_process", args);
-  In = strenv.getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain").value_or(0.0);
+  In =
+      strenv
+          .getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain")
+          .value_or(0.0);
   EXPECT_EQ(In, 9.0);
 
   strenv.invoke("RootDomain_process", args);
-  In = strenv.getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain").value_or(0.0);
+  In =
+      strenv
+          .getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain")
+          .value_or(0.0);
   EXPECT_EQ(In, 11.0);
 
   strenv.invoke("RootDomain_process", args);
-  In = strenv.getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain").value_or(0.0);
+  In =
+      strenv
+          .getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain")
+          .value_or(0.0);
   EXPECT_EQ(In, 13.0);
 
   strenv.invoke("RootDomain_process", args);
-  In = strenv.getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain").value_or(0.0);
+  In =
+      strenv
+          .getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain")
+          .value_or(0.0);
   EXPECT_EQ(In, 5.0);
 
   strenv.invoke("RootDomain_process", args);
-  In = strenv.getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain").value_or(0.0);
+  In =
+      strenv
+          .getStateVar<double>(statePtr.get(), "In", std::nullopt, "RootDomain")
+          .value_or(0.0);
   EXPECT_EQ(In, 7.0);
 }
 
@@ -736,8 +850,12 @@ TEST(JIT, LiteralModuleInput) {
   void *args[] = {statePtr.get()};
 
   strenv.invoke("TestDomain_process", args);
-  auto out0 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", 0, "TestDomain").value_or(0);
-  auto out1 = strenv.getStateVar<int32_t>(statePtr.get(), "Out", 1, "TestDomain").value_or(0);
+  auto out0 =
+      strenv.getStateVar<int32_t>(statePtr.get(), "Out", 0, "TestDomain")
+          .value_or(0);
+  auto out1 =
+      strenv.getStateVar<int32_t>(statePtr.get(), "Out", 1, "TestDomain")
+          .value_or(0);
   EXPECT_EQ(out0, 5);
   EXPECT_EQ(out1, 8);
 }
@@ -758,13 +876,19 @@ TEST(JIT, TypecastStream) {
 
   strenv.invoke("RootDomain_process", args);
 
-  auto Int0 = strenv.getStateVar<double>(statePtr.get(), "Int", 0, "RootDomain").value_or(0.0);
-  auto Int1 = strenv.getStateVar<double>(statePtr.get(), "Int", 1, "RootDomain").value_or(0.0);
+  auto Int0 = strenv.getStateVar<double>(statePtr.get(), "Int", 0, "RootDomain")
+                  .value_or(0.0);
+  auto Int1 = strenv.getStateVar<double>(statePtr.get(), "Int", 1, "RootDomain")
+                  .value_or(0.0);
   EXPECT_EQ(Int0, 1);
   EXPECT_EQ(Int1, 4);
 
-  auto Real0 = strenv.getStateVar<double>(statePtr.get(), "Real", 0, "RootDomain").value_or(0.0);
-  auto Real1 = strenv.getStateVar<double>(statePtr.get(), "Real", 1, "RootDomain").value_or(0.0);
+  auto Real0 =
+      strenv.getStateVar<double>(statePtr.get(), "Real", 0, "RootDomain")
+          .value_or(0.0);
+  auto Real1 =
+      strenv.getStateVar<double>(statePtr.get(), "Real", 1, "RootDomain")
+          .value_or(0.0);
   EXPECT_DOUBLE_EQ(Real0, 3.0);
   EXPECT_DOUBLE_EQ(Real1, 5.0);
 }
@@ -786,12 +910,18 @@ TEST(JIT, TypecastList) {
   strenv.setStateVar(statePtr.get(), "InReal", 5.0, std::nullopt, "TestDomain");
   strenv.invoke("TestDomain_process", args);
 
-  auto compReal = strenv.getStateVar<double>(statePtr.get(), "CompReal", std::nullopt, "TestDomain").value_or(0.0);
+  auto compReal = strenv
+                      .getStateVar<bool>(statePtr.get(), "CompReal",
+                                         std::nullopt, "TestDomain")
+                      .value_or(false);
   EXPECT_FALSE(compReal != 0.0);
 
   strenv.setStateVar(statePtr.get(), "InReal", 0.0, std::nullopt, "TestDomain");
   strenv.invoke("TestDomain_process", args);
-  compReal = strenv.getStateVar<double>(statePtr.get(), "CompReal", std::nullopt, "TestDomain").value_or(0.0);
+  compReal = strenv
+                 .getStateVar<bool>(statePtr.get(), "CompReal", std::nullopt,
+                                    "TestDomain")
+                 .value_or(false);
   EXPECT_TRUE(compReal != 0.0);
 }
 
@@ -811,16 +941,20 @@ TEST(JIT, BundleDefaults) {
 
   strenv.invoke("RootDomain_init", args);
 
-  auto A0 = strenv.getStateVar<double>(statePtr.get(), "A", 0, "RootDomain").value_or(0.0);
-  auto A1 = strenv.getStateVar<double>(statePtr.get(), "A", 1, "RootDomain").value_or(0.0);
+  auto A0 = strenv.getStateVar<double>(statePtr.get(), "A", 0, "RootDomain")
+                .value_or(0.0);
+  auto A1 = strenv.getStateVar<double>(statePtr.get(), "A", 1, "RootDomain")
+                .value_or(0.0);
 
   EXPECT_EQ(A0, 5);
   EXPECT_EQ(A1, 2);
 
   strenv.invoke("RootDomain_process", args);
 
-  auto out0 = strenv.getStateVar<double>(statePtr.get(), "Out", 0, "RootDomain").value_or(0.0);
-  auto out1 = strenv.getStateVar<double>(statePtr.get(), "Out", 1, "RootDomain").value_or(0.0);
+  auto out0 = strenv.getStateVar<double>(statePtr.get(), "Out", 0, "RootDomain")
+                  .value_or(0.0);
+  auto out1 = strenv.getStateVar<double>(statePtr.get(), "Out", 1, "RootDomain")
+                  .value_or(0.0);
   EXPECT_EQ(out0, 10);
   EXPECT_EQ(out1, 13);
 }
@@ -843,8 +977,14 @@ TEST(JIT, Polymorphism) {
   strenv.setStateVar(statePtr.get(), "InReal", 5.0, std::nullopt, "TestDomain");
   strenv.invoke("TestDomain_process", args);
 
-  auto compInt = strenv.getStateVar<double>(statePtr.get(), "CompInt", std::nullopt, "TestDomain").value_or(0.0);
-  auto compReal = strenv.getStateVar<double>(statePtr.get(), "CompReal", std::nullopt, "TestDomain").value_or(0.0);
+  auto compInt = strenv
+                     .getStateVar<double>(statePtr.get(), "CompInt",
+                                          std::nullopt, "TestDomain")
+                     .value_or(0.0);
+  auto compReal = strenv
+                      .getStateVar<double>(statePtr.get(), "CompReal",
+                                           std::nullopt, "TestDomain")
+                      .value_or(0.0);
 
   EXPECT_FALSE(compInt != 0.0);
   EXPECT_FALSE(compReal != 0.0);
@@ -852,9 +992,15 @@ TEST(JIT, Polymorphism) {
   strenv.setStateVar(statePtr.get(), "InInt", 0, std::nullopt, "TestDomain");
   strenv.setStateVar(statePtr.get(), "InReal", 0.0, std::nullopt, "TestDomain");
   strenv.invoke("TestDomain_process", args);
-  
-  compInt = strenv.getStateVar<double>(statePtr.get(), "CompInt", std::nullopt, "TestDomain").value_or(0.0);
-  compReal = strenv.getStateVar<double>(statePtr.get(), "CompReal", std::nullopt, "TestDomain").value_or(0.0);
+
+  compInt = strenv
+                .getStateVar<double>(statePtr.get(), "CompInt", std::nullopt,
+                                     "TestDomain")
+                .value_or(0.0);
+  compReal = strenv
+                 .getStateVar<double>(statePtr.get(), "CompReal", std::nullopt,
+                                      "TestDomain")
+                 .value_or(0.0);
   EXPECT_TRUE(compInt != 0.0);
   EXPECT_TRUE(compReal != 0.0);
 }
@@ -875,11 +1021,14 @@ TEST(JIT, Loop) {
   int32_t List[20] = {1000, 1, 1, 1, 1, 1, 1, 1, 1, 1,
                       1,    1, 1, 1, 1, 1, 1, 1, 1, 100};
   for (int i = 0; i < 20; ++i) {
-      strenv.setStateVar(statePtr.get(), "List", List[i], i, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "List", List[i], i, "RootDomain");
   }
 
   strenv.invoke("RootDomain_process", args);
-  auto Out = strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0);
+  auto Out = strenv
+                 .getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                       "RootDomain")
+                 .value_or(0);
   EXPECT_EQ(Out, 1118);
 }
 
@@ -898,8 +1047,10 @@ TEST(JIT, PortPropertySize) {
   void *args[] = {statePtr.get()};
 
   strenv.invoke("RootDomain_process", args);
-  auto Out0 = strenv.getStateVar<double>(statePtr.get(), "Out", 0, "RootDomain").value_or(0.0);
-  auto Out1 = strenv.getStateVar<double>(statePtr.get(), "Out", 1, "RootDomain").value_or(0.0);
+  auto Out0 = strenv.getStateVar<double>(statePtr.get(), "Out", 0, "RootDomain")
+                  .value_or(0.0);
+  auto Out1 = strenv.getStateVar<double>(statePtr.get(), "Out", 1, "RootDomain")
+                  .value_or(0.0);
 
   EXPECT_EQ(Out0, 32);
   EXPECT_EQ(Out1, 8);
@@ -924,9 +1075,18 @@ TEST(JIT, PlatformFunction) {
 
   strenv.invoke("TestDomain_process", args);
 
-  auto OutInt = strenv.getStateVar<double>(statePtr.get(), "OutInt", std::nullopt, "TestDomain").value_or(0.0);
-  auto OutReal = strenv.getStateVar<double>(statePtr.get(), "OutReal", std::nullopt, "TestDomain").value_or(0.0);
-  auto OutWrapped = strenv.getStateVar<double>(statePtr.get(), "OutWrapped", std::nullopt, "TestDomain").value_or(0.0);
+  auto OutInt = strenv
+                    .getStateVar<double>(statePtr.get(), "OutInt", std::nullopt,
+                                         "TestDomain")
+                    .value_or(0.0);
+  auto OutReal = strenv
+                     .getStateVar<double>(statePtr.get(), "OutReal",
+                                          std::nullopt, "TestDomain")
+                     .value_or(0.0);
+  auto OutWrapped = strenv
+                        .getStateVar<double>(statePtr.get(), "OutWrapped",
+                                             std::nullopt, "TestDomain")
+                        .value_or(0.0);
 
   EXPECT_EQ(OutInt, 2);
   EXPECT_DOUBLE_EQ(OutReal, 5.5);
@@ -949,9 +1109,11 @@ TEST(JIT, ModuleProperties) {
 
   strenv.setStateVar(statePtr.get(), "In", 2.0, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  
-  auto out0 = strenv.getStateVar<double>(statePtr.get(), "Out", 0, "RootDomain").value_or(0.0);
-  auto out1 = strenv.getStateVar<double>(statePtr.get(), "Out", 1, "RootDomain").value_or(0.0);
+
+  auto out0 = strenv.getStateVar<double>(statePtr.get(), "Out", 0, "RootDomain")
+                  .value_or(0.0);
+  auto out1 = strenv.getStateVar<double>(statePtr.get(), "Out", 1, "RootDomain")
+                  .value_or(0.0);
 
   EXPECT_EQ(out0, 6);
   EXPECT_EQ(out1, 8);
@@ -1056,8 +1218,8 @@ TEST(JIT, FunctionStandaloneReactionTerminateWhen) {
       strd::CodeAnalysis::getStateStructInformation({}, tree);
 
   strd::ScopeStack scope;
-  auto funcDecl = strd::ASTQuery::findDeclarationByName(
-      "ReactionTerminateWhen", scope, tree);
+  auto funcDecl = strd::ASTQuery::findDeclarationByName("ReactionTerminateWhen",
+                                                        scope, tree);
   EXPECT_NE(funcDecl, nullptr);
 
   auto func = strd::StrideGenerator::createFunctionDeclaration(
@@ -1081,7 +1243,7 @@ TEST(JIT, FunctionStandaloneReactionTerminateWhen) {
   int32_t out = 0;
   bool done = false;
 
-  auto *Entry = EntrySym->toPtr<void (*)(int32_t*, bool*)>();
+  auto *Entry = EntrySym->toPtr<void (*)(int32_t *, bool *)>();
   Entry(&out, &done);
   EXPECT_EQ(out, 2);
   EXPECT_TRUE(done);
@@ -1300,27 +1462,42 @@ TEST(JIT, ReactionInModule) {
   strenv.setStateVar(statePtr.get(), "In", 3.0, std::nullopt, "RootDomain");
   strenv.setStateVar(statePtr.get(), "Out", 1.0, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  auto Out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  auto Out = strenv
+                 .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                      "RootDomain")
+                 .value_or(0.0);
   EXPECT_EQ(Out, 1.0);
 
   strenv.setStateVar(statePtr.get(), "In", 4.0, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  Out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  Out = strenv
+            .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                 "RootDomain")
+            .value_or(0.0);
   EXPECT_EQ(Out, 1.0);
 
   strenv.setStateVar(statePtr.get(), "In", 5.0, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  Out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  Out = strenv
+            .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                 "RootDomain")
+            .value_or(0.0);
   EXPECT_EQ(Out, 1.0);
 
   strenv.setStateVar(statePtr.get(), "In", 6.0, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  Out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  Out = strenv
+            .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                 "RootDomain")
+            .value_or(0.0);
   EXPECT_EQ(Out, 6.0);
 
   strenv.setStateVar(statePtr.get(), "In", 10.0, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
-  Out = strenv.getStateVar<double>(statePtr.get(), "Out", std::nullopt, "RootDomain").value_or(0.0);
+  Out = strenv
+            .getStateVar<double>(statePtr.get(), "Out", std::nullopt,
+                                 "RootDomain")
+            .value_or(0.0);
   EXPECT_EQ(Out, 10.0);
 }
 
@@ -1450,7 +1627,8 @@ TEST(JIT, ReactionInModule) {
 
 TEST(JIT, ChainedCodeGeneratorsInStream) {
   strd::StrideEnvironment strenv;
-  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "chained_code_generators.stride");
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                               "chained_code_generators.stride");
   EXPECT_TRUE(ret);
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
@@ -1462,23 +1640,30 @@ TEST(JIT, ChainedCodeGeneratorsInStream) {
   strenv.invoke("RootDomain_init", args);
 
   auto getResult = [&]() {
-    return strenv.getStateVar(statePtr.get(), "Result", std::nullopt, "RootDomain").value_or(0);
+    return strenv
+        .getStateVar(statePtr.get(), "Result", std::nullopt, "RootDomain")
+        .value_or(0);
   };
 
   // Initially Trigger is off, Result is 0
   EXPECT_EQ(getResult(), 0);
 
-  // Tick with Trigger off -> Entire stream (StepOne and StepTwo) must be skipped -> Result remains 0
+  // Tick with Trigger off -> Entire stream (StepOne and StepTwo) must be
+  // skipped -> Result remains 0
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(getResult(), 0);
 
-  // Set Trigger to on (true) -> StepOne(factor: 5) outputs 10 -> StepTwo(offset: 10) outputs 20 -> Result = 20
-  strenv.setStateVar(statePtr.get(), "Trigger", true, std::nullopt, "RootDomain");
+  // Set Trigger to on (true) -> StepOne(factor: 5) outputs 10 ->
+  // StepTwo(offset: 10) outputs 20 -> Result = 20
+  strenv.setStateVar(statePtr.get(), "Trigger", true, std::nullopt,
+                     "RootDomain");
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(getResult(), 20);
 
-  // Turn Trigger back to off (false), reset Result to 999 -> Process tick must NOT execute StepOne or StepTwo
-  strenv.setStateVar(statePtr.get(), "Trigger", false, std::nullopt, "RootDomain");
+  // Turn Trigger back to off (false), reset Result to 999 -> Process tick must
+  // NOT execute StepOne or StepTwo
+  strenv.setStateVar(statePtr.get(), "Trigger", false, std::nullopt,
+                     "RootDomain");
   strenv.setStateVar(statePtr.get(), "Result", 999, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(getResult(), 999);
@@ -1486,7 +1671,8 @@ TEST(JIT, ChainedCodeGeneratorsInStream) {
 
 TEST(JIT, TriggeredReactionStreamPipelineWholeStreamInIf) {
   strd::StrideEnvironment strenv;
-  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "triggered_reaction_stream_pipeline.stride");
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                               "triggered_reaction_stream_pipeline.stride");
   EXPECT_TRUE(ret);
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
@@ -1498,10 +1684,15 @@ TEST(JIT, TriggeredReactionStreamPipelineWholeStreamInIf) {
   strenv.invoke("RootDomain_init", args);
 
   auto getResult = [&]() {
-    return strenv.getStateVar(statePtr.get(), "Result", std::nullopt, "RootDomain").value_or(0);
+    return strenv
+        .getStateVar(statePtr.get(), "Result", std::nullopt, "RootDomain")
+        .value_or(0);
   };
   auto getLiteralOnResult = [&]() {
-    return strenv.getStateVar(statePtr.get(), "LiteralOnResult", std::nullopt, "RootDomain").value_or(0);
+    return strenv
+        .getStateVar(statePtr.get(), "LiteralOnResult", std::nullopt,
+                     "RootDomain")
+        .value_or(0);
   };
 
   // Before process: both outputs 0
@@ -1510,23 +1701,28 @@ TEST(JIT, TriggeredReactionStreamPipelineWholeStreamInIf) {
 
   // 1st tick with Trigger off:
   // - 3-stage Trigger pipeline is skipped entirely -> Result remains 0
-  // - 2-stage 'on' pipeline executes: (4 * 3) + 8 = 20 -> LiteralOnResult becomes 20
+  // - 2-stage 'on' pipeline executes: (4 * 3) + 8 = 20 -> LiteralOnResult
+  // becomes 20
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(getResult(), 0);
   EXPECT_EQ(getLiteralOnResult(), 20);
 
   // 2nd tick with Trigger on:
-  // - 3-stage Trigger pipeline executes: ((5 * 3) + 5) * 2 = 40 -> Result becomes 40
+  // - 3-stage Trigger pipeline executes: ((5 * 3) + 5) * 2 = 40 -> Result
+  // becomes 40
   // - 2-stage 'on' pipeline executes again -> LiteralOnResult remains 20
-  strenv.setStateVar(statePtr.get(), "Trigger", true, std::nullopt, "RootDomain");
+  strenv.setStateVar(statePtr.get(), "Trigger", true, std::nullopt,
+                     "RootDomain");
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(getResult(), 40);
   EXPECT_EQ(getLiteralOnResult(), 20);
 
   // 3rd tick with Trigger off:
   // - Mutate Result manually to 123
-  // - Process tick: Trigger is off -> 3-stage pipeline does not run -> Result stays 123
-  strenv.setStateVar(statePtr.get(), "Trigger", false, std::nullopt, "RootDomain");
+  // - Process tick: Trigger is off -> 3-stage pipeline does not run -> Result
+  // stays 123
+  strenv.setStateVar(statePtr.get(), "Trigger", false, std::nullopt,
+                     "RootDomain");
   strenv.setStateVar(statePtr.get(), "Result", 123, std::nullopt, "RootDomain");
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(getResult(), 123);
@@ -1535,7 +1731,8 @@ TEST(JIT, TriggeredReactionStreamPipelineWholeStreamInIf) {
 
 TEST(JIT, SwitchDefaults) {
   strd::StrideEnvironment strenv;
-  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "switch_defaults.stride");
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "switch_defaults.stride");
   EXPECT_TRUE(ret);
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
@@ -1548,7 +1745,9 @@ TEST(JIT, SwitchDefaults) {
   strenv.invoke("RootDomain_process", args);
 
   auto getSw = [&](const std::string &name) -> bool {
-    return strenv.getStateVar<bool>(statePtr.get(), name, std::nullopt, "RootDomain").value_or(false);
+    return strenv
+        .getStateVar<bool>(statePtr.get(), name, std::nullopt, "RootDomain")
+        .value_or(false);
   };
 
   // Scalar defaults
@@ -1568,7 +1767,8 @@ TEST(JIT, SwitchDefaults) {
 
 TEST(JIT, ChainedFunctionsInStreamPipeline) {
   strd::StrideEnvironment strenv;
-  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "chained_functions_in_stream.stride");
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                               "chained_functions_in_stream.stride");
   EXPECT_TRUE(ret);
   ret = strenv.compileInMemory();
   EXPECT_TRUE(ret);
@@ -1580,7 +1780,9 @@ TEST(JIT, ChainedFunctionsInStreamPipeline) {
   strenv.invoke("RootDomain_init", args);
 
   auto getOutput = [&]() {
-    return strenv.getStateVar(statePtr.get(), "OutputValue", std::nullopt, "RootDomain").value_or(0);
+    return strenv
+        .getStateVar(statePtr.get(), "OutputValue", std::nullopt, "RootDomain")
+        .value_or(0);
   };
 
   // Default InputValue = 10:
@@ -1590,16 +1792,15 @@ TEST(JIT, ChainedFunctionsInStreamPipeline) {
 
   // Update InputValue = 4:
   // (4 * 3) + 7 - 2 = 12 + 7 - 2 = 17
-  strenv.setStateVar(statePtr.get(), "InputValue", 4, std::nullopt, "RootDomain");
+  strenv.setStateVar(statePtr.get(), "InputValue", 4, std::nullopt,
+                     "RootDomain");
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(getOutput(), 17);
 
   // Update InputValue = 0:
   // (0 * 3) + 7 - 2 = 0 + 7 - 2 = 5
-  strenv.setStateVar(statePtr.get(), "InputValue", 0, std::nullopt, "RootDomain");
+  strenv.setStateVar(statePtr.get(), "InputValue", 0, std::nullopt,
+                     "RootDomain");
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(getOutput(), 5);
 }
-
-
-
