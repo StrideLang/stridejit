@@ -3,8 +3,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <set>
 #include <sstream>
+#include <unordered_set>
 
 // stride
 #include "stride/codegen/coderesolver.hpp"
@@ -419,6 +421,31 @@ static void writeConstantToBuffer(llvm::Constant *C, char *buffer,
   } else if (auto *CDA = llvm::dyn_cast<llvm::ConstantDataArray>(C)) {
     llvm::StringRef raw = CDA->getRawDataValues();
     memcpy(buffer, raw.data(), raw.size());
+  } else if (C->getType()->isPointerTy()) {
+    llvm::Constant *target = C;
+    if (auto *CE = llvm::dyn_cast<llvm::ConstantExpr>(target)) {
+      if (CE->getOpcode() == llvm::Instruction::GetElementPtr) {
+        target = CE->getOperand(0);
+      }
+    }
+    if (auto *GV = llvm::dyn_cast<llvm::GlobalVariable>(target)) {
+      if (GV->hasInitializer()) {
+        if (auto *CDS =
+                llvm::dyn_cast<llvm::ConstantDataSequential>(GV->getInitializer())) {
+          static std::unordered_set<std::string> s_stringPool;
+          static std::mutex s_poolMutex;
+          std::string strVal = CDS->getAsString().str();
+          const char *internedPtr = nullptr;
+          {
+            std::lock_guard<std::mutex> lock(s_poolMutex);
+            auto [it, _] = s_stringPool.insert(std::move(strVal));
+            internedPtr = it->c_str();
+          }
+          size_t ptrSz = DL.getTypeAllocSize(C->getType());
+          memcpy(buffer, &internedPtr, ptrSz);
+        }
+      }
+    }
   }
 }
 
@@ -1354,7 +1381,8 @@ bool StrideEnvironment::compileInMemory() {
     LOG_ERROR() << "Failed to load current symbols: " << err << std::endl;
   }
   JIT->getMainJITDylib().addGenerator(llvm::cantFail(
-      llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess('a')));
+      llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(
+          JIT->getDataLayout().getGlobalPrefix())));
   llvm::orc::SymbolMap M;
   llvm::orc::MangleAndInterner Mangle(JIT->getExecutionSession(),
                                       JIT->getDataLayout());
