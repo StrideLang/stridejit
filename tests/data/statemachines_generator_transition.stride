@@ -30,7 +30,7 @@ reaction RecordReaction {
 
 state State1 {
     transitions: [
-        transition PlaceMarker[Index in 0:3] {
+        transition PlaceMarker[Index in 0..3] {
             label: "PlaceMarker"
             guard: GuardArr[Index]
             onTransition: [ on >> RecordReaction(loc: Index); ]

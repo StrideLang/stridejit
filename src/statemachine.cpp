@@ -10,7 +10,9 @@
 #include "stride/parser/ast.h"
 #include "stride/parser/declarationnode.h"
 #include "stride/parser/entitynode.h"
+#include "stride/parser/generatorrangenode.h"
 #include "stride/parser/propertynode.h"
+#include "stride/parser/rangenode.h"
 #include "stride/parser/valuenode.h"
 #include "stride/utils/astquery.h"
 #include "stride/utils/logger.h"
@@ -226,7 +228,30 @@ StateMachine::processStateMachine(std::shared_ptr<EntityNode> child,
                         std::static_pointer_cast<ValueNode>(varProp)->getStringValue();
                   }
                   auto rangeProp = tDecl->getCompilerProperty("_generatorRange");
-                  if (rangeProp && rangeProp->getNodeType() == AST::Range) {
+                  if (rangeProp &&
+                      rangeProp->getNodeType() == AST::GeneratorRange) {
+                    auto genNode =
+                        std::static_pointer_cast<GeneratorRangeNode>(rangeProp);
+                    if (genNode->startIndex() &&
+                        genNode->startIndex()->getNodeType() == AST::Int) {
+                      t.rangeStart = std::static_pointer_cast<ValueNode>(
+                                         genNode->startIndex())
+                                         ->getIntValue();
+                    }
+                    if (genNode->endIndex() &&
+                        genNode->endIndex()->getNodeType() == AST::Int) {
+                      t.rangeEnd = std::static_pointer_cast<ValueNode>(
+                                       genNode->endIndex())
+                                       ->getIntValue();
+                    }
+                    if (genNode->stepIndex() &&
+                        genNode->stepIndex()->getNodeType() == AST::Int) {
+                      t.rangeStep = std::static_pointer_cast<ValueNode>(
+                                        genNode->stepIndex())
+                                        ->getIntValue();
+                    }
+                  } else if (rangeProp &&
+                             rangeProp->getNodeType() == AST::Range) {
                     auto rNode = std::static_pointer_cast<RangeNode>(rangeProp);
                     if (rNode->startIndex()->getNodeType() == AST::Int) {
                       t.rangeStart = std::static_pointer_cast<ValueNode>(
@@ -503,6 +528,15 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
         auto *leEnd = state.Builder->CreateICmpSLE(
             reqArgVal, state.Builder->getInt32(t.rangeEnd));
         auto *inRange = state.Builder->CreateAnd(geStart, leEnd);
+        if (std::abs(t.rangeStep) > 1) {
+          auto *diff = state.Builder->CreateSub(
+              reqArgVal, state.Builder->getInt32(t.rangeStart));
+          auto *rem = state.Builder->CreateSRem(
+              diff, state.Builder->getInt32(t.rangeStep));
+          auto *stepMatch = state.Builder->CreateICmpEQ(
+              rem, state.Builder->getInt32(0));
+          inRange = state.Builder->CreateAnd(inRange, stepMatch);
+        }
         guardVal = state.Builder->CreateAnd(guardVal, inRange);
 
         // Temporarily bind generator variable in state.NamedValues so guardCode can evaluate with reqArgVal

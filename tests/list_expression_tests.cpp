@@ -4,6 +4,7 @@
 #include "stride/stridejit/numberexprast.hpp"
 #include "stride/stridejit/stridecompiler.hpp"
 
+#include "stride/parser/generatorrangenode.h"
 #include "stride/parser/valuenode.h"
 
 #include "llvm/IR/Constants.h"
@@ -280,6 +281,29 @@ TEST(ListExprAST, ZeroValues) {
 
   auto [v, t] = list.codegen(state);
   ASSERT_NE(v, nullptr);
+}
+
+TEST(GeneratorRangeNode, BasicConstruction) {
+  auto start = std::make_shared<strd::ValueNode>(static_cast<int64_t>(0), "test.stride", 1);
+  auto end = std::make_shared<strd::ValueNode>(static_cast<int64_t>(8), "test.stride", 1);
+  auto gen = std::make_shared<strd::GeneratorRangeNode>(start, end, "test.stride", 1);
+
+  EXPECT_EQ(gen->getNodeType(), strd::AST::GeneratorRange);
+  EXPECT_EQ(gen->startIndex(), start);
+  EXPECT_EQ(gen->endIndex(), end);
+  EXPECT_EQ(gen->stepIndex(), nullptr);
+}
+
+TEST(GeneratorRangeNode, SteppedConstruction) {
+  auto start = std::make_shared<strd::ValueNode>(static_cast<int64_t>(0), "test.stride", 1);
+  auto step = std::make_shared<strd::ValueNode>(static_cast<int64_t>(2), "test.stride", 1);
+  auto end = std::make_shared<strd::ValueNode>(static_cast<int64_t>(10), "test.stride", 1);
+  auto gen = std::make_shared<strd::GeneratorRangeNode>(start, step, end, "test.stride", 1);
+
+  EXPECT_EQ(gen->getNodeType(), strd::AST::GeneratorRange);
+  EXPECT_EQ(gen->startIndex(), start);
+  EXPECT_EQ(gen->stepIndex(), step);
+  EXPECT_EQ(gen->endIndex(), end);
 }
 
 } // namespace

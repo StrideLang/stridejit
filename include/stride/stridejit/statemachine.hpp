@@ -54,6 +54,7 @@ struct Transition {
   std::string generatorVar;
   int64_t rangeStart = 0;
   int64_t rangeEnd = 0;
+  int64_t rangeStep = 1;
 
   std::vector<std::unique_ptr<ExprAST>> guardCode;
   std::vector<std::unique_ptr<ExprAST>> onTransitionCode;
