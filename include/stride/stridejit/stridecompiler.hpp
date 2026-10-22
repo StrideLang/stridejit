@@ -235,8 +235,18 @@ public:
   const StateStructInfo *currentFunctionStateInfo{nullptr};
   ASTNode m_tree{nullptr};
 
-  bool isModuleNode(ASTNode node) const;
   bool doesNodeNeedState(const CodeAnalysis::TypeTree *node);
+  // Single source of truth for whether a domain's process/init functions take
+  // a __state struct. Domains only own state for their dynamic fields (domain
+  // signals, state machine variables); stateful children alone do not make a
+  // domain struct.
+  bool doesDomainNeedState(ASTNode domainDecl) const;
+  const std::vector<DynamicDomainField> *
+  findDynamicDomainFields(ASTNode domainDecl) const;
+  // Builds a compile-time default constant of `varType` from a `default:`
+  // AST value (Int/Real/Switch/String scalars, broadcast to arrays, or a List
+  // matching an array's length). Returns nullptr if it cannot be converted.
+  llvm::Constant *makeDefaultConstant(ASTNode defaultNode, llvm::Type *varType);
   void buildNodeState(const CodeAnalysis::TypeTree &nodeTree);
   void buildStateStructTypes(const CodeAnalysis::TypeTree &tree,
                              ScopeStack &scope, ASTNode root);

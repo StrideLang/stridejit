@@ -1,5 +1,7 @@
 #include "stride/utils/logger.h"
+#include <algorithm>
 #include <iostream>
+#include <optional>
 
 #include "stride/stridejit/binaryexprast.hpp"
 #include "stride/stridejit/exprast.hpp"
@@ -17,6 +19,84 @@
 // #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 
 using namespace strd;
+
+namespace {
+
+struct ExternalCallTemplate {
+  std::string symbol;
+  // Input token index for each operand listed after the symbol, in call
+  // order. Empty when the template lists no operands (e.g. "@fn").
+  std::vector<size_t> inTokenOrder;
+  bool operandsParsed{true};
+};
+
+// Parses a platformModule processing string that names an external C symbol
+// with the '@' prefix. Accepted forms:
+//   "@fn"
+//   "@fn %%intokens:0%%, %%intokens:1%%"
+//   "%%outtokens:0%% = @fn %%intokens:0%%, %%intokens:1%%"
+// Native instructions ("llvm::...") are not external calls.
+std::optional<ExternalCallTemplate>
+parseExternalCallTemplate(const std::string &processing) {
+  if (processing.find("llvm::") != std::string::npos) {
+    return std::nullopt;
+  }
+  size_t atPos = processing.find('@');
+  if (atPos == std::string::npos) {
+    return std::nullopt;
+  }
+  size_t nameEnd = processing.find_first_of(" \t\r\n(,", atPos + 1);
+  ExternalCallTemplate result;
+  result.symbol = processing.substr(atPos + 1, nameEnd == std::string::npos
+                                                   ? std::string::npos
+                                                   : nameEnd - (atPos + 1));
+  if (result.symbol.empty()) {
+    return std::nullopt;
+  }
+  if (nameEnd == std::string::npos) {
+    return result;
+  }
+
+  std::string operands = processing.substr(nameEnd);
+  operands.erase(std::remove(operands.begin(), operands.end(), '('),
+                 operands.end());
+  operands.erase(std::remove(operands.begin(), operands.end(), ')'),
+                 operands.end());
+  const std::string prefix = "%%intokens:";
+  const std::string suffix = "%%";
+  size_t start = 0;
+  while (start <= operands.size()) {
+    size_t comma = operands.find(',', start);
+    std::string op = operands.substr(
+        start, comma == std::string::npos ? std::string::npos : comma - start);
+    op.erase(0, op.find_first_not_of(" \t\r\n"));
+    size_t last = op.find_last_not_of(" \t\r\n");
+    op.erase(last == std::string::npos ? 0 : last + 1);
+    if (!op.empty()) {
+      if (op.size() > prefix.size() + suffix.size() &&
+          op.compare(0, prefix.size(), prefix) == 0 &&
+          op.compare(op.size() - suffix.size(), suffix.size(), suffix) == 0) {
+        std::string idxStr = op.substr(
+            prefix.size(), op.size() - prefix.size() - suffix.size());
+        try {
+          result.inTokenOrder.push_back(
+              static_cast<size_t>(std::stoul(idxStr)));
+        } catch (...) {
+          result.operandsParsed = false;
+        }
+      } else {
+        result.operandsParsed = false;
+      }
+    }
+    if (comma == std::string::npos) {
+      break;
+    }
+    start = comma + 1;
+  }
+  return result;
+}
+
+} // namespace
 
 void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
                               StrideCompiler &state) {
@@ -148,9 +228,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
       }
     }
 
-    auto domainTypeNode = state.findTypeTreeNode(domainDecl);
-    bool domainNeedsState = (state.dynamicDomainFields.find(domainDecl) !=
-                             state.dynamicDomainFields.end());
+    bool domainNeedsState = state.doesDomainNeedState(domainDecl);
 
     std::vector<PrototypeArg> internalArgs;
     if (domainNeedsState) {
@@ -669,119 +747,14 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
                   varType = llvm::ArrayType::get(varType, size);
                 }
               }
-              llvm::Constant *defaultVal =
-                  llvm::Constant::getNullValue(varType);
               auto defaultNode = varDecl->getPropertyValue("default");
               if (!defaultNode) {
                 defaultNode = varDecl->getPropertyValue("value");
               }
-              if (defaultNode) {
-                llvm::Type *scalarType = varType->isArrayTy()
-                                             ? varType->getArrayElementType()
-                                             : varType;
-                auto getScalarConst =
-                    [&](ASTNode valNode) -> llvm::Constant * {
-                  if (!valNode)
-                    return nullptr;
-                  if (valNode->getNodeType() == AST::Int) {
-                    int64_t val =
-                        std::static_pointer_cast<ValueNode>(valNode)
-                            ->getIntValue();
-                    if (scalarType->isFloatingPointTy()) {
-                      return llvm::ConstantFP::get(scalarType,
-                                                   static_cast<double>(val));
-                    } else if (scalarType->isIntegerTy(64)) {
-                      return llvm::ConstantInt::get(scalarType, val);
-                    } else if (scalarType->isIntegerTy(32)) {
-                      return llvm::ConstantInt::get(scalarType,
-                                                    static_cast<int32_t>(val));
-                    } else if (scalarType->isIntegerTy(1) ||
-                               scalarType->isIntegerTy(8)) {
-                      return llvm::ConstantInt::get(scalarType,
-                                                    val != 0 ? 1 : 0);
-                    } else if (scalarType->isIntegerTy()) {
-                      return llvm::ConstantInt::get(scalarType, val);
-                    }
-                  } else if (valNode->getNodeType() == AST::Real) {
-                    double val =
-                        std::static_pointer_cast<ValueNode>(valNode)
-                            ->getRealValue();
-                    if (scalarType->isFloatingPointTy()) {
-                      return llvm::ConstantFP::get(scalarType, val);
-                    } else if (scalarType->isIntegerTy(1) ||
-                               scalarType->isIntegerTy(8)) {
-                      return llvm::ConstantInt::get(scalarType,
-                                                    val != 0.0 ? 1 : 0);
-                    } else if (scalarType->isIntegerTy(32)) {
-                      return llvm::ConstantInt::get(scalarType,
-                                                    static_cast<int32_t>(val));
-                    } else if (scalarType->isIntegerTy(64)) {
-                      return llvm::ConstantInt::get(scalarType,
-                                                    static_cast<int64_t>(val));
-                    } else if (scalarType->isIntegerTy()) {
-                      return llvm::ConstantInt::get(scalarType,
-                                                    static_cast<int64_t>(val));
-                    }
-                  } else if (valNode->getNodeType() == AST::Switch) {
-                    bool val =
-                        std::static_pointer_cast<ValueNode>(valNode)
-                            ->getSwitchValue();
-                    if (scalarType->isFloatingPointTy()) {
-                      return llvm::ConstantFP::get(scalarType,
-                                                   val ? 1.0 : 0.0);
-                    } else {
-                      return llvm::ConstantInt::get(scalarType, val ? 1 : 0);
-                    }
-                  } else if (valNode->getNodeType() == AST::String) {
-                    std::string val =
-                        std::static_pointer_cast<ValueNode>(valNode)
-                            ->getStringValue();
-                    llvm::Constant *strPtr = llvm::cast<llvm::Constant>(
-                        state.Builder->CreateGlobalStringPtr(
-                            val, "str_lit", 0, state.TheModule.get()));
-                    llvm::Constant *lenVal = llvm::ConstantInt::get(
-                        llvm::Type::getInt32Ty(*state.TheContext),
-                        static_cast<int32_t>(val.size()));
-                    if (scalarType->isStructTy()) {
-                      return llvm::ConstantStruct::get(
-                          llvm::cast<llvm::StructType>(scalarType),
-                          {strPtr, lenVal});
-                    }
-                  }
-                  return nullptr;
-                };
-
-                if (defaultNode->getNodeType() == AST::List &&
-                    varType->isArrayTy()) {
-                  auto children = defaultNode->getChildren();
-                  uint64_t numElems = varType->getArrayNumElements();
-                  if (children.size() == numElems) {
-                    std::vector<llvm::Constant *> initVals;
-                    initVals.reserve(numElems);
-                    for (const auto &child : children) {
-                      llvm::Constant *c = getScalarConst(child);
-                      if (!c) {
-                        c = llvm::Constant::getNullValue(scalarType);
-                      }
-                      initVals.push_back(c);
-                    }
-                    defaultVal = llvm::ConstantArray::get(
-                        llvm::cast<llvm::ArrayType>(varType), initVals);
-                  }
-                } else {
-                  llvm::Constant *scalarDefaultVal =
-                      getScalarConst(defaultNode);
-                  if (scalarDefaultVal) {
-                    if (varType->isArrayTy()) {
-                      std::vector<llvm::Constant *> initVals(
-                          varType->getArrayNumElements(), scalarDefaultVal);
-                      defaultVal = llvm::ConstantArray::get(
-                          llvm::cast<llvm::ArrayType>(varType), initVals);
-                    } else {
-                      defaultVal = scalarDefaultVal;
-                    }
-                  }
-                }
+              llvm::Constant *defaultVal =
+                  state.makeDefaultConstant(defaultNode, varType);
+              if (!defaultVal) {
+                defaultVal = llvm::Constant::getNullValue(varType);
               }
 
               // Check if already added to avoid duplicates
@@ -1621,8 +1594,22 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
 
       // Create function call expr
       if (externFunc) {
-        if (externFunc->name.size() > 0 && externFunc->name[0] == '@') {
-          std::string fnName = externFunc->name.substr(1);
+        auto externCall = parseExternalCallTemplate(externFunc->name);
+        if (externCall) {
+          std::string fnName = externCall->symbol;
+          // The external ABI path passes inputs in declaration order, so the
+          // template may only list %%intokens:N%% in ascending order.
+          bool orderOk = externCall->operandsParsed;
+          for (size_t i = 0; orderOk && i < externCall->inTokenOrder.size();
+               ++i) {
+            orderOk = externCall->inTokenOrder[i] == i;
+          }
+          if (!orderOk) {
+            LOG_ERROR() << "External call template '" << externFunc->name
+                        << "' must list %%intokens:N%% operands in "
+                           "declaration order; ignoring template operands."
+                        << std::endl;
+          }
           if (!state.TheModule->getFunction(fnName)) {
             // Aggregates (e.g. _StringType {ptr, i32}) cannot be passed by
             // value across the JIT/host-C++ boundary: MSVC passes 16-byte
