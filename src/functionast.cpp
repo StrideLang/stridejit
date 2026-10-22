@@ -931,7 +931,8 @@ llvm::Value *func(llvm::Value *value, std::optional<llvm::Type *> type,
     if (!allocTy || allocTy->isVoidTy()) {
       allocTy = llvm::Type::getDoubleTy(*state.TheContext);
     }
-    ArgsV = state.Builder->CreateAlloca(allocTy, nullptr, "LiteralValTemp");
+    llvm::Function *TheFunction = state.Builder->GetInsertBlock()->getParent();
+    ArgsV = state.CreateEntryBlockAlloca(TheFunction, "LiteralValTemp", allocTy);
     state.Builder->CreateStore(value, ArgsV);
   }
   //    value->print(llvm::outs());
@@ -1214,16 +1215,22 @@ CallExprAST::codegen(StrideCompiler &state) {
                      ? CallArgs[outArgCount].second.value()
                      : llvm::Type::getInt32Ty(*state.TheContext));
 
-      llvm::Value *arraySizeValue = state.Builder->getInt32(arraySize);
-      llvm::AllocaInst *arrayAlloc = state.Builder->CreateAlloca(
-          elemType, arraySizeValue, "array_intermediate");
+      llvm::Function *TheFunction =
+          state.Builder->GetInsertBlock()->getParent();
+      size_t allocCount = (arraySize > 0) ? arraySize : 1;
+      llvm::ArrayType *arrayTy = llvm::ArrayType::get(elemType, allocCount);
+      llvm::AllocaInst *arrayAlloc = state.CreateEntryBlockAlloca(
+          TheFunction, "array_intermediate", arrayTy);
+      llvm::Value *zero = state.Builder->getInt32(0);
+      llvm::Value *firstElemPtr = state.Builder->CreateInBoundsGEP(
+          arrayTy, arrayAlloc, {zero, zero}, "array_base");
 
       for (size_t i = 0; i < arraySize; ++i) {
         llvm::Value *index = llvm::ConstantInt::get(
             llvm::Type::getInt32Ty(*state.TheContext), i);
 
         llvm::Value *gepPtr = state.Builder->CreateInBoundsGEP(
-            elemType, arrayAlloc, index, "array_element_ptr");
+            elemType, firstElemPtr, index, "array_element_ptr");
 
         llvm::Value *val = CallArgs[outArgCount + i].first;
         if (val->getType()->isPointerTy()) {
@@ -1242,7 +1249,7 @@ CallExprAST::codegen(StrideCompiler &state) {
         state.Builder->CreateStore(val, gepPtr);
       }
       CallArgs.resize(outArgCount);
-      CallArgs.push_back({arrayAlloc, elemType});
+      CallArgs.push_back({firstElemPtr, elemType});
       if (Logger::isDebugEnabled()) {
         std::string s;
         llvm::raw_string_ostream rso(s);
@@ -1280,10 +1287,15 @@ CallExprAST::codegen(StrideCompiler &state) {
         llvm::StructType *fmtArgTy = llvm::StructType::get(
             *state.TheContext, {i32Ty, i32Ty, doubleTy, strTy});
 
-        llvm::Value *arraySizeValue = state.Builder->getInt32(numVarArgs);
-        llvm::AllocaInst *arrayAlloc = state.Builder->CreateAlloca(
-            fmtArgTy, arraySizeValue, "varg_fmt_array");
-        state.pointerElementTypes[arrayAlloc] = fmtArgTy;
+        llvm::Function *TheFunction =
+            state.Builder->GetInsertBlock()->getParent();
+        size_t allocCount = (numVarArgs > 0) ? numVarArgs : 1;
+        llvm::ArrayType *arrayTy = llvm::ArrayType::get(fmtArgTy, allocCount);
+        llvm::AllocaInst *arrayAlloc =
+            state.CreateEntryBlockAlloca(TheFunction, "varg_fmt_array", arrayTy);
+        llvm::Value *zero = state.Builder->getInt32(0);
+        llvm::Value *firstElemPtr = state.Builder->CreateInBoundsGEP(
+            arrayTy, arrayAlloc, {zero, zero}, "varg_fmt_base");
 
         for (size_t k = 0; k < numVarArgs; ++k) {
           size_t argIdx = prefixCount + k;
@@ -1332,7 +1344,7 @@ CallExprAST::codegen(StrideCompiler &state) {
           }
 
           llvm::Value *elemPtr = state.Builder->CreateInBoundsGEP(
-              fmtArgTy, arrayAlloc, state.Builder->getInt32(k),
+              fmtArgTy, firstElemPtr, state.Builder->getInt32(k),
               "varg_elem_ptr");
           llvm::Value *tagPtr = state.Builder->CreateStructGEP(
               fmtArgTy, elemPtr, 0, "varg_tag_ptr");
@@ -1372,7 +1384,7 @@ CallExprAST::codegen(StrideCompiler &state) {
             state.Builder->CreateStore(argVal, intFieldPtr);
           }
         }
-        CallArgs.push_back({arrayAlloc, fmtArgTy});
+        CallArgs.push_back({firstElemPtr, fmtArgTy});
         CallArgs.push_back({state.Builder->getInt32(numVarArgs), i32Ty});
       } else {
         llvm::Type *elemType =
@@ -1382,10 +1394,15 @@ CallExprAST::codegen(StrideCompiler &state) {
                 ? InArgsDataType[prefixCount]
                 : state.typesMap["_StringType"];
 
-        llvm::Value *arraySizeValue = state.Builder->getInt32(numVarArgs);
-        llvm::AllocaInst *arrayAlloc = state.Builder->CreateAlloca(
-            elemType, arraySizeValue, "clist_array");
-        state.pointerElementTypes[arrayAlloc] = elemType;
+        llvm::Function *TheFunction =
+            state.Builder->GetInsertBlock()->getParent();
+        size_t allocCount = (numVarArgs > 0) ? numVarArgs : 1;
+        llvm::ArrayType *arrayTy = llvm::ArrayType::get(elemType, allocCount);
+        llvm::AllocaInst *arrayAlloc =
+            state.CreateEntryBlockAlloca(TheFunction, "clist_array", arrayTy);
+        llvm::Value *zero = state.Builder->getInt32(0);
+        llvm::Value *firstElemPtr = state.Builder->CreateInBoundsGEP(
+            arrayTy, arrayAlloc, {zero, zero}, "clist_base");
 
         for (size_t k = 0; k < numVarArgs; ++k) {
           size_t argIdx = prefixCount + k;
@@ -1400,10 +1417,10 @@ CallExprAST::codegen(StrideCompiler &state) {
           }
           llvm::Value *index = llvm::ConstantInt::get(i32Ty, k);
           llvm::Value *gepPtr = state.Builder->CreateInBoundsGEP(
-              elemType, arrayAlloc, index, "elem_ptr");
+              elemType, firstElemPtr, index, "elem_ptr");
           state.Builder->CreateStore(argVal, gepPtr);
         }
-        CallArgs.push_back({arrayAlloc, elemType});
+        CallArgs.push_back({firstElemPtr, elemType});
         CallArgs.push_back({state.Builder->getInt32(numVarArgs), i32Ty});
       }
     } else {
