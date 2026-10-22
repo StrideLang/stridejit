@@ -206,6 +206,10 @@ public:
     size_t allocSize{0};
     std::vector<uint64_t> fieldOffsets;
     std::vector<size_t> fieldAllocSizes;
+    // Serialized defaultConstant (allocSize bytes). defaultConstant can dangle
+    // once the module is optimized or handed to the JIT, so runtime state
+    // allocation must use this copy.
+    std::vector<char> defaultBytes;
 
     llvm::Constant *getDefaultValue(const std::string &varName) const;
     llvm::Constant *getChildDefaultConstant(ASTNode childInstance) const;

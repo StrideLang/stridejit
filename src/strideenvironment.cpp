@@ -302,6 +302,7 @@ bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
 }
 
 void StrideEnvironment::optimizeModule() {
+  snapshotStateDefaults();
   m_moduleOptimized = true;
   if (m_optimizeCode) {
 #if LLVM_VERSION_MAJOR >= 17
@@ -464,6 +465,21 @@ const llvm::DataLayout *StrideEnvironment::getDataLayout() const {
   return nullptr;
 }
 
+void StrideEnvironment::snapshotStateDefaults() {
+  const auto *DL = getDataLayout();
+  if (!DL) {
+    return;
+  }
+  for (auto &[instance, info] : mStrideEnv.stateStructMap) {
+    if (!info.defaultBytes.empty() || !info.defaultConstant ||
+        info.allocSize == 0) {
+      continue;
+    }
+    info.defaultBytes.assign(info.allocSize, 0);
+    writeConstantToBuffer(info.defaultConstant, info.defaultBytes.data(), *DL);
+  }
+}
+
 void *StrideEnvironment::allocateState(const std::string &funcName) {
   const auto *info = mStrideEnv.getStateStructInfo(funcName);
   if (!info || !info->structType || info->allocSize == 0) {
@@ -474,7 +490,13 @@ void *StrideEnvironment::allocateState(const std::string &funcName) {
     return nullptr;
   }
   memset(mem, 0, info->allocSize);
-  if (info->defaultConstant) {
+  if (!info->defaultBytes.empty()) {
+    size_t copySize = info->defaultBytes.size() < info->allocSize
+                          ? info->defaultBytes.size()
+                          : info->allocSize;
+    memcpy(mem, info->defaultBytes.data(), copySize);
+  } else if (info->defaultConstant && mStrideEnv.TheModule) {
+    // Module not yet optimized or handed to the JIT: constant is still valid.
     const auto *DL = getDataLayout();
     if (DL) {
       writeConstantToBuffer(info->defaultConstant, static_cast<char *>(mem),
@@ -1304,6 +1326,7 @@ std::string StrideEnvironment::getJitObjectTag() const {
 }
 
 bool StrideEnvironment::compileInMemory() {
+  snapshotStateDefaults();
   std::vector<uint8_t> cachedObjBytes;
   std::string objTag = getJitObjectTag();
   std::vector<std::filesystem::path> deps;
@@ -1480,10 +1503,16 @@ bool StrideEnvironment::compileInMemory() {
   }
 
   if (mStrideEnv.TheModule && mStrideEnv.TheContext) {
+    snapshotStateDefaults();
     TSCtx = llvm::orc::ThreadSafeContext(std::move(mStrideEnv.TheContext));
     if (auto Err = JIT->addIRModule(llvm::orc::ThreadSafeModule(
             std::move(mStrideEnv.TheModule), TSCtx))) {
       return false;
+    }
+    // The JIT owns (and will destroy) the module and its globals now; any
+    // constant referencing them may dangle. Runtime code uses defaultBytes.
+    for (auto &[instance, info] : mStrideEnv.stateStructMap) {
+      info.defaultConstant = nullptr;
     }
   }
   return true;

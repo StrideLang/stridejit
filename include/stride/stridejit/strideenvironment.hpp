@@ -282,6 +282,11 @@ private:
   mutable std::optional<llvm::DataLayout> m_dataLayout;
   const llvm::DataLayout *getDataLayout() const;
   void optimizeModule();
+  // Serializes every StateStructInfo::defaultConstant into defaultBytes while
+  // the LLVM module is still intact. Must run before optimization (GlobalDCE
+  // can destroy string-literal globals, and with them any constant referencing
+  // them) and before the module is handed to the JIT.
+  void snapshotStateDefaults();
   bool loadLibrary(const char *libName, std::string &err);
   bool generateCompiledObject(std::string path, std::string TargetTriple);
 
