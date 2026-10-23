@@ -99,6 +99,17 @@ static bool validateDataTypes(std::shared_ptr<DeclarationNode> decl,
   }
   visited.insert(decl.get());
   bool valid = true;
+  auto unresolvedType = decl->getCompilerProperty("unresolvedType");
+  if (unresolvedType && unresolvedType->getNodeType() == AST::String) {
+    LOG_ERROR() << decl->getFilename() << ":" << decl->getLine()
+                << " Can't resolve the data type of '" << decl->getName()
+                << "'. The output type of '"
+                << std::static_pointer_cast<ValueNode>(unresolvedType)
+                       ->getStringValue()
+                << "' comes from its output port. Declare '"
+                << decl->getName() << "' with a type" << std::endl;
+    valid = false;
+  }
   auto typeNode = decl->getPropertyValue("type");
   if (typeNode && typeNode->getNodeType() == AST::Entity) {
     auto typeName = ASTQuery::getNodeName(typeNode);
