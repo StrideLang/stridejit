@@ -26,7 +26,6 @@ reaction StepTwo {
     ports: [
         mainInputPort InPort {
             block: Input
-            type: _IntType
         }
         propertyInputPort OffsetPort {
             name: "offset"

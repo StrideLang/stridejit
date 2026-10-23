@@ -90,6 +90,64 @@ void StrideEnvironment::initializeJIT() {
   }
 }
 
+// Typed declarations (e.g. signal) only accept members of their typeClass.
+// Switch and string data are declared with switch and string, not signal.
+static bool validateDataTypes(std::shared_ptr<DeclarationNode> decl,
+                              ASTNode tree, std::set<const void *> &visited) {
+  if (visited.count(decl.get()) > 0) {
+    return true;
+  }
+  visited.insert(decl.get());
+  bool valid = true;
+  auto typeNode = decl->getPropertyValue("type");
+  if (typeNode && typeNode->getNodeType() == AST::Entity) {
+    auto typeName = ASTQuery::getNodeName(typeNode);
+    for (const auto &className : ASTQuery::getDataTypeClassNames(decl, tree)) {
+      auto typeClass = ASTQuery::findTypeClass(className, tree);
+      if (typeClass && !ASTQuery::isTypeClassMember(typeClass, typeName)) {
+        LOG_ERROR() << decl->getFilename() << ":" << decl->getLine() << " "
+                    << decl->getEntityType() << " '" << decl->getName()
+                    << "' can't have type " << typeName << " (not in "
+                    << className << ")" << std::endl;
+        valid = false;
+      }
+    }
+  }
+  for (const auto &property : decl->getProperties()) {
+    auto value = property->getValue();
+    if (!value) {
+      continue;
+    }
+    std::vector<ASTNode> children;
+    if (value->getNodeType() == AST::List) {
+      children = value->getChildren();
+    } else {
+      children.push_back(value);
+    }
+    for (const auto &child : children) {
+      if (child->getNodeType() == AST::Declaration ||
+          child->getNodeType() == AST::ArrayDeclaration) {
+        valid &= validateDataTypes(
+            std::static_pointer_cast<DeclarationNode>(child), tree, visited);
+      }
+    }
+  }
+  return valid;
+}
+
+static bool validateDataTypes(ASTNode tree) {
+  std::set<const void *> visited;
+  bool valid = true;
+  for (const auto &child : tree->getChildren()) {
+    if (child->getNodeType() == AST::Declaration ||
+        child->getNodeType() == AST::ArrayDeclaration) {
+      valid &= validateDataTypes(
+          std::static_pointer_cast<DeclarationNode>(child), tree, visited);
+    }
+  }
+  return valid;
+}
+
 void StrideEnvironment::prepareTree(ASTNode tree) {
   if (!tree || tree->getCompilerProperty("isPrepared")) {
     return;
@@ -204,6 +262,9 @@ bool StrideEnvironment::generateIr(const std::vector<std::string> &paths,
       }
       prepareTree(tree);
     }
+    if (!validateDataTypes(tree)) {
+      return false;
+    }
 
     m_trees.push_back(tree);
 
@@ -256,6 +317,9 @@ bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
   }
 
   prepareTree(root);
+  if (!validateDataTypes(root)) {
+    return false;
+  }
 
   ScopeStack globalScope;
   {

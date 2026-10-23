@@ -27,7 +27,6 @@ reaction StepB {
     ports: [
         mainInputPort InPort {
             block: InB
-            type: _IntType
         }
         propertyInputPort OffsetPort {
             name: "offset"
@@ -51,7 +50,6 @@ reaction StepC {
     ports: [
         mainInputPort InPort {
             block: InC
-            type: _IntType
         }
         propertyInputPort MulPort {
             name: "multiplier"
