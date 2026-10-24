@@ -129,6 +129,7 @@ set(STRIDEJIT_SRC
   src/listexprast.cpp
   src/numberexprast.cpp
   src/functionast.cpp
+  src/namemangler.cpp
 
   src/statemachine.cpp
   src/strideenvironment.cpp
@@ -142,6 +143,7 @@ set(STRIDEJIT_HEADERS
   include/stride/stridejit/listexprast.hpp
   include/stride/stridejit/numberexprast.hpp
   include/stride/stridejit/functionast.hpp
+  include/stride/stridejit/namemangler.hpp
 
   include/stride/stridejit/statemachine.hpp
   include/stride/stridejit/strideenvironment.hpp

@@ -1675,8 +1675,10 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
           // --------------------- Function declaration -----------------------
           // Can we unify this parameter definition wiht argument preparation
           // above?
-          std::unique_ptr<FunctionAST> newFuncDecl =
-              createFunctionDeclaration(funcDecl, func, tree, &scope, state);
+          // Name of the generated function, mangled for polymorphic callables.
+          std::string calleeName = func->getName();
+          std::unique_ptr<FunctionAST> newFuncDecl = createFunctionDeclaration(
+              funcDecl, func, tree, &scope, state, &calleeName);
           if (newFuncDecl) {
             const auto &protoOuts = newFuncDecl->getProto().getOutArgs();
             while (args.MainOut.args.size() < protoOuts.size()) {
@@ -1707,7 +1709,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               }
             }
           } else {
-            auto protoIt = state.FunctionProtos.find(funcDecl->getName());
+            auto protoIt = state.FunctionProtos.find(calleeName);
             if (protoIt != state.FunctionProtos.end()) {
               const auto &protoOuts = protoIt->second->getOutArgs();
               while (args.MainOut.args.size() < protoOuts.size()) {
@@ -1834,7 +1836,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
           // -----------------------------------------------------------
           // Function call expr
           auto callexpr = std::make_unique<CallExprAST>(
-              std::string(func->getName()), std::move(args.MainOut.args),
+              calleeName, std::move(args.MainOut.args),
               std::move(args.MainIn.args), std::move(args.Properties.args),
               std::move(args.Internal.args), std::move(args.External.args),
               std::move(PortPropArgs), std::move(args.MainOut.argTypes),
@@ -2084,17 +2086,57 @@ bool StrideGenerator::resolveIOParamsFromDefinition(
   return ioParamsResolved;
 }
 
+bool StrideGenerator::isPolymorphicCallable(
+    std::shared_ptr<DeclarationNode> funcDecl) {
+  if (!funcDecl) {
+    return false;
+  }
+  const auto &entityType = funcDecl->getEntityType();
+  if (entityType != "module" && entityType != "loop") {
+    return false;
+  }
+  auto blocks = funcDecl->getPropertyValue("blocks");
+  if (!blocks) {
+    return false;
+  }
+  for (const auto &node : blocks->getChildren()) {
+    if (node->getNodeType() != AST::Declaration &&
+        node->getNodeType() != AST::ArrayDeclaration) {
+      continue;
+    }
+    auto typeNode =
+        std::static_pointer_cast<DeclarationNode>(node)->getPropertyValue(
+            "type");
+    if (typeNode && typeNode->getNodeType() == AST::MemberAccess) {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
     std::shared_ptr<DeclarationNode> funcDecl,
     std::shared_ptr<FunctionNode> funcInstance, ASTNode tree, ScopeStack *scope,
-    StrideCompiler &state) {
+    StrideCompiler &state, std::string *symbolName) {
 
   std::string funcName = funcDecl->getName();
+  if (symbolName) {
+    *symbolName = funcName;
+  }
+  // A polymorphic callable gets one function per type signature, so it can
+  // only be deduplicated once its parameter types are resolved below.
+  // Standalone generation has no instance and keeps the plain name.
+  const bool polymorphic = funcInstance && isPolymorphicCallable(funcDecl);
+  // Port types (`type: OutputPort.type`) are resolved from what this
+  // instance connects to, which is declared in the caller's scope.
+  StrideCompiler::ConnectionScopeGuard connectionScope(state, scope, tree);
 
-  llvm::Function *TheFunction = state.getFunctionInModule(funcName);
-  if (TheFunction) {
-    LOG_DEBUG() << " Function already defined: " << funcName << std::endl;
-    return nullptr;
+  if (!polymorphic) {
+    llvm::Function *TheFunction = state.getFunctionInModule(funcName);
+    if (TheFunction) {
+      LOG_DEBUG() << " Function already defined: " << funcName << std::endl;
+      return nullptr;
+    }
   }
 
   auto functionScope = *scope;
@@ -2109,26 +2151,6 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
     }
   }
 
-  std::vector<std::unique_ptr<ExprAST>> collected;
-  // Generate function code by going through stream blocks.
-  auto streamBlocks =
-      ASTQuery::getContainedStreamBlocks(funcDecl, functionScope, tree);
-  for (const auto &streamBlock : streamBlocks) {
-    for (const auto &stream : streamBlock.streams) {
-      auto code = createStreamCode(stream, tree, functionScope, state);
-      for (auto &domainCode : code) {
-        while (domainCode.second.expr.size() > 0) {
-          collected.push_back(std::move(domainCode.second.expr.front()));
-          domainCode.second.expr.erase(domainCode.second.expr.begin());
-        }
-        // FIXME nested functions need to have their name mangled/hashed as
-        // they move to the global namespace
-        for (const auto &f : domainCode.second.functions) {
-          f->codegen(state);
-        }
-      }
-    }
-  }
   // Analyze function parameters. FIrst check to see if the types are fully
   // defined, then if they are not, infer them from connections.
 
@@ -2259,6 +2281,44 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
     InternalPersistentParams.clear();
     InternalPersistentParams.push_back(
         PrototypeArg{"__state", llvm::PointerType::get(*state.TheContext, 0)});
+  }
+
+  if (polymorphic) {
+    std::vector<llvm::Type *> signature;
+    for (const auto *params : {&OutParams, &InParams, &PropertyParams}) {
+      for (const auto &param : *params) {
+        signature.push_back(param.llvmType);
+      }
+    }
+    funcName = state.mangler.mangle(funcDecl->getName(), {}, signature);
+    if (symbolName) {
+      *symbolName = funcName;
+    }
+    if (state.getFunctionInModule(funcName)) {
+      LOG_DEBUG() << " Function already defined: " << funcName << std::endl;
+      return nullptr;
+    }
+  }
+
+  std::vector<std::unique_ptr<ExprAST>> collected;
+  // Generate function code by going through stream blocks.
+  auto streamBlocks =
+      ASTQuery::getContainedStreamBlocks(funcDecl, functionScope, tree);
+  for (const auto &streamBlock : streamBlocks) {
+    for (const auto &stream : streamBlock.streams) {
+      auto code = createStreamCode(stream, tree, functionScope, state);
+      for (auto &domainCode : code) {
+        while (domainCode.second.expr.size() > 0) {
+          collected.push_back(std::move(domainCode.second.expr.front()));
+          domainCode.second.expr.erase(domainCode.second.expr.begin());
+        }
+        // FIXME nested functions need to have their name mangled/hashed as
+        // they move to the global namespace
+        for (const auto &f : domainCode.second.functions) {
+          f->codegen(state);
+        }
+      }
+    }
   }
 
   auto proto = std::make_unique<PrototypeAST>(

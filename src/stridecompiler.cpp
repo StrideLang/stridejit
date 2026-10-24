@@ -401,26 +401,14 @@ llvm::Type *StrideCompiler::getLLVMTypeForCodegenEntity(
     } else if (typePropNode->getNodeType() == strd::AST::MemberAccess) {
       auto typeProp =
           std::static_pointer_cast<strd::MemberAccessNode>(typePropNode);
-      if (funcDecl->getEntityType() == "platformModule") {
-        auto inputBlock = funcDecl->getCompilerProperty("inputBlock");
-        if (inputBlock) {
-        }
+      if (typeProp->getPropertyName() != "type") {
+        LOG_ERROR() << "ERROR invalid port for type for " << decl->toText()
+                    << std::endl;
+        return typesMap[type];
       }
-      auto inputPortBlock = strd::ASTQuery::getModuleMainInputPort(funcDecl);
-      if (inputPortBlock && typeProp &&
-          inputPortBlock->getName() == typeProp->getEntity()) {
-        if (typeProp->getPropertyName() != "type") {
-          LOG_ERROR() << "ERROR invalid port for type for " << decl->toText()
-                      << std::endl;
-          return typesMap[type];
-        }
-        if (functionInstance) {
-          auto portConnection =
-              functionInstance->getPropertyValue("inputBlock");
-          // auto type = portConnection->getCompilerProperty("declaration");
-          // if (type) {
-          // }
-        }
+      if (llvm::Type *resolved =
+              resolvePortMemberType(typeProp, funcDecl, functionInstance, 0)) {
+        return resolved;
       }
     } else {
       LOG_INFO() << " : unsupported type" << std::endl;
@@ -434,6 +422,131 @@ llvm::Type *StrideCompiler::getLLVMTypeForCodegenEntity(
     return typesMap[type];
   }
   return typesMap["_RealType"];
+}
+
+// Port types can chain through several functions (a >> Abs() >> Abs() >> b).
+// Bounds the recursion if declarations are cyclic.
+static constexpr int kMaxPortTypeDepth = 32;
+
+llvm::Type *StrideCompiler::resolvePortMemberType(
+    std::shared_ptr<MemberAccessNode> typeProp,
+    std::shared_ptr<DeclarationNode> funcDecl,
+    std::shared_ptr<FunctionNode> instance, int depth) {
+  if (!typeProp || !funcDecl || !instance || depth > kMaxPortTypeDepth) {
+    return nullptr;
+  }
+  auto outputPort = ASTQuery::getModuleMainOutputPort(funcDecl);
+  if (outputPort && outputPort->getName() == typeProp->getEntity()) {
+    return getConnectedNodeType(instance->getCompilerProperty("outputBlock"),
+                                true, depth + 1);
+  }
+  auto inputPort = ASTQuery::getModuleMainInputPort(funcDecl);
+  if (inputPort && inputPort->getName() == typeProp->getEntity()) {
+    return getConnectedNodeType(instance->getCompilerProperty("inputBlock"),
+                                false, depth + 1);
+  }
+  return nullptr;
+}
+
+llvm::Type *
+StrideCompiler::getPortBlockType(std::shared_ptr<DeclarationNode> portDecl,
+                                 std::shared_ptr<DeclarationNode> funcDecl,
+                                 std::shared_ptr<FunctionNode> instance,
+                                 int depth) {
+  if (!portDecl || !funcDecl || depth > kMaxPortTypeDepth) {
+    return nullptr;
+  }
+  auto blocks = funcDecl->getPropertyValue("blocks");
+  if (!blocks) {
+    return nullptr;
+  }
+  std::string blockName = ASTQuery::getNodeName(portDecl->getPropertyValue("block"));
+  for (const auto &node : blocks->getChildren()) {
+    if (node->getNodeType() != AST::Declaration &&
+        node->getNodeType() != AST::ArrayDeclaration) {
+      continue;
+    }
+    auto blockDecl = std::static_pointer_cast<DeclarationNode>(node);
+    if (blockDecl->getName() != blockName) {
+      continue;
+    }
+    auto typeProp = blockDecl->getPropertyValue("type");
+    if (typeProp && typeProp->getNodeType() == AST::MemberAccess) {
+      return resolvePortMemberType(
+          std::static_pointer_cast<MemberAccessNode>(typeProp), funcDecl,
+          instance, depth + 1);
+    }
+    return getLLVMType(blockDecl);
+  }
+  return nullptr;
+}
+
+std::shared_ptr<DeclarationNode>
+StrideCompiler::findConnectedDeclaration(ASTNode node) const {
+  auto decl = std::static_pointer_cast<DeclarationNode>(
+      node->getCompilerProperty("declaration"));
+  // The resolver does not attach declarations to every stream node (e.g. in a
+  // state's updateGuard), so look them up in the instance's scope.
+  if (!decl && !connectionScopes.empty()) {
+    const auto &context = connectionScopes.back();
+    if (context.scope) {
+      decl = ASTQuery::findDeclarationByName(ASTQuery::getNodeName(node),
+                                             *context.scope, context.tree);
+    }
+  }
+  if (decl && decl->getEntityType() == "platformModule") {
+    return nullptr;
+  }
+  return decl;
+}
+
+llvm::Type *StrideCompiler::getConnectedNodeType(ASTNode node,
+                                                 bool isDownstream, int depth) {
+  if (!node || depth > kMaxPortTypeDepth) {
+    return nullptr;
+  }
+  switch (node->getNodeType()) {
+  case AST::Int:
+    return typesMap["_IntType"];
+  case AST::Real:
+    return typesMap["_RealType"];
+  case AST::Switch:
+    return typesMap["_SwitchType"];
+  case AST::String:
+    return typesMap["_StringType"];
+  case AST::Entity:
+  case AST::Array: {
+    auto decl = findConnectedDeclaration(node);
+    return decl ? getLLVMType(decl) : nullptr;
+  }
+  case AST::Function: {
+    auto decl = findConnectedDeclaration(node);
+    if (!decl) {
+      return nullptr;
+    }
+    auto port = isDownstream ? ASTQuery::getModuleMainInputPort(decl)
+                             : ASTQuery::getModuleMainOutputPort(decl);
+    return getPortBlockType(port, decl,
+                            std::static_pointer_cast<FunctionNode>(node),
+                            depth + 1);
+  }
+  case AST::List: {
+    // Elements of a list feed one array, so a real element makes it real.
+    llvm::Type *result = nullptr;
+    for (const auto &child : node->getChildren()) {
+      llvm::Type *elemType = getConnectedNodeType(child, isDownstream, depth + 1);
+      if (!elemType) {
+        return nullptr;
+      }
+      if (!result || elemType->isFloatingPointTy()) {
+        result = elemType;
+      }
+    }
+    return result;
+  }
+  default:
+    return nullptr;
+  }
 }
 
 void StrideCompiler::pushName(std::string name) {

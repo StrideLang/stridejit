@@ -62,10 +62,13 @@ TEST(JIT, Create) {
           llvm::orc::ThreadSafeModule(std::move(strenv.mStrideEnv.TheModule),
                                       std::move(strenv.mStrideEnv.TheContext)))) {
   }
-  auto EntrySym = (*JIT)->lookup("AddTwo");
-  if (!EntrySym) {
-    std::cerr << "No entry" << std::endl;
-  }
+  // AddTwo's types come from its ports, so it is generated under a mangled
+  // name for the types it is called with.
+  auto addTwoName = strenv.mStrideEnv.mangler.resolveUnique("AddTwo");
+  ASSERT_TRUE(addTwoName.has_value());
+  auto EntrySym = (*JIT)->lookup(*addTwoName);
+  ASSERT_TRUE(static_cast<bool>(EntrySym))
+      << llvm::toString(EntrySym.takeError());
 
   auto *Entry = EntrySym->toPtr<void (*)(...)>();
 

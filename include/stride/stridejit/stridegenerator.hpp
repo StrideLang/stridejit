@@ -109,11 +109,20 @@ public:
 
   static std::unique_ptr<ExprAST> createExpr(ASTNode node);
 
+  // Returns nullptr if the function was already generated. symbolName (if
+  // given) receives the name to call it by, which is mangled for
+  // polymorphic callables.
   static std::unique_ptr<FunctionAST>
   createFunctionDeclaration(std::shared_ptr<DeclarationNode> funcDecl,
                             std::shared_ptr<FunctionNode> funcInstance,
                             ASTNode tree, ScopeStack *scope,
-                            StrideCompiler &state);
+                            StrideCompiler &state,
+                            std::string *symbolName = nullptr);
+
+  // True for modules and loops whose block types come from their ports
+  // (e.g. `type: OutputPort.type`). Each type signature gets its own
+  // generated function.
+  static bool isPolymorphicCallable(std::shared_ptr<DeclarationNode> funcDecl);
 
   static std::unique_ptr<FunctionAST>
   generateStandaloneFunction(std::shared_ptr<DeclarationNode> funcDecl,

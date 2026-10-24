@@ -1820,6 +1820,14 @@ StrideEnvironment::getFunction(std::string functionName) {
     ;
   }
   auto EntrySym = JIT->lookup(functionName.c_str());
+  if (!EntrySym) {
+    // A polymorphic module is generated under mangled names. Resolve its
+    // Stride name when only one variant exists.
+    if (auto mangled = mStrideEnv.mangler.resolveUnique(functionName)) {
+      llvm::consumeError(EntrySym.takeError());
+      return JIT->lookup(*mangled);
+    }
+  }
   return EntrySym;
 }
 

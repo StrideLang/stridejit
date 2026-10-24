@@ -571,16 +571,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
             defaultValue = llvm::ConstantFP::get(
                 llvm::Type::getDoubleTy(*state.TheContext), llvm::APFloat(0.0));
           }
-          // Start the PHI node with an entry for Start.
-          std::string VarName = decl->getName();
-          llvm::PHINode *Variable = state.Builder->CreatePHI(type, 2, VarName);
           assert(defaultValue);
-          Variable->addIncoming(defaultValue, PreheaderBB);
-
-          PHIVariables[VarName] = Variable;
-          OldVals[VarName] = state.NamedValues[VarName].first;
-          state.NamedValues[VarName] = {Variable, type};
-
         } else if (decl->getEntityType() == "switch" ||
                    decl->getEntityType() == "trigger") {
           //  Local switches in loops are reset on every trigger, so they are
@@ -782,7 +773,14 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   state.currentFunctionStatePtr = prevFunctionStatePtr;
   state.currentFunctionStateInfo = prevFunctionStateInfo;
   // Validate the generated code, checking for consistency.
-  verifyFunction(*TheFunction);
+  {
+    std::string verifyErrors;
+    llvm::raw_string_ostream verifyStream(verifyErrors);
+    if (llvm::verifyFunction(*TheFunction, &verifyStream)) {
+      LOG_ERROR() << "Invalid IR generated for " << TheFunction->getName().str()
+                  << ": " << verifyStream.str() << std::endl;
+    }
+  }
   if (Logger::isDebugEnabled()) {
     std::string s;
     llvm::raw_string_ostream rso(s);
@@ -943,6 +941,69 @@ llvm::Value *func(llvm::Value *value, std::optional<llvm::Type *> type,
   return ArgsV;
 };
 
+// Converts a numeric value to another numeric type. Other values are
+// returned unchanged.
+static llvm::Value *convertScalar(StrideCompiler &state, llvm::Value *value,
+                                  llvm::Type *toType) {
+  llvm::Type *fromType = value->getType();
+  if (fromType == toType) {
+    return value;
+  }
+  auto &B = *state.Builder;
+  if (fromType->isIntegerTy() && toType->isIntegerTy()) {
+    if (toType->isIntegerTy(1)) {
+      return B.CreateICmpNE(value, llvm::ConstantInt::get(fromType, 0),
+                            "to_switch");
+    }
+    // Switches are unsigned 0/1, other integers are signed.
+    return B.CreateIntCast(value, toType, !fromType->isIntegerTy(1),
+                           "int_cast");
+  }
+  if (fromType->isIntegerTy() && toType->isFloatingPointTy()) {
+    return fromType->isIntegerTy(1) ? B.CreateUIToFP(value, toType, "to_fp")
+                                    : B.CreateSIToFP(value, toType, "to_fp");
+  }
+  if (fromType->isFloatingPointTy() && toType->isIntegerTy()) {
+    if (toType->isIntegerTy(1)) {
+      return B.CreateFCmpONE(value, llvm::ConstantFP::get(fromType, 0.0),
+                             "to_switch");
+    }
+    return B.CreateFPToSI(value, toType, "to_int");
+  }
+  if (fromType->isFloatingPointTy() && toType->isFloatingPointTy()) {
+    return B.CreateFPCast(value, toType, "fp_cast");
+  }
+  return value;
+}
+
+// Reports a call argument whose scalar type differs from the callee's
+// parameter. The callee reads and writes through the pointer with its own
+// type, so a mismatch reads garbage or writes past the caller's storage.
+static bool checkArgumentType(const std::string &callee,
+                              const PrototypeArg &param,
+                              const std::optional<llvm::Type *> &argType) {
+  if (!param.llvmType || !argType.has_value() || !argType.value()) {
+    return true;
+  }
+  llvm::Type *expected = param.llvmType;
+  llvm::Type *actual = argType.value();
+  auto isScalar = [](llvm::Type *t) {
+    return t->isIntegerTy() || t->isFloatingPointTy();
+  };
+  if (!isScalar(expected) || !isScalar(actual) || expected == actual) {
+    return true;
+  }
+  std::string expectedText, actualText;
+  llvm::raw_string_ostream expectedStream(expectedText);
+  llvm::raw_string_ostream actualStream(actualText);
+  expected->print(expectedStream);
+  actual->print(actualStream);
+  LOG_ERROR() << "Type mismatch calling " << callee << ": argument '"
+              << param.name << "' expects " << expectedStream.str()
+              << " but is " << actualStream.str() << std::endl;
+  return false;
+}
+
 void processArgGroup(
     StrideCompiler &state,
     const std::vector<std::unique_ptr<ExprAST>> &ArgGroup,
@@ -951,7 +1012,8 @@ void processArgGroup(
         &CallArgs,
     bool isOutputGroup = false,
     std::vector<std::tuple<std::string, llvm::AllocaInst *, llvm::Type *>>
-        *tempOuts = nullptr) {
+        *tempOuts = nullptr,
+    const std::vector<llvm::Type *> *argTypes = nullptr) {
   for (unsigned i = 0, e = ArgGroup.size(); i != e; ++i) {
     size_t paramIdx = CallArgs.size();
     llvm::Argument *calleeArg =
@@ -964,7 +1026,14 @@ void processArgGroup(
             !state.globalExists(varName)) {
           llvm::Function *TheFunction =
               state.Builder->GetInsertBlock()->getParent();
+          // Undeclared outputs are implicit intermediates between chained
+          // calls. Use the callee's declared output type so e.g. a switch
+          // output is not widened to i32 and stored over neighbouring state.
           llvm::Type *elemTy = llvm::Type::getInt32Ty(*state.TheContext);
+          if (argTypes && i < argTypes->size() && (*argTypes)[i] &&
+              !(*argTypes)[i]->isVoidTy()) {
+            elemTy = (*argTypes)[i];
+          }
           llvm::AllocaInst *tempAlloc = state.CreateEntryBlockAlloca(
               TheFunction, varName + "_tmp", elemTy);
           state.Builder->CreateStore(llvm::Constant::getNullValue(elemTy),
@@ -1111,6 +1180,9 @@ void processArgGroup(
           }
           auto *GEP = state.Builder->CreateGEP(gepElemType, value, idxList);
           value = GEP;
+          // The pointer now addresses a single element, so later loads and
+          // array grouping must use the element type, not the array type.
+          type = gepElemType;
         }
         newArgVal = value;
       } else {
@@ -1173,7 +1245,8 @@ CallExprAST::codegen(StrideCompiler &state) {
   std::vector<std::tuple<std::string, llvm::AllocaInst *, llvm::Type *>>
       tempOuts;
   if (callType != CallableType::External) {
-    processArgGroup(state, OutArgs, CalleeF, CallArgs, true, &tempOuts);
+    processArgGroup(state, OutArgs, CalleeF, CallArgs, true, &tempOuts,
+                    &OutArgsDataType);
   }
 
   auto protoIt = state.FunctionProtos.find(Callee);
@@ -1197,6 +1270,24 @@ CallExprAST::codegen(StrideCompiler &state) {
 
     int outArgCount = CallArgs.size();
     processArgGroup(state, InArgs, CalleeF, CallArgs, false);
+
+    if (protoIt != state.FunctionProtos.end()) {
+      const auto &proto = *protoIt->second;
+      for (size_t k = 0; k < proto.getOutArgs().size() &&
+                         k < static_cast<size_t>(outArgCount);
+           ++k) {
+        checkArgumentType(Callee, proto.getOutArgs()[k], CallArgs[k].second);
+      }
+      // Inputs grouped into one array below are not checked here.
+      if (CallArgs.size() <= static_cast<size_t>(outArgCount) + 1) {
+        for (size_t k = 0; k < proto.getInArgs().size() &&
+                           outArgCount + k < CallArgs.size();
+             ++k) {
+          checkArgumentType(Callee, proto.getInArgs()[k],
+                            CallArgs[outArgCount + k].second);
+        }
+      }
+    }
 
     // Group main inputs into array if not external.
     // Modules and Loops take a single entity, so
@@ -1600,6 +1691,16 @@ CallExprAST::codegen(StrideCompiler &state) {
     for (const auto &p : CallArgs) {
       CallArgsValues.push_back(p.first);
     }
+    if (callType == CallableType::External) {
+      // A polymorphic module variant may only find a platform overload for
+      // another numeric type (e.g. fabs for an i32 Abs). Convert to it.
+      auto *FT = CalleeF->getFunctionType();
+      for (size_t i = 0; i < CallArgsValues.size() && i < FT->getNumParams();
+           ++i) {
+        CallArgsValues[i] =
+            convertScalar(state, CallArgsValues[i], FT->getParamType(i));
+      }
+    }
     if (CallArgsValues.size() != CalleeF->getFunctionType()->getNumParams() &&
         !CalleeF->getFunctionType()->isVarArg()) {
       LOG_ERROR() << "CallExprAST signature mismatch for " << Callee
@@ -1630,7 +1731,11 @@ CallExprAST::codegen(StrideCompiler &state) {
     if (!call->getType()->isVoidTy() && OutArgs.size() > 0) {
       auto [outVal, outType] = OutArgs[0]->codegen(state);
       if (outVal->getType()->isPointerTy()) {
-        state.Builder->CreateStore(call, outVal);
+        llvm::Value *result = call;
+        if (outType.has_value() && outType.value()) {
+          result = convertScalar(state, result, outType.value());
+        }
+        state.Builder->CreateStore(result, outVal);
       }
     }
   } else {

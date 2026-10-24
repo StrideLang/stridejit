@@ -34,7 +34,9 @@
 #include "stride/codegen/codeanalysis.hpp"
 #include "stride/parser/declarationnode.h"
 #include "stride/parser/functionnode.h"
+#include "stride/parser/memberaccessnode.h"
 #include "stride/stridejit/functionast.hpp"
+#include "stride/stridejit/namemangler.hpp"
 #include "stride/utils/logger.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -184,6 +186,33 @@ public:
       NamedValues;
   std::map<std::string, llvm::Value *> PortBlockMap;
   std::map<std::string, std::unique_ptr<PrototypeAST>> FunctionProtos;
+  // Names of generated callables that are mangled, e.g. one variant per type
+  // signature of a polymorphic module. Resolves them back to Stride names.
+  NameMangler mangler;
+
+  // Scope of the function instance whose parameter types are being
+  // resolved. Used to find declarations of the nodes connected to its ports.
+  struct ConnectionScope {
+    const ScopeStack *scope;
+    ASTNode tree;
+  };
+  std::vector<ConnectionScope> connectionScopes;
+
+  // Pushes a ConnectionScope for the lifetime of the guard.
+  class ConnectionScopeGuard {
+  public:
+    ConnectionScopeGuard(StrideCompiler &state, const ScopeStack *scope,
+                         ASTNode tree)
+        : m_state(state) {
+      m_state.connectionScopes.push_back({scope, tree});
+    }
+    ~ConnectionScopeGuard() { m_state.connectionScopes.pop_back(); }
+    ConnectionScopeGuard(const ConnectionScopeGuard &) = delete;
+    ConnectionScopeGuard &operator=(const ConnectionScopeGuard &) = delete;
+
+  private:
+    StrideCompiler &m_state;
+  };
   std::map<char, int> BinopPrecedence;
 
   CodeAnalysis::TypeTree m_intanceTree;
@@ -264,6 +293,25 @@ public:
   uint32_t m_idCounter{0};
 
 private:
+  // Type of a block declared `type: <Port>.type`, from what the instance
+  // connects to that port. nullptr if it cannot be determined.
+  llvm::Type *resolvePortMemberType(std::shared_ptr<MemberAccessNode> typeProp,
+                                    std::shared_ptr<DeclarationNode> funcDecl,
+                                    std::shared_ptr<FunctionNode> instance,
+                                    int depth);
+  // Type of a port's block for a given function instance.
+  llvm::Type *getPortBlockType(std::shared_ptr<DeclarationNode> portDecl,
+                               std::shared_ptr<DeclarationNode> funcDecl,
+                               std::shared_ptr<FunctionNode> instance,
+                               int depth);
+  // Type of the value carried by a node connected to a port. isDownstream is
+  // true when the node receives the value, so a function node is described
+  // by its input port; otherwise by its output port.
+  llvm::Type *getConnectedNodeType(ASTNode node, bool isDownstream, int depth);
+  // Declaration of a node connected to a port, from the node or by name in
+  // the current ConnectionScope. Platform modules are not returned.
+  std::shared_ptr<DeclarationNode> findConnectedDeclaration(ASTNode node) const;
+
   uint64_t m_configuration{NO_OPTIONS};
   std::map<std::string, std::pair<llvm::Value *, std::optional<llvm::Type *>>>
       m_globals;
