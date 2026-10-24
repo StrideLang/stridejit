@@ -4,9 +4,20 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/IRBuilder.h"
 
+#include "stride/parser/ast.h"
+
 using namespace strd;
 
 ExprAST::ExprAST() {}
+
+void ExprAST::setLocationFrom(const std::shared_ptr<AST> &node) {
+  if (node) {
+    m_line = node->getLine();
+    m_column = node->getColumn();
+    m_relativeFilename = node->getRelativeFilename();
+    m_absoluteFilename = node->getAbsoluteFilename();
+  }
+}
 
 std::pair<llvm::Value *, std::optional<llvm::Type *>>
 StringExprAST::codegen(StrideCompiler &state) {

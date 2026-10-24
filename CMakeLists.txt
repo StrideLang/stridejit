@@ -135,6 +135,7 @@ set(STRIDEJIT_SRC
   src/strideenvironment.cpp
   src/stridecompiler.cpp
   src/stridegenerator.cpp
+  src/stridedebugemitter.cpp
 )
 
 set(STRIDEJIT_HEADERS
@@ -149,6 +150,7 @@ set(STRIDEJIT_HEADERS
   include/stride/stridejit/strideenvironment.hpp
   include/stride/stridejit/stridecompiler.hpp
   include/stride/stridejit/stridegenerator.hpp
+  include/stride/stridejit/stridedebugemitter.hpp
   include/stride/stridejit/strideruntime_string.h
 )
 

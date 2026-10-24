@@ -32,6 +32,7 @@ if (STRIDEJIT_BUILD_TESTS)
       function_test_runner_tests.cpp
       string_tests.cpp
       namemangler_tests.cpp
+      debug_tests.cpp
       # error_tests.cpp
     )
     add_executable(stridejit_tests ${TEST_SOURCES})

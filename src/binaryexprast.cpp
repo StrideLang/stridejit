@@ -32,6 +32,10 @@ std::pair<llvm::Value *, std::optional<llvm::Type *>>
 BinaryExprAST::codegen(StrideCompiler &state) {
   LOG_INFO() << " == BinaryExprAST codegen " << std::string{Op} << std::endl;
 
+  if (state.debugEmitter && state.debugEmitter->isInitialized() && m_line > 0) {
+    state.debugEmitter->emitLocation(*state.Builder, m_line, m_column);
+  }
+
   // Special case '=' because we don't want to emit the LHS as an expression.
   if (Op == '=') {
     // Assignment requires the LHS to be an identifier.

@@ -40,9 +40,9 @@
 #include "stride/utils/logger.h"
 #include "llvm/Support/raw_ostream.h"
 
-// #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
+#include "stride/stridejit/stridedebugemitter.hpp"
 
 // forward declarations for llvm
 namespace llvm {
@@ -178,6 +178,15 @@ public:
 
   void setConfiguration(StrideConfig option, bool enable = true);
   bool hasConfiguration(StrideConfig option);
+
+  void setDebugInfoEnabled(bool enable = true) { m_debugInfo = enable; }
+  bool isDebugInfoEnabled() const { return m_debugInfo; }
+  void initializeDebugInfo(const std::string &primaryRelFile = "",
+                           const std::string &primaryAbsFile = "");
+  void finalizeDebugInfo();
+
+  std::unique_ptr<StrideDebugEmitter> debugEmitter;
+  bool m_debugInfo{false};
 
   std::unique_ptr<llvm::LLVMContext> TheContext;
   std::unique_ptr<llvm::Module> TheModule;

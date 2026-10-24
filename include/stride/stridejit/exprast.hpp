@@ -25,6 +25,7 @@
 #define EXPRAST_HPP
 
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <variant>
@@ -37,6 +38,7 @@ class Type;
 namespace strd {
 using DefaultVariant = std::variant<double, int32_t, bool, std::string>;
 
+class AST;
 class StrideCompiler;
 
 class ExprAST {
@@ -49,6 +51,27 @@ public:
   codegen(StrideCompiler &state) = 0;
 
   virtual bool writesTo(const std::string &varName) const { return false; }
+
+  int m_line{-1};
+  int m_column{-1};
+  std::string m_relativeFilename;
+  std::string m_absoluteFilename;
+
+  void setLocation(int line, int column = -1,
+                   const std::string &relFile = "",
+                   const std::string &absFile = "") {
+    m_line = line;
+    m_column = column;
+    m_relativeFilename = relFile;
+    m_absoluteFilename = absFile;
+  }
+
+  void setLocationFrom(const std::shared_ptr<AST> &node);
+
+  int getLine() const { return m_line; }
+  int getColumn() const { return m_column; }
+  const std::string &getRelativeFilename() const { return m_relativeFilename; }
+  const std::string &getAbsoluteFilename() const { return m_absoluteFilename; }
 
   std::string typecast;
 };

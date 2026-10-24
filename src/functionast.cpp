@@ -23,6 +23,7 @@
 
 #include "stride/stridejit/exprast.hpp"
 #include "stride/stridejit/functionast.hpp"
+#include "stride/stridejit/stridedebugemitter.hpp"
 #include "stride/stridejit/listexprast.hpp"
 #include "stride/stridejit/numberexprast.hpp"
 #include "stride/stridejit/stridecompiler.hpp"
@@ -79,6 +80,12 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
         // Register in NamedValues so VariableExprAST and assignments locate the
         // alloca
         state.NamedValues[varName] = {alloca, type};
+        if (state.debugEmitter && state.debugEmitter->isInitialized()) {
+          state.debugEmitter->emitLocalVariable(
+              *state.Builder, alloca, varName, decl->getRelativeFilename(),
+              decl->getAbsoluteFilename(), decl->getLine(), decl->getColumn(),
+              state.debugEmitter->getOrCreateTypeForLLVMType(type));
+        }
 
         // Set default values. Should be initialized on every function call as
         // they are not persistent
@@ -273,6 +280,12 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
         // Register in NamedValues so VariableExprAST and assignments locate the
         // alloca
         state.NamedValues[varName] = {alloca, type};
+        if (state.debugEmitter && state.debugEmitter->isInitialized()) {
+          state.debugEmitter->emitLocalVariable(
+              *state.Builder, alloca, varName, decl->getRelativeFilename(),
+              decl->getAbsoluteFilename(), decl->getLine(), decl->getColumn(),
+              state.debugEmitter->getOrCreateTypeForLLVMType(alloca->getAllocatedType()));
+        }
       }
     }
   }
@@ -310,6 +323,22 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   llvm::BasicBlock *BB =
       llvm::BasicBlock::Create(*state.TheContext, "entry", TheFunction);
   state.Builder->SetInsertPoint(BB);
+
+  llvm::DISubprogram *subprogram = nullptr;
+  if (state.debugEmitter && state.debugEmitter->isInitialized() && TheFunction) {
+    std::string dispName = !displayName.empty() ? displayName : protoName;
+    int fnLine = line > 0 ? line : (funcInstance ? funcInstance->getLine() : 1);
+    int fnCol = column > 0 ? column : (funcInstance ? funcInstance->getColumn() : 1);
+    std::string relFile = !relativeFilename.empty() ? relativeFilename
+        : (funcInstance ? funcInstance->getRelativeFilename() : "");
+    std::string absFile = !absoluteFilename.empty() ? absoluteFilename
+        : (funcInstance ? funcInstance->getAbsoluteFilename() : "");
+
+    subprogram = state.debugEmitter->createSubprogram(
+        TheFunction, dispName, protoName, relFile, absFile, fnLine, fnLine);
+    state.debugEmitter->pushScope(subprogram);
+    state.debugEmitter->clearLocation(*state.Builder);
+  }
 
   auto argTypes = P.getUsedArgsTypes();
 
@@ -373,6 +402,18 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
               state.currentFunctionStateInfo->structType,
               state.currentFunctionStatePtr, idx, varName + "_ptr");
           state.NamedValues[varName] = {fieldPtr, elemTy};
+          if (state.debugEmitter && subprogram) {
+            std::string relFile = !relativeFilename.empty()
+                ? relativeFilename
+                : (funcInstance ? funcInstance->getRelativeFilename() : "");
+            std::string absFile = !absoluteFilename.empty()
+                ? absoluteFilename
+                : (funcInstance ? funcInstance->getAbsoluteFilename() : "");
+            state.debugEmitter->emitLocalVariable(
+                *state.Builder, fieldPtr, varName, relFile, absFile,
+                line > 0 ? line : 1, column > 0 ? column : 1,
+                state.debugEmitter->getOrCreateTypeForLLVMType(elemTy), subprogram);
+          }
           LOG_DEBUG() << "DEBUG: Added " << varName << " to NamedValues!\n";
         }
       }
@@ -622,6 +663,17 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
         PHIVariables[VarName] = Variable;
         OldVals[VarName] = state.NamedValues[VarName].first;
         state.NamedValues[VarName] = {Variable, type};
+
+        if (state.debugEmitter && subprogram && decl) {
+          ElementContext ctx;
+          ctx.kind = ElementContext::Kind::Generator;
+          ctx.varName = VarName;
+          ctx.currentVal = Variable;
+          state.debugEmitter->pushElementContext(ctx);
+          state.debugEmitter->emitElementContextVariable(
+              *state.Builder, decl->getRelativeFilename(),
+              decl->getAbsoluteFilename(), decl->getLine(), decl->getColumn());
+        }
       }
 
       for (const auto &portPropArg : P.getUsedMemberAccesses()) {
@@ -642,6 +694,10 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   for (const auto &statement : Body) {
     if (!statement) {
       return nullptr;
+    }
+    if (state.debugEmitter && subprogram && statement->getLine() > 0) {
+      state.debugEmitter->emitLocation(*state.Builder, statement->getLine(),
+                                       statement->getColumn(), subprogram);
     }
     auto [RetVal, retType] = statement->codegen(state);
 
@@ -758,6 +814,10 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
         state.NamedValues[oldVal.first] = {oldVal.second, std::nullopt};
       else
         state.NamedValues.erase(oldVal.first);
+
+      if (state.debugEmitter && subprogram) {
+        state.debugEmitter->popElementContext();
+      }
     }
   }
 
@@ -786,6 +846,9 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     llvm::raw_string_ostream rso(s);
     TheFunction->print(rso);
     LOG_DEBUG() << rso.str() << "\n";
+  }
+  if (state.debugEmitter && subprogram) {
+    state.debugEmitter->popScope();
   }
   return TheFunction;
 }
@@ -1240,6 +1303,10 @@ CallExprAST::codegen(StrideCompiler &state) {
   LOG_INFO() << " == CallExprAST codegen for "
              << std::string(CalleeF->getName()) << " -> " << instanceName
              << std::endl;
+
+  if (state.debugEmitter && state.debugEmitter->isInitialized() && m_line > 0) {
+    state.debugEmitter->emitLocation(*state.Builder, m_line, m_column);
+  }
 
   std::vector<std::pair<llvm::Value *, std::optional<llvm::Type *>>> CallArgs;
   std::vector<std::tuple<std::string, llvm::AllocaInst *, llvm::Type *>>

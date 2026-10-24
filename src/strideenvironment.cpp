@@ -22,10 +22,12 @@
 // llvm
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Config/llvm-config.h"
+#include "llvm/ExecutionEngine/JITEventListener.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
 #include "llvm/ExecutionEngine/Orc/Core.h"
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
 #include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
+#include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/LLVMContext.h"
@@ -60,7 +62,11 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
+#if __has_include(<llvm/TargetParser/Host.h>)
 #include "llvm/TargetParser/Host.h"
+#else
+#include "llvm/Support/Host.h"
+#endif
 
 using namespace strd;
 
@@ -327,6 +333,14 @@ bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
     m_primarySourcePath = root->getFilename();
   }
 
+  if (m_debugInfo) {
+    std::string relFile = root ? root->getRelativeFilename() : "";
+    std::string absFile = root ? root->getAbsoluteFilename() : "";
+    if (relFile.empty()) relFile = m_primarySourcePath;
+    if (absFile.empty()) absFile = m_primarySourcePath;
+    mStrideEnv.initializeDebugInfo(relFile, absFile);
+  }
+
   prepareTree(root);
   if (!validateDataTypes(root)) {
     return false;
@@ -379,7 +393,7 @@ bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
 void StrideEnvironment::optimizeModule() {
   snapshotStateDefaults();
   m_moduleOptimized = true;
-  if (m_optimizeCode) {
+  if (m_optimizeCode && m_optimizationLevel > 0) {
 #if LLVM_VERSION_MAJOR >= 17
     // New Pass Manager
     llvm::LoopAnalysisManager LAM;
@@ -395,8 +409,15 @@ void StrideEnvironment::optimizeModule() {
     PB.registerLoopAnalyses(LAM);
     PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
 
+    llvm::OptimizationLevel optLevel = llvm::OptimizationLevel::O2;
+    if (m_optimizationLevel == 1) {
+      optLevel = llvm::OptimizationLevel::O1;
+    } else if (m_optimizationLevel == 3) {
+      optLevel = llvm::OptimizationLevel::O3;
+    }
+
     llvm::ModulePassManager MPM =
-        PB.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
+        PB.buildPerModuleDefaultPipeline(optLevel);
 
     MPM.run(*mStrideEnv.TheModule, MAM);
 #else
@@ -1395,6 +1416,33 @@ int32_t StrideEnvironment::invoke(const std::string &funcName,
   return invoke(funcName, params.data());
 }
 
+int32_t StrideEnvironment::stepTick(const std::string &domainOrFuncName,
+                                   void *statePtr,
+                                   const std::vector<void *> &inOutArgs) {
+  std::string targetFunc = domainOrFuncName;
+  if (mStrideEnv.FunctionProtos.find(targetFunc) ==
+      mStrideEnv.FunctionProtos.end()) {
+    if (mStrideEnv.FunctionProtos.find(targetFunc + "::process") !=
+        mStrideEnv.FunctionProtos.end()) {
+      targetFunc = targetFunc + "::process";
+    }
+  }
+
+  auto argInfos = getFunctionArgs(targetFunc);
+  std::vector<void *> callArgs(argInfos.size(), nullptr);
+  size_t userArgIdx = 0;
+
+  for (size_t i = 0; i < argInfos.size(); ++i) {
+    if (argInfos[i].role == FunctionArgInfo::Role::State) {
+      callArgs[i] = statePtr ? statePtr : allocateState(targetFunc);
+    } else if (userArgIdx < inOutArgs.size()) {
+      callArgs[i] = inOutArgs[userArgIdx++];
+    }
+  }
+
+  return invoke(targetFunc, callArgs.data());
+}
+
 std::string StrideEnvironment::getJitObjectTag() const {
   return "jit_obj_" + llvm::sys::getDefaultTargetTriple() + "_" +
          (m_optimizeCode ? "O2" : "O0");
@@ -1417,7 +1465,8 @@ bool StrideEnvironment::compileInMemory() {
   }
 
   if (!haveCachedObj) {
-    if (m_optimizeCode && !m_moduleOptimized) {
+    mStrideEnv.finalizeDebugInfo();
+    if (m_optimizeCode && !m_moduleOptimized && m_optimizationLevel > 0) {
       optimizeModule();
     }
     if (m_cacheBitcode && !m_primarySourcePath.empty() &&
@@ -1460,6 +1509,15 @@ bool StrideEnvironment::compileInMemory() {
     return false; // JIT.takeError();
   }
   JIT = std::move(*JIT_);
+  if (m_debugInfo) {
+    if (auto *rtld = llvm::dyn_cast<llvm::orc::RTDyldObjectLinkingLayer>(
+            &JIT->getObjLinkingLayer())) {
+      if (auto *gdbListener =
+              llvm::JITEventListener::createGDBRegistrationListener()) {
+        rtld->registerJITEventListener(*gdbListener);
+      }
+    }
+  }
   auto librarySearch =
       llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(
           JIT->getDataLayout().getGlobalPrefix());
@@ -1577,6 +1635,8 @@ bool StrideEnvironment::compileInMemory() {
     }
   }
 
+  mStrideEnv.finalizeDebugInfo();
+
   if (mStrideEnv.TheModule && mStrideEnv.TheContext) {
     snapshotStateDefaults();
     TSCtx = llvm::orc::ThreadSafeContext(std::move(mStrideEnv.TheContext));
@@ -1593,8 +1653,7 @@ bool StrideEnvironment::compileInMemory() {
   return true;
 }
 
-#include "llvm/Support/TargetSelect.h"
-#include "llvm/TargetParser/Host.h"
+
 
 bool StrideEnvironment::compileObjectToDisk(std::string path) {
   if (m_optimizeCode && !m_moduleOptimized) {
@@ -1772,6 +1831,7 @@ bool StrideEnvironment::generateCompiledObject(std::string path,
     return false;
   }
 
+  mStrideEnv.finalizeDebugInfo();
   pass.run(*mStrideEnv.TheModule);
   dest.flush();
   return true;
@@ -1960,7 +2020,8 @@ bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
                                        const std::string &features,
                                        const std::string &relocModel,
                                        const std::string &codeModel) {
-  if (m_optimizeCode && !m_moduleOptimized) {
+  mStrideEnv.finalizeDebugInfo();
+  if (m_optimizeCode && !m_moduleOptimized && m_optimizationLevel > 0) {
     optimizeModule();
   }
   llvm::InitializeAllTargetInfos();
@@ -2022,14 +2083,23 @@ bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
     cm = llvm::CodeModel::Large;
   }
 
+  llvm::CodeGenOptLevel codegenOpt = llvm::CodeGenOptLevel::Default;
+  if (m_optimizationLevel == 0 || m_buildType == BuildType::Debug) {
+    codegenOpt = llvm::CodeGenOptLevel::None;
+  } else if (m_optimizationLevel == 1) {
+    codegenOpt = llvm::CodeGenOptLevel::Less;
+  } else if (m_optimizationLevel == 3) {
+    codegenOpt = llvm::CodeGenOptLevel::Aggressive;
+  }
+
 #if LLVM_VERSION_MAJOR >= 20
   auto targetMachine =
       target->createTargetMachine(theTriple, targetCPU, targetFeatures, opt, rm,
-                                  cm, llvm::CodeGenOptLevel::Default);
+                                  cm, codegenOpt);
 #else
   auto targetMachine =
       target->createTargetMachine(theTriple.str(), targetCPU, targetFeatures,
-                                  opt, rm, cm, llvm::CodeGenOptLevel::Default);
+                                  opt, rm, cm, codegenOpt);
 #endif
 
   if (!targetMachine) {
@@ -2067,6 +2137,7 @@ bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
     return false;
   }
 
+  mStrideEnv.finalizeDebugInfo();
   pass.run(*mStrideEnv.TheModule);
   dest.flush();
   return true;
