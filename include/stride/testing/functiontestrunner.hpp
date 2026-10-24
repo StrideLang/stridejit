@@ -78,6 +78,7 @@ public:
 
     TestRunResult runTest(const FunctionTestSpec& spec);
     TestRunResult runTestWithFunction(const FunctionTestSpec& spec, void* processFn);
+    bool stepTick(void* processFn = nullptr);
 
 private:
     std::unique_ptr<DynamicLoader> m_loader;

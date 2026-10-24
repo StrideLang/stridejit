@@ -125,6 +125,12 @@ public:
   bool hasState{false};
   ASTNode funcInstance{nullptr};
 
+  int line{-1};
+  int column{-1};
+  std::string relativeFilename;
+  std::string absoluteFilename;
+  std::string displayName;
+
 private:
   void allocateInternalVariables(StrideCompiler &state,
                                  llvm::Function *TheFunction);

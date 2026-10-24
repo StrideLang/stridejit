@@ -1,4 +1,5 @@
 #include "stride/stridejit/statemachine.hpp"
+#include "stride/stridejit/stridedebugemitter.hpp"
 #include "stride/stridejit/stridecompiler.hpp"
 #include "stride/stridejit/numberexprast.hpp"
 
@@ -368,6 +369,10 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
 
     for (const auto *aFs : initAncestry) {
       for (auto &expr : aFs->onEntryCode) {
+        if (state.debugEmitter && expr->getLine() > 0) {
+          state.debugEmitter->emitLocation(*state.Builder, expr->getLine(),
+                                           expr->getColumn());
+        }
         expr->codegen(state);
       }
     }
@@ -606,6 +611,10 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
 
       for (const auto *eFs : exitedStates) {
         for (auto &expr : eFs->onExitCode) {
+          if (state.debugEmitter && expr->getLine() > 0) {
+            state.debugEmitter->emitLocation(*state.Builder, expr->getLine(),
+                                             expr->getColumn());
+          }
           expr->codegen(state);
         }
 
@@ -631,13 +640,40 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
         }
       }
 
+      bool hasElementContext = false;
       if (t.isGenerator && !t.generatorVar.empty() && reqArgVal) {
         state.NamedValues[t.generatorVar] = {reqArgVal,
                                              state.Builder->getInt32Ty()};
+        if (state.isDebugInfoEnabled() && state.debugEmitter) {
+          ElementContext ctx;
+          ctx.kind = ElementContext::Kind::Generator;
+          ctx.varName = t.generatorVar;
+          ctx.currentVal = reqArgVal;
+          ctx.totalCount =
+              (t.rangeEnd >= t.rangeStart) ? (t.rangeEnd - t.rangeStart + 1) : 0;
+          state.debugEmitter->pushElementContext(ctx);
+          std::string relFile =
+              t.transitionDecl ? t.transitionDecl->getRelativeFilename() : "";
+          std::string absFile =
+              t.transitionDecl ? t.transitionDecl->getAbsoluteFilename() : "";
+          int line = t.transitionDecl ? t.transitionDecl->getLine() : -1;
+          int col = t.transitionDecl ? t.transitionDecl->getColumn() : -1;
+          state.debugEmitter->emitElementContextVariable(
+              *state.Builder, relFile, absFile, line, col);
+          hasElementContext = true;
+        }
       }
 
       for (auto &expr : t.onTransitionCode) {
+        if (state.debugEmitter && expr->getLine() > 0) {
+          state.debugEmitter->emitLocation(*state.Builder, expr->getLine(),
+                                           expr->getColumn());
+        }
         expr->codegen(state);
+      }
+
+      if (hasElementContext) {
+        state.debugEmitter->popElementContext();
       }
 
       // Handle transition to target state (checking resumeLastState history)
@@ -694,12 +730,20 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
 
           for (const auto *aFs : targetAncestry) {
             for (auto &expr : aFs->updateGuardCode) {
+              if (state.debugEmitter && expr->getLine() > 0) {
+                state.debugEmitter->emitLocation(*state.Builder, expr->getLine(),
+                                                 expr->getColumn());
+              }
               expr->codegen(state);
             }
           }
 
           for (const auto *aFs : targetAncestry) {
             for (auto &expr : aFs->onEntryCode) {
+              if (state.debugEmitter && expr->getLine() > 0) {
+                state.debugEmitter->emitLocation(*state.Builder, expr->getLine(),
+                                                 expr->getColumn());
+              }
               expr->codegen(state);
             }
           }
@@ -716,6 +760,10 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
 
     // Run onProcessCode
     for (auto &expr : fs.onProcessCode) {
+      if (state.debugEmitter && expr->getLine() > 0) {
+        state.debugEmitter->emitLocation(*state.Builder, expr->getLine(),
+                                         expr->getColumn());
+      }
       expr->codegen(state);
     }
 
@@ -724,6 +772,10 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
       for (auto &childFs : smContext.flattenedStates) {
         if (childFs.parentId == fs.id) {
           for (auto &expr : childFs.onProcessCode) {
+            if (state.debugEmitter && expr->getLine() > 0) {
+              state.debugEmitter->emitLocation(*state.Builder, expr->getLine(),
+                                               expr->getColumn());
+            }
             expr->codegen(state);
           }
         }

@@ -804,6 +804,17 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
     }
 
     stateStructMap[nodeTree.instance] = info;
+    if (debugEmitter && debugEmitter->isInitialized()) {
+      std::vector<std::pair<std::string, llvm::DIType *>> debugFields;
+      for (const auto &[varName, idx] : info.varIndices) {
+        if (idx < fieldTypes.size()) {
+          debugFields.push_back(
+              {varName, debugEmitter->getOrCreateTypeForLLVMType(fieldTypes[idx])});
+        }
+      }
+      debugEmitter->createStateStructType("struct." + name + "_state",
+                                          debugFields, info.allocSize);
+    }
   }
 }
 
@@ -845,3 +856,19 @@ void StrideCompiler::buildStateStructTypes(const CodeAnalysis::TypeTree &tree,
     buildNodeState(node);
   }
 }
+
+void StrideCompiler::initializeDebugInfo(const std::string &primaryRelFile,
+                                         const std::string &primaryAbsFile) {
+  if (!debugEmitter) {
+    debugEmitter = std::make_unique<StrideDebugEmitter>(*TheModule);
+  }
+  debugEmitter->initialize(primaryRelFile, primaryAbsFile);
+  m_debugInfo = true;
+}
+
+void StrideCompiler::finalizeDebugInfo() {
+  if (debugEmitter) {
+    debugEmitter->finalize();
+  }
+}
+

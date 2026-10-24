@@ -483,6 +483,22 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                                 ss << (std::get<bool>(actualScalar) ? "true" : "false");
                             }
                         }
+                        ss << "\n  Input causal slice at tick " << t << ":\n";
+                        for (size_t inIdx = 0; inIdx < m_argInfos.size(); ++inIdx) {
+                            if (m_argInfos[inIdx].role == FunctionArgInfo::Role::Input) {
+                                ss << "    " << m_argInfos[inIdx].name << " = ";
+                                if (inIdx < argBuffers.size()) {
+                                    if (m_argInfos[inIdx].type == DataType::INT32 && !argBuffers[inIdx].int32Vec.empty()) {
+                                        ss << argBuffers[inIdx].int32Vec[0];
+                                    } else if (m_argInfos[inIdx].type == DataType::BOOL && !argBuffers[inIdx].boolVec.empty()) {
+                                        ss << (argBuffers[inIdx].boolVec[0] ? "true" : "false");
+                                    } else if (!argBuffers[inIdx].doubleVec.empty()) {
+                                        ss << argBuffers[inIdx].doubleVec[0];
+                                    }
+                                }
+                                ss << "\n";
+                            }
+                        }
                         result.errorMessage = ss.str();
                         result.ticksExecuted = t;
                         return result;
@@ -499,6 +515,25 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
         });
 
         return result;
+}
+
+bool FunctionTestRunner::stepTick(void* processFn) {
+    void* fn = processFn ? processFn : (m_invokerPointer ? m_invokerPointer : m_directFunctionPointer);
+    if (!fn) {
+        return false;
+    }
+    if (m_invokerPointer) {
+        std::vector<void*> invokerArgs(m_argInfos.size(), nullptr);
+        for (size_t i = 0; i < m_argInfos.size(); ++i) {
+            if (m_argInfos[i].role == FunctionArgInfo::Role::State) {
+                invokerArgs[i] = m_statePtr;
+            }
+        }
+        auto* invoker = reinterpret_cast<int32_t(*)(void**)>(m_invokerPointer);
+        invoker(invokerArgs.data());
+        return true;
+    }
+    return false;
 }
 
 } // namespace strd::test

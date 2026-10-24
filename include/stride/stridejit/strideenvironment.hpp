@@ -102,8 +102,14 @@ private:
   std::unordered_map<std::string, size_t> m_nameToIndex;
 };
 
+enum class BuildType { Debug, Release, RelWithDebInfo, MinSizeRel };
+enum class DebugInfoLevel { None, LineTablesOnly, Full };
+
 class StrideEnvironment {
 public:
+  using BuildType = strd::BuildType;
+  using DebugInfoLevel = strd::DebugInfoLevel;
+
   StrideEnvironment(std::string strideroot = std::string());
 
   // Include paths
@@ -146,6 +152,53 @@ public:
   bool isObjectCachingEnabled() const { return m_cacheObjectCode; }
   void enableBitcodeCaching(bool enabled) { m_cacheBitcode = enabled; }
   bool isBitcodeCachingEnabled() const { return m_cacheBitcode; }
+  void enableDebugInfo(bool enabled = true) {
+    m_debugInfo = enabled;
+    mStrideEnv.setDebugInfoEnabled(enabled);
+  }
+  bool isDebugInfoEnabled() const { return m_debugInfo; }
+  void setBuildType(BuildType type) {
+    m_buildType = type;
+    switch (type) {
+    case BuildType::Debug:
+      enableDebugInfo(true);
+      m_debugInfoLevel = DebugInfoLevel::Full;
+      m_optimizationLevel = 0;
+      m_optimizeCode = false;
+      break;
+    case BuildType::RelWithDebInfo:
+      enableDebugInfo(true);
+      m_debugInfoLevel = DebugInfoLevel::LineTablesOnly;
+      m_optimizationLevel = 2;
+      m_optimizeCode = true;
+      break;
+    case BuildType::Release:
+      enableDebugInfo(false);
+      m_debugInfoLevel = DebugInfoLevel::None;
+      m_optimizationLevel = 3;
+      m_optimizeCode = true;
+      break;
+    case BuildType::MinSizeRel:
+      enableDebugInfo(false);
+      m_debugInfoLevel = DebugInfoLevel::None;
+      m_optimizationLevel = 2;
+      m_optimizeCode = true;
+      break;
+    }
+  }
+  BuildType getBuildType() const { return m_buildType; }
+
+  void setDebugInfoLevel(DebugInfoLevel level) {
+    m_debugInfoLevel = level;
+    enableDebugInfo(level != DebugInfoLevel::None);
+  }
+  DebugInfoLevel getDebugInfoLevel() const { return m_debugInfoLevel; }
+
+  void setOptimizationLevel(int level) {
+    m_optimizationLevel = level;
+    m_optimizeCode = (level > 0);
+  }
+  int getOptimizationLevel() const { return m_optimizationLevel; }
   void setPrimarySourcePath(const std::string &path) { m_primarySourcePath = path; }
   const std::string &getPrimarySourcePath() const { return m_primarySourcePath; }
   std::string getJitObjectTag() const;
@@ -251,6 +304,8 @@ public:
   createInvokerParamList(const std::string &funcName) const;
   int32_t invoke(const std::string &funcName, void **args);
   int32_t invoke(const std::string &funcName, InvokerParameterList &params);
+  int32_t stepTick(const std::string &domainOrFuncName, void *statePtr = nullptr,
+                   const std::vector<void *> &inOutArgs = {});
 
   void prepareTree(ASTNode tree);
 
@@ -294,6 +349,10 @@ private:
   bool m_moduleOptimized{false};
   bool m_cacheObjectCode{true};
   bool m_cacheBitcode{true};
+  bool m_debugInfo{false};
+  BuildType m_buildType{BuildType::Release};
+  DebugInfoLevel m_debugInfoLevel{DebugInfoLevel::None};
+  int m_optimizationLevel{2};
 };
 
 template <typename T> T *StrideEnvironment::getGlobal(std::string varName) {

@@ -170,6 +170,13 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
     processFunc->callType = CallableType::DomainFunction;
     processFunc->hasState = domainNeedsState;
     processFunc->funcInstance = domainDecl;
+    if (domainDecl) {
+      processFunc->line = domainDecl->getLine();
+      processFunc->column = domainDecl->getColumn();
+      processFunc->relativeFilename = domainDecl->getRelativeFilename();
+      processFunc->absoluteFilename = domainDecl->getAbsoluteFilename();
+    }
+    processFunc->displayName = domainName + "::process";
 
     if (auto *processLlvm = processFunc->codegen(state)) {
       generateInvoker(processLlvm, state);
@@ -404,6 +411,13 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
     initFunc->callType = CallableType::DomainFunction;
     initFunc->hasState = domainNeedsState;
     initFunc->funcInstance = domainDecl;
+    if (domainDecl) {
+      initFunc->line = domainDecl->getLine();
+      initFunc->column = domainDecl->getColumn();
+      initFunc->relativeFilename = domainDecl->getRelativeFilename();
+      initFunc->absoluteFilename = domainDecl->getAbsoluteFilename();
+    }
+    initFunc->displayName = domainName + "::init";
     // Add domain member variables (globals)
     // for (const auto &global : generatedIRCode.GlobalSignals) {
     //   initFunc->internalVariables.push_back(global);
@@ -420,11 +434,11 @@ std::unique_ptr<ExprAST> StrideGenerator::createExpr(ASTNode node) {
   if (!node) {
     return nullptr;
   }
+  std::unique_ptr<ExprAST> V = nullptr;
   if (node->getNodeType() == AST::Entity) {
-    std::unique_ptr<ExprAST> V = std::make_unique<VariableExprAST>(
+    V = std::make_unique<VariableExprAST>(
         std::static_pointer_cast<EntityNode>(node)->getName());
     setTypeCastMetadata(node, V.get());
-    return V;
   } else if (node->getNodeType() == AST::Array) {
     auto arrayNode = std::static_pointer_cast<ArrayNode>(node);
 
@@ -439,27 +453,23 @@ std::unique_ptr<ExprAST> StrideGenerator::createExpr(ASTNode node) {
         LOG_ERROR() << "Unsupported node type for array index.";
       }
     }
-    auto V = std::make_unique<VariableExprAST>(arrayNode->getName(), indeces);
+    V = std::make_unique<VariableExprAST>(arrayNode->getName(), indeces);
     setTypeCastMetadata(node, V.get());
-    return V;
   } else if (node->getNodeType() == AST::Real) {
     // TODO separate float types
-    auto V = std::make_unique<RealExprAST>(
+    V = std::make_unique<RealExprAST>(
         std::static_pointer_cast<ValueNode>(node)->getRealValue());
     setTypeCastMetadata(node, V.get());
-    return V;
   } else if (node->getNodeType() == AST::Int) {
     // TODO separate int types
-    auto V = std::make_unique<IntExprAST>(
+    V = std::make_unique<IntExprAST>(
         std::static_pointer_cast<ValueNode>(node)->getIntValue());
     setTypeCastMetadata(node, V.get());
-    return V;
   } else if (node->getNodeType() == AST::Switch) {
     // TODO separate int types
-    auto V = std::make_unique<BoolExprAST>(
+    V = std::make_unique<BoolExprAST>(
         std::static_pointer_cast<ValueNode>(node)->getSwitchValue());
     setTypeCastMetadata(node, V.get());
-    return V;
   } else if (node->getNodeType() == AST::Expression) {
     auto expr = std::static_pointer_cast<ExpressionNode>(node);
     if (expr->isUnary()) {
@@ -470,57 +480,55 @@ std::unique_ptr<ExprAST> StrideGenerator::createExpr(ASTNode node) {
         if (!operand) {
           return nullptr;
         }
-        auto V = std::make_unique<BinaryExprAST>(
+        V = std::make_unique<BinaryExprAST>(
             '*', std::move(operand),
             std::make_unique<IntExprAST>(static_cast<int32_t>(-1)));
         setTypeCastMetadata(node, V.get());
-        return V;
+      } else {
+        LOG_ERROR() << " Unsupported unary expression type: "
+                    << expr->getExpressionTypeString() << std::endl;
+        return nullptr;
       }
-      LOG_ERROR() << " Unsupported unary expression type: "
-                  << expr->getExpressionTypeString() << std::endl;
-      return nullptr;
     } else {
       auto l = createExpr(expr->getLeft());
       auto r = createExpr(expr->getRight());
       char op;
       if (expr->getExpressionType() == ExpressionNode::Multiply) {
-
         op = '*';
       } else if (expr->getExpressionType() == ExpressionNode::Divide) {
-
         op = '/';
       } else if (expr->getExpressionType() == ExpressionNode::Add) {
-
         op = '+';
       } else if (expr->getExpressionType() == ExpressionNode::Subtract) {
-
         op = '-';
       } else {
         assert(0 == 1);
         return nullptr;
       }
 
-      auto V = std::make_unique<BinaryExprAST>(op, std::move(l), std::move(r));
+      V = std::make_unique<BinaryExprAST>(op, std::move(l), std::move(r));
       setTypeCastMetadata(node, V.get());
-      return V;
     }
   } else if (node->getNodeType() == AST::List) {
-    auto list = std::make_unique<ListExprAST>(node->getChildren());
-    return list;
+    V = std::make_unique<ListExprAST>(node->getChildren());
   } else if (node->getNodeType() == AST::String) {
     auto val = std::static_pointer_cast<ValueNode>(node)->getStringValue();
-    auto strExpr = std::make_unique<StringExprAST>(val);
-    setTypeCastMetadata(node, strExpr.get());
-    return strExpr;
+    V = std::make_unique<StringExprAST>(val);
+    setTypeCastMetadata(node, V.get());
   } else if (node->getNodeType() == AST::MemberAccess) {
     auto pp = std::static_pointer_cast<MemberAccessNode>(node);
-    auto V = std::make_unique<MemberAccessAST>(pp->getEntity(),
-                                               pp->getPropertyName());
+    V = std::make_unique<MemberAccessAST>(pp->getEntity(),
+                                          pp->getPropertyName());
     setTypeCastMetadata(node, V.get());
-    return V;
+  } else {
+    LOG_ERROR() << " Node type not supported " << std::endl;
+    return nullptr;
   }
-  LOG_ERROR() << " Node type not supported " << std::endl;
-  return nullptr;
+
+  if (V && node) {
+    V->setLocationFrom(node);
+  }
+  return V;
 }
 
 std::vector<std::unique_ptr<ExprAST>> StrideGenerator::generateStreamsForNodes(
@@ -1486,6 +1494,9 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         generated[domainName].expr.back() = std::make_unique<BinaryExprAST>(
             '=', std::move(entityExpr),
             std::move(generated[domainName].expr.back()));
+        if (stream) {
+          generated[domainName].expr.back()->setLocationFrom(stream);
+        }
       } else {
         generated[domainName].expr.push_back(std::move(entityExpr));
       }
@@ -1853,6 +1864,9 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               std::move(PortPropArgs), std::move(args.MainOut.argTypes),
               std::move(args.MainIn.argTypes),
               std::move(args.Properties.argTypes), state.getName());
+          if (func) {
+            callexpr->setLocationFrom(func);
+          }
           auto *callTypeTree = state.findTypeTreeNode(func);
           if (!callTypeTree && funcDecl) {
             callTypeTree = state.findTypeTreeNode(funcDecl);
@@ -2285,6 +2299,13 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
   newfunc->hasState = funcNeedsState;
   newfunc->funcInstance =
       funcInstance ? ASTNode(funcInstance) : ASTNode(funcDecl);
+  if (funcDecl) {
+    newfunc->line = funcDecl->getLine();
+    newfunc->column = funcDecl->getColumn();
+    newfunc->relativeFilename = funcDecl->getRelativeFilename();
+    newfunc->absoluteFilename = funcDecl->getAbsoluteFilename();
+  }
+  newfunc->displayName = funcName;
 
   if (funcDecl->getEntityType() == "module") {
     newfunc->callType = CallableType::Module;
