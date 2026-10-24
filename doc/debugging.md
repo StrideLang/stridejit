@@ -138,11 +138,11 @@ The `StrideEnvironment::stepTick()` and `DomainStepper` APIs provide fine-graine
 strd::StrideEnvironment env;
 env.setBuildType(strd::BuildType::Debug);
 env.setDebugInfoLevel(strd::DebugInfoLevel::Full);
-env.loadSource("GameSystem.stride");
+env.loadSource("SensorDSP.stride");
 
 // Single-step discrete ticks through domain execution
 for (int tick = 0; tick < 10; ++tick) {
-    env.stepTick("GameDomain");
+    env.stepTick("SensorDSP");
     // Query intermediate state or verify invariants
 }
 ```
