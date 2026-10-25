@@ -7,10 +7,10 @@ _domainDefinition RootDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal In {default: 3.0 type: _RealType reset: Reset domain: RootDomain}
+        signal In {default: 3.0 type: Real reset: Reset domain: RootDomain}
     ]
     outputs: [
-        signal Count {default: 0 type: _IntType reset: Reset domain: RootDomain}
+        signal Count {default: 0 type: Int reset: Reset domain: RootDomain}
     ]
 	domainFunctionCode: ''
 }

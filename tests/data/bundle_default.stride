@@ -8,12 +8,12 @@ _domainDefinition RootDomain {
     inputs: [
     ]
     outputs: [
-        signal Out[3] { domain: RootDomain default: 0 type: _IntType }
+        signal Out[3] { domain: RootDomain default: 0 type: Int }
     ]
 	domainFunctionCode: ''
 }
 
-signal A[2] {type: _IntType default: [5,2] domain: RootDomain}
+signal A[2] {type: Int default: [5,2] domain: RootDomain}
 
 module Add {
     ports: [
@@ -25,9 +25,9 @@ module Add {
         }
     ]
     blocks: [
-        signal Input[2] { type: _IntType}
-        signal Internal[2] {type: _IntType default: [1,2]}
-        signal Output {type: _IntType}
+        signal Input[2] { type: Int}
+        signal Internal[2] {type: Int default: [1,2]}
+        signal Output {type: Int}
     ]
     streams: [
         Internal[0] + Internal[1] + Input[0] + Input[1] >> Output;
@@ -47,9 +47,9 @@ module AddIntSingle {
         }
     ]
     blocks: [
-        signal Input[2] { type: _IntType}
-        signal Internal[2] {type: _IntType default: 3}
-        signal Output {type: _IntType}
+        signal Input[2] { type: Int}
+        signal Internal[2] {type: Int default: 3}
+        signal Output {type: Int}
     ]
     streams: [
         Internal[0] + Internal[1] + Input[0] + Input[1] >> Output;

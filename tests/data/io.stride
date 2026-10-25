@@ -6,10 +6,10 @@ _domainDefinition RootDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal In { domain: RootDomain type: _RealType}
+        signal In { domain: RootDomain type: Real}
     ]
     outputs: [
-        signal Out { domain: RootDomain type: _RealType }
+        signal Out { domain: RootDomain type: Real }
     ]
 	domainFunctionCode: ''
 }

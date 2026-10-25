@@ -1,7 +1,7 @@
 # Test multi-stage triggered reaction pipeline and literal on stream
 
-signal Result { type: _IntType default: 0 }
-signal LiteralOnResult { type: _IntType default: 0 }
+signal Result { type: Int default: 0 }
+signal LiteralOnResult { type: Int default: 0 }
 switch Trigger { default: off }
 
 reaction StepA {
@@ -15,8 +15,8 @@ reaction StepA {
         }
     ]
     blocks: [
-        signal Factor { type: _IntType }
-        signal OutA { type: _IntType }
+        signal Factor { type: Int }
+        signal OutA { type: Int }
     ]
     streams: [
         Factor * 3 >> OutA;
@@ -37,9 +37,9 @@ reaction StepB {
         }
     ]
     blocks: [
-        signal InB { type: _IntType }
-        signal Offset { type: _IntType }
-        signal OutB { type: _IntType }
+        signal InB { type: Int }
+        signal Offset { type: Int }
+        signal OutB { type: Int }
     ]
     streams: [
         InB + Offset >> OutB;
@@ -60,9 +60,9 @@ reaction StepC {
         }
     ]
     blocks: [
-        signal InC { type: _IntType }
-        signal Multiplier { type: _IntType }
-        signal OutC { type: _IntType }
+        signal InC { type: Int }
+        signal Multiplier { type: Int }
+        signal OutC { type: Int }
     ]
     streams: [
         InC * Multiplier >> OutC;

@@ -55,7 +55,7 @@ struct StrideStringView {
   bool operator!=(const char *other) const { return !(*this == other); }
 };
 
-// ABI contract: the JIT's _StringType is the LLVM struct { ptr, i32 }. The
+// ABI contract: the JIT's String data type is the LLVM struct { ptr, i32 }. The
 // host-side view must be bit-identical, and no layout assumption may drift.
 // NOTE: aggregates are never passed or returned by value across the
 // JIT <-> C++ boundary (calling conventions for them differ per platform and
@@ -63,8 +63,8 @@ struct StrideStringView {
 // registers). Use the pointer-based __stride_jit_string_* entry points.
 static_assert(std::is_standard_layout<StrideStringView>::value,
               "StrideStringView must be standard-layout to mirror the LLVM "
-              "{ptr, i32} _StringType");
-// The length is a fixed 32-bit integer (same as _IntType), so the layout is
+              "{ptr, i32} String");
+// The length is a fixed 32-bit integer (same as Int32), so the layout is
 // identical in LLVM and C++ on 32- and 64-bit targets: natural alignment
 // gives 8 bytes on ILP32 and 16 bytes (4 bytes of padding) on LP64.
 static_assert(sizeof(int32_t) == 4, "length must be 32-bit");
@@ -172,7 +172,7 @@ STRIDE_EXPORT void __stride_string_print(strd::StrideStringView str);
 // ---------------------------------------------------------------------------
 // JIT-facing entry points. These are ABI-neutral: strings are always passed by
 // pointer, string results are written through a trailing out pointer, and
-// integers use the 32-bit width of _IntType. The JIT-generated code and the
+// integers use the 32-bit width of Int32. The JIT-generated code and the
 // host C++ compiler (e.g. MSVC, which passes 16-byte structs by hidden
 // reference) disagree on by-value struct passing, so Stride platform modules
 // must bind to these instead of the by-value functions above.

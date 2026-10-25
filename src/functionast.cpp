@@ -564,28 +564,25 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
             } else {
               LOG_ERROR() << "Unknown type " << typeBlockName << std::endl;
             }
-            if (typeBlockName == "_RealType") {
+            auto typeInfo = state.getDataTypeInfo(typeBlockName);
+            if (typeInfo.isFloat()) {
               double val =
                   std::static_pointer_cast<ValueNode>(defaultNode)->toReal();
-              defaultValue = llvm::ConstantFP::get(
-                  llvm::Type::getDoubleTy(*state.TheContext),
-                  llvm::APFloat(val));
+              defaultValue = llvm::ConstantFP::get(type, val);
 
-            } else if (typeBlockName == "_IntType") {
+            } else if (typeInfo.isInteger()) {
               if (defaultNode->getNodeType() == AST::Int) {
-                // TODO determine best int for this case.
                 int64_t val = std::static_pointer_cast<ValueNode>(defaultNode)
                                   ->getIntValue();
                 defaultValue = llvm::ConstantInt::get(
-                    llvm::Type::getInt32Ty(*state.TheContext),
-                    llvm::APInt(32, val));
+                    type, static_cast<uint64_t>(val), typeInfo.isSigned);
               } else if (defaultNode->getNodeType() == AST::Real) {
                 double val = std::static_pointer_cast<ValueNode>(defaultNode)
                                  ->getRealValue();
 
                 defaultValue = llvm::ConstantInt::get(
-                    llvm::Type::getInt32Ty(*state.TheContext),
-                    llvm::APInt(32, int32_t(val)));
+                    type, static_cast<uint64_t>(static_cast<int64_t>(val)),
+                    typeInfo.isSigned);
               } else {
                 LOG_ERROR()
                     << "Unsupported type. Falling back on double" << std::endl;
@@ -617,7 +614,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
                    decl->getEntityType() == "trigger") {
           //  Local switches in loops are reset on every trigger, so they are
           //  allocated and set to their default value
-          type = state.typesMap["_SwitchType"];
+          type = state.typesMap[DataTypes::Switch];
           auto defaultNode = decl->getPropertyValue("default");
           if (defaultNode && defaultNode->getNodeType() == AST::Switch) {
             bool val = std::static_pointer_cast<ValueNode>(defaultNode)
@@ -1441,7 +1438,7 @@ CallExprAST::codegen(StrideCompiler &state) {
 
       if (CalleeF->hasFnAttribute("stride.variadic_heterogeneous")) {
         llvm::Type *doubleTy = llvm::Type::getDoubleTy(*state.TheContext);
-        llvm::Type *strTy = state.typesMap["_StringType"];
+        llvm::Type *strTy = state.typesMap[DataTypes::String];
         llvm::StructType *fmtArgTy = llvm::StructType::get(
             *state.TheContext, {i32Ty, i32Ty, doubleTy, strTy});
 
@@ -1550,7 +1547,7 @@ CallExprAST::codegen(StrideCompiler &state) {
              InArgsDataType[prefixCount] &&
              !InArgsDataType[prefixCount]->isVoidTy())
                 ? InArgsDataType[prefixCount]
-                : state.typesMap["_StringType"];
+                : state.typesMap[DataTypes::String];
 
         llvm::Function *TheFunction =
             state.Builder->GetInsertBlock()->getParent();
@@ -1612,7 +1609,7 @@ CallExprAST::codegen(StrideCompiler &state) {
           }
           if (!idxList.empty()) {
             llvm::Type *gepElemType =
-                outTy.value_or(state.typesMap["_StringType"]);
+                outTy.value_or(state.typesMap[DataTypes::String]);
             if (gepElemType->isArrayTy()) {
               gepElemType =
                   static_cast<llvm::ArrayType *>(gepElemType)->getElementType();
@@ -1912,6 +1909,7 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
     return {val, elemType};
   };
 
+  std::vector<std::string> inArgSourceTypes;
   for (unsigned i = 0, e = InArgs.size(); i != e; ++i) {
     auto [value, type] = InArgs[i]->codegen(state);
     if (!value) {
@@ -1927,6 +1925,7 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
           return {nullptr, std::nullopt};
         }
         CallArgs.push_back(processed);
+        inArgSourceTypes.push_back(expr->dataType);
       }
     } else {
       auto processed = processArg(InArgs[i].get(), value, type);
@@ -1934,10 +1933,19 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
         return {nullptr, std::nullopt};
       }
       CallArgs.push_back(processed);
+      inArgSourceTypes.push_back(InArgs[i]->dataType);
     }
   }
 
   size_t inArgCount = CallArgs.size();
+  // e.g. a UInt8 into an Int input is zero extended
+  for (size_t i = 0; i < inArgCount && i < InArgDataTypes.size(); ++i) {
+    auto *converted = state.convertToDataType(
+        CallArgs[i].first, inArgSourceTypes[i], InArgDataTypes[i]);
+    if (converted != CallArgs[i].first) {
+      CallArgs[i] = {converted, converted->getType()};
+    }
+  }
 
   for (unsigned i = 0, e = OutArgs.size(); i != e; ++i) {
     auto [value, type] = OutArgs[i]->codegen(state);

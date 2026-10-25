@@ -1,0 +1,45 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+    ]
+    outputs: [
+		signal Wrapped {type: UInt8 domain: RootDomain}
+		signal Narrow {type: Int8 domain: RootDomain}
+		signal Wide {type: Int64 domain: RootDomain}
+		signal Halved {type: UInt8 domain: RootDomain}
+		signal FromUnsigned {type: Real domain: RootDomain}
+		signal FromSigned {type: Real domain: RootDomain}
+		signal Single {type: Float32 domain: RootDomain}
+		signal Double {type: Float64 domain: RootDomain}
+		signal Truncated {type: Int16 domain: RootDomain}
+		signal Platform {type: Int domain: RootDomain}
+		signal Difference {type: Int64 domain: RootDomain}
+		switch UnsignedGreater {domain: RootDomain}
+    ]
+	domainFunctionCode: ''
+}
+
+signal Big { type: UInt8 default: 255 domain: RootDomain }
+signal Minus { type: Int8 default: -3 domain: RootDomain }
+signal Small { type: UInt8 default: 10 domain: RootDomain }
+
+# UInt8 arithmetic wraps
+Big + 1 >> Wrapped;
+Minus >> Narrow;
+# 64 bit literal
+3000000000 >> Wide;
+# Unsigned values are zero extended: 255 / 2 is 127
+Big / 2 >> Halved;
+# and converted to floats as unsigned
+Big >> FromUnsigned;
+Minus >> FromSigned;
+0.25 >> Single;
+Single + 0.5 >> Double;
+70000 >> Truncated;
+Minus + 10 >> Platform;
+[Big, 200] >> Greater() >> UnsignedGreater;
+# Int8 and UInt8 promote to Int16, so the difference stays negative
+Minus - Small >> Difference;

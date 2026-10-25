@@ -4,26 +4,26 @@ _domainDefinition TestDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal InReal { domain: TestDomain type: _RealType }
-        signal InInt { domain: TestDomain type: _IntType }
+        signal InReal { domain: TestDomain type: Real }
+        signal InInt { domain: TestDomain type: Int }
     ]
     outputs: [
-        signal OutInt { domain: TestDomain type: _IntType }
-        signal OutReal { domain: TestDomain type: _RealType }
+        signal OutInt { domain: TestDomain type: Int }
+        signal OutReal { domain: TestDomain type: Real }
     ]
 	domainFunctionCode: ''
 }
 
 platformModule __OverloadTest@Int {
-    inputs: [_IntType]
-	outputs: [_IntType]
+    inputs: [Int]
+	outputs: [Int]
     processing: " %%outtokens:0%% = llvm::add i32 %%intokens:0%%, 2 "
     inherits: [_Signal]
 }
 
 platformModule __OverloadTest@Double {
-    inputs: [_RealType]
-	outputs: [_RealType]
+    inputs: [Real]
+	outputs: [Real]
     processing: " %%outtokens:0%% = llvm::fadd double %%intokens:0%%, 2.500000e+00 "
     inherits: [_Signal]
 }

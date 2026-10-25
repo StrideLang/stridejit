@@ -77,8 +77,8 @@ TEST(NameMangler, TypeCodes) {
                 llvm::ArrayType::get(llvm::Type::getInt1Ty(ctx), 9)),
             "A9_b");
   auto *named = llvm::StructType::create(ctx, {llvm::Type::getInt32Ty(ctx)},
-                                         "_StringType");
-  EXPECT_EQ(NameMangler::typeCode(named), "S11_StringType");
+                                         "String");
+  EXPECT_EQ(NameMangler::typeCode(named), "S6String");
   EXPECT_EQ(NameMangler::typeCode(nullptr), "u");
 }
 

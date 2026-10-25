@@ -3,20 +3,20 @@ _domainDefinition RootDomain {
 	rate: -1
     substitutions: [ ]
     domainIncludes: []
-    inputs: [ signal In {domain: RootDomain type: _RealType} ]
-    outputs: [ signal Out {domain: RootDomain type: _RealType} ]
+    inputs: [ signal In {domain: RootDomain type: Real} ]
+    outputs: [ signal Out {domain: RootDomain type: Real} ]
 	domainFunctionCode: ''
 }
 reaction AddTwo {
     ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
-    blocks: [ signal Input { type: _RealType domain: OutputPort.domain } signal Output { type: _RealType domain: OutputPort.domain } ]
+    blocks: [ signal Input { type: Real domain: OutputPort.domain } signal Output { type: Real domain: OutputPort.domain } ]
     streams: [ Input + 2.0 >> Output; ]
 }
 reaction TestReaction {
     ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
     blocks: [
-        signal Input { type: _RealType domain: OutputPort.domain }
-        signal Output { type: _RealType domain: OutputPort.domain }
+        signal Input { type: Real domain: OutputPort.domain }
+        signal Output { type: Real domain: OutputPort.domain }
     ]
     streams: [
         Input >> AddTwo() >> Output;

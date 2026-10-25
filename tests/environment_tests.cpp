@@ -182,7 +182,7 @@ TEST(StrideEnvironmentTest, BenchmarkASTCacheVsParse) {
         << "  framework: _JitFramework\n"
         << "  rate: -1\n"
         << "  outputs: [\n"
-        << "    signal Out { domain: BenchmarkDomain type: _RealType }\n"
+        << "    signal Out { domain: BenchmarkDomain type: Real }\n"
         << "  ]\n"
         << "  domainFunctionCode: ''\n"
         << "}\n\n";
@@ -289,7 +289,7 @@ TEST(StrideEnvironmentTest, CompiledObjectAndBitcodeCaching) {
         << "  framework: _JitFramework\n"
         << "  rate: -1\n"
         << "  outputs: [\n"
-        << "    signal Out { domain: TestDomain type: _RealType }\n"
+        << "    signal Out { domain: TestDomain type: Real }\n"
         << "  ]\n"
         << "  domainFunctionCode: ''\n"
         << "}\n\n"

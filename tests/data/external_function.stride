@@ -14,8 +14,8 @@ _domainDefinition RootDomain {
 }
 
 platformModule GreaterLocal@Int_Bool {
-    inputs: [_IntType, _IntType]
-	outputs: [_SwitchType]
+    inputs: [Int, Int]
+	outputs: [Switch]
 #    linkTo: []
 #    declarations: ['']
     # initializations: ["// CPP Greater Init"]
@@ -23,8 +23,8 @@ platformModule GreaterLocal@Int_Bool {
     inherits: [_Signal]
 }
 
-signal A {type: _IntType default: 5 domain: RootDomain}
-signal B {type: _IntType default: 2 domain: RootDomain}
+signal A {type: Int default: 5 domain: RootDomain}
+signal B {type: Int default: 2 domain: RootDomain}
 
 5 >> A;
 2 >> B;

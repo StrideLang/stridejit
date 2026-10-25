@@ -36,7 +36,9 @@ class Type;
 } // namespace llvm
 
 namespace strd {
-using DefaultVariant = std::variant<double, int32_t, bool, std::string>;
+// int64_t holds integer defaults that don't fit in 32 bits
+using DefaultVariant =
+    std::variant<double, int32_t, bool, std::string, int64_t>;
 
 class AST;
 class StrideCompiler;
@@ -73,7 +75,11 @@ public:
   const std::string &getRelativeFilename() const { return m_relativeFilename; }
   const std::string &getAbsoluteFilename() const { return m_absoluteFilename; }
 
+  // Data type to convert the value to, e.g. "Real"
   std::string typecast;
+  // Data type of the value, e.g. "UInt8". Empty if unknown, in which case
+  // integers are treated as signed.
+  std::string dataType;
 };
 
 class StringExprAST : public ExprAST {

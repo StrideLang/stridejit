@@ -10,8 +10,8 @@ _domainDefinition RootDomain {
 }
 
 switch GuardArr[3] { default: off domain: RootDomain }
-signal ActionOutput { domain: RootDomain type: _IntType default: 0 }
-signal State2Entered { domain: RootDomain type: _IntType default: 0 }
+signal ActionOutput { domain: RootDomain type: Int default: 0 }
+signal State2Entered { domain: RootDomain type: Int default: 0 }
 
 reaction PlaceMarkerReaction {
     streams: [

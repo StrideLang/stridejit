@@ -9,12 +9,12 @@ _domainDefinition RootDomain {
 	domainFunctionCode: ''
 }
 
-signal Counter { domain: RootDomain type: _IntType default: 100 }
-signal EntryCounter { domain: RootDomain type: _IntType default: 200 }
-signal ExitCounter { domain: RootDomain type: _IntType default: 300 }
-signal Parallel1Counter { domain: RootDomain type: _IntType default: 400 }
-signal Parallel2Counter { domain: RootDomain type: _IntType default: 500 }
-signal Child2Counter { domain: RootDomain type: _IntType default: 600 }
+signal Counter { domain: RootDomain type: Int default: 100 }
+signal EntryCounter { domain: RootDomain type: Int default: 200 }
+signal ExitCounter { domain: RootDomain type: Int default: 300 }
+signal Parallel1Counter { domain: RootDomain type: Int default: 400 }
+signal Parallel2Counter { domain: RootDomain type: Int default: 500 }
+signal Child2Counter { domain: RootDomain type: Int default: 600 }
 
 state Child1 {
     onEntry: [

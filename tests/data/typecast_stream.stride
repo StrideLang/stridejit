@@ -7,17 +7,17 @@ _domainDefinition RootDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-		signal Int[2] {type: _IntType domain: RootDomain}
+		signal Ints[2] {type: Int domain: RootDomain}
     ]
     outputs: [
-        signal Real[2] {type: _RealType domain: RootDomain}
+        signal Reals[2] {type: Real domain: RootDomain}
     ]
 	domainFunctionCode: ''
 }
 
 # Casting literals:
-1.0 >> Int[0];
-3 >> Real[0];
+1.0 >> Ints[0];
+3 >> Reals[0];
 # Casting expression output
-Real[0] + 1.0 >> Int[1];
-Int[1] + 1 >> Real[1]; 
+Reals[0] + 1.0 >> Ints[1];
+Ints[1] + 1 >> Reals[1]; 

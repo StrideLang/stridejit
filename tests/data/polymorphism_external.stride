@@ -6,8 +6,8 @@ _domainDefinition TestDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal InInt { domain: TestDomain type: _IntType }
-        signal InReal { domain: TestDomain type: _RealType }
+        signal InInt { domain: TestDomain type: Int }
+        signal InReal { domain: TestDomain type: Real }
     ]
     outputs: [
         switch Out { domain: TestDomain }

@@ -4,11 +4,11 @@ _domainDefinition RootDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal In[16] {domain: RootDomain type: _RealType}
-        signal Index {domain: RootDomain default: 2 type: _IntType}
+        signal In[16] {domain: RootDomain type: Real}
+        signal Index {domain: RootDomain default: 2 type: Int}
     ]
     outputs: [
-        signal Out[16] {domain: RootDomain type: _RealType}
+        signal Out[16] {domain: RootDomain type: Real}
     ]
 	domainFunctionCode: ''
 }

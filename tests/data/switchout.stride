@@ -7,7 +7,7 @@ _domainDefinition RootDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal In { domain: RootDomain type: _RealType }
+        signal In { domain: RootDomain type: Real }
     ]
     outputs: [
         switch Out { domain: RootDomain }

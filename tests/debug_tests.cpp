@@ -57,7 +57,8 @@ TEST(DebugTest, InstructionDebugLocationAndLineColumn) {
   llvm::Module *module = env.mStrideEnv.TheModule.get();
   ASSERT_NE(module, nullptr);
 
-  llvm::Function *procFn = module->getFunction("RootDomain_process");
+  // The streams of domain_variable.stride run in TestDomain
+  llvm::Function *procFn = module->getFunction("TestDomain_process");
   ASSERT_NE(procFn, nullptr);
 
   bool foundValidDILocation = false;
@@ -104,15 +105,15 @@ TEST(DebugTest, DomainStepperStepTick) {
   ok = env.compileInMemory();
   ASSERT_TRUE(ok);
 
-  void *statePtr = env.allocateState("RootDomain");
+  void *statePtr = env.allocateState("TestDomain");
   ASSERT_NE(statePtr, nullptr);
 
   // Execute single tick through stepper API
-  int32_t ret = env.stepTick("RootDomain", statePtr);
+  int32_t ret = env.stepTick("TestDomain", statePtr);
   EXPECT_GE(ret, 0);
 
   // Execute a second tick
-  ret = env.stepTick("RootDomain", statePtr);
+  ret = env.stepTick("TestDomain", statePtr);
   EXPECT_GE(ret, 0);
 
   env.deallocateState(statePtr);

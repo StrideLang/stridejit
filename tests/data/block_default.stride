@@ -8,11 +8,11 @@ _domainDefinition TestDomain {
     inputs: [
     ]
     outputs: [
-        signal Out { domain: TestDomain default: 0 type: _IntType }
+        signal Out { domain: TestDomain default: 0 type: Int }
     ]
 	domainFunctionCode: ''
 }
 
-signal A {type: _IntType default: 5 domain: TestDomain}
+signal A {type: Int default: 5 domain: TestDomain}
 
 A + 1 >> Out;

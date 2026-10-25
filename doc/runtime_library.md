@@ -66,7 +66,7 @@ int main() {
 Header: `include/stride/stridejit/strideruntime_string.h`
 
 ### `StrideStringView`
-Mirrors the LLVM `_StringType` (`{ ptr, i32 }`) with standard layout and zero hidden fields:
+Mirrors the LLVM `String` (`{ ptr, i32 }`) with standard layout and zero hidden fields:
 
 ```cpp
 struct StrideStringView {

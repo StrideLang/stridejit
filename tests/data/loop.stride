@@ -6,10 +6,10 @@ _domainDefinition RootDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-		signal List[20] { domain: RootDomain  default: 1  type: _IntType}
+		signal List[20] { domain: RootDomain  default: 1  type: Int}
     ]
     outputs: [
-        signal Out { domain: RootDomain type: _IntType }
+        signal Out { domain: RootDomain type: Int }
     ]
 	domainFunctionCode: ''
 }
@@ -27,7 +27,7 @@ module Equal {
         }
     ]
     blocks: [
-        signal Input[2] {domain: OutputPort.domain type: _IntType}
+        signal Input[2] {domain: OutputPort.domain type: Int}
 		switch Output {domain: OutputPort.domain}
     ]
     streams: [
@@ -37,8 +37,8 @@ module Equal {
 }
 
 platformModule __Equal@Int_Bool {
-    inputs: [_IntType, _IntType]
-	outputs: [_SwitchType]
+    inputs: [Int, Int]
+	outputs: [Switch]
 #    linkTo: []
 #    declarations: ['']
     # initializations: ["// CPP Greater Init"]
@@ -57,9 +57,9 @@ loop Add {
 		}
 	]
 	blocks: [
-		signal Input[InputPort.size] { type: _IntType }
-		signal Output {default: 0 type: _IntType }
-		signal Index { default: 0 type: _IntType reset: Reset }
+		signal Input[InputPort.size] { type: Int }
+		signal Output {default: 0 type: Int }
+		signal Index { default: 0 type: Int reset: Reset }
 		switch Done { default: off }
 		# trigger Reset {}
 	]

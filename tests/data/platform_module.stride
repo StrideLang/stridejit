@@ -6,22 +6,22 @@ _domainDefinition TestDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal InReal { domain: TestDomain type: _RealType }
-        signal InInt { domain: TestDomain type: _IntType }
+        signal InReal { domain: TestDomain type: Real }
+        signal InInt { domain: TestDomain type: Int }
     ]
     outputs: [
         switch Out { domain: TestDomain }
-        signal OutInt { domain: TestDomain type: _IntType }
-        signal OutReal { domain: TestDomain type: _RealType }
-        signal OutWrapped { domain: TestDomain type: _RealType }
+        signal OutInt { domain: TestDomain type: Int }
+        signal OutReal { domain: TestDomain type: Real }
+        signal OutWrapped { domain: TestDomain type: Real }
     ]
 	domainFunctionCode: ''
 }
 
 
 platformModule __Test1 {
-    inputs: [_IntType]
-	outputs: [_IntType]
+    inputs: [Int]
+	outputs: [Int]
 #    linkTo: []
 #    declarations: ['']
     # initializations: ["// CPP Equal Init"]
@@ -30,8 +30,8 @@ platformModule __Test1 {
 }
 
 platformModule __Test2 {
-    inputs: [_RealType]
-	outputs: [_RealType]
+    inputs: [Real]
+	outputs: [Real]
 #    linkTo: []
 #    declarations: ['']
     # initializations: ["// CPP Equal Init"]
@@ -49,8 +49,8 @@ module Wrapper {
         }
     ]
     blocks: [
-        signal Input {domain: OutputPort.domain type: _RealType}
-        signal Output {domain: OutputPort.domain type: _RealType}
+        signal Input {domain: OutputPort.domain type: Real}
+        signal Output {domain: OutputPort.domain type: Real}
     ]
     streams: [
         Input >> __Test2() >> Output;

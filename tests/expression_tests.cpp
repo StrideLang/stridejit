@@ -181,7 +181,7 @@ TEST(BinaryExprAST, StringAddition) {
 
   auto [v, t] = bin.codegen(state);
   ASSERT_NE(v, nullptr);
-  EXPECT_EQ(t.value(), state.typesMap["_StringType"]);
+  EXPECT_EQ(t.value(), state.typesMap["String"]);
 }
 
 TEST(BinaryExprAST, StringEquality) {

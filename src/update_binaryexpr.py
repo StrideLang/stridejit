@@ -29,9 +29,9 @@ BinaryExprAST::codegen(StrideCompiler &state) {
     
     // Typecast logic for assignment
     if (typecast.size() > 0) {
-      if (R->getType()->isIntegerTy() && typecast == "_RealType") {
+      if (R->getType()->isIntegerTy() && typecast == "Real") {
         R = state.Builder->CreateSIToFP(R, llvm::Type::getDoubleTy(*state.TheContext));
-      } else if (R->getType()->isDoubleTy() && typecast == "_IntType") {
+      } else if (R->getType()->isDoubleTy() && typecast == "Int") {
         R = state.Builder->CreateFPToSI(R, llvm::Type::getInt32Ty(*state.TheContext));
       }
     }

@@ -41,17 +41,159 @@ StrideCompiler::StrideCompiler() {
   BinopPrecedence['-'] = 20;
   BinopPrecedence['*'] = 40; // highest.
 
-  // Initialize types map
-  typesMap["_RealType"] = llvm::Type::getDoubleTy(*TheContext);
-  typesMap["_DoubleType"] = llvm::Type::getDoubleTy(*TheContext);
-  typesMap["_FloatType"] = llvm::Type::getFloatTy(*TheContext);
-  typesMap["_IntType"] = llvm::Type::getInt32Ty(*TheContext);
-  typesMap["_SwitchType"] = llvm::Type::getInt1Ty(*TheContext);
-  typesMap["_StringType"] = llvm::StructType::get(
-      *TheContext, {llvm::PointerType::get(*TheContext, 0),
-                    llvm::Type::getInt32Ty(*TheContext)});
+  // Builtin data types. registerDataTypes() replaces them with the
+  // declarations of the framework.
+  for (const auto &name :
+       {"Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32",
+        "UInt64", "Float32", "Float64", "Switch", "String", "Int", "UInt",
+        "Real", "Size"}) {
+    auto info = DataTypes::builtin(name);
+    dataTypes[name] = info;
+    typesMap[name] = getLLVMTypeForDataType(info);
+  }
 
   typesMap[""] = llvm::Type::getVoidTy(*TheContext);
+}
+
+StrideCompiler::~StrideCompiler() {
+  // The debug emitter's DIBuilder untracks metadata owned by TheContext, so
+  // it must go first. Members are destroyed in reverse order of declaration,
+  // which would destroy it after the context.
+  debugEmitter.reset();
+}
+
+llvm::Type *
+StrideCompiler::getLLVMTypeForDataType(const DataTypes::Info &info) {
+  switch (info.kind) {
+  case DataTypes::Kind::Integer:
+    return llvm::Type::getIntNTy(*TheContext, info.bits);
+  case DataTypes::Kind::Float:
+    return info.bits == 32 ? llvm::Type::getFloatTy(*TheContext)
+                           : llvm::Type::getDoubleTy(*TheContext);
+  case DataTypes::Kind::Switch:
+    return llvm::Type::getInt1Ty(*TheContext);
+  case DataTypes::Kind::String:
+    return llvm::StructType::get(*TheContext,
+                                 {llvm::PointerType::get(*TheContext, 0),
+                                  llvm::Type::getInt32Ty(*TheContext)});
+  case DataTypes::Kind::Unknown:
+    break;
+  }
+  return nullptr;
+}
+
+void StrideCompiler::registerDataTypes(ASTNode tree) {
+  if (!tree) {
+    return;
+  }
+  for (const auto &node : tree->getChildren()) {
+    if (node->getNodeType() != AST::Declaration) {
+      continue;
+    }
+    auto decl = std::static_pointer_cast<DeclarationNode>(node);
+    // Aliases of data types (alias Int { entity: Int32 }) get the LLVM type
+    // of the type they stand for
+    if (decl->getEntityType() != "frameworkDataType" &&
+        decl->getEntityType() != "alias") {
+      continue;
+    }
+    auto info = DataTypes::resolve(decl->getName(), tree);
+    if (auto *type = getLLVMTypeForDataType(info)) {
+      dataTypes[decl->getName()] = info;
+      typesMap[decl->getName()] = type;
+    }
+  }
+}
+
+DataTypes::Info StrideCompiler::getDataTypeInfo(const std::string &name) {
+  auto it = dataTypes.find(name);
+  if (it != dataTypes.end()) {
+    return it->second;
+  }
+  DataTypes::Info info;
+  info.name = name;
+  return info;
+}
+
+std::string
+StrideCompiler::getDataTypeName(std::shared_ptr<strd::DeclarationNode> decl) {
+  if (!decl) {
+    return std::string();
+  }
+  if (decl->getEntityType() == "switch" || decl->getEntityType() == "trigger" ||
+      decl->getEntityType() == "reaction") {
+    return DataTypes::Switch;
+  }
+  if (decl->getEntityType() == "string") {
+    return DataTypes::String;
+  }
+  auto typeNode = decl->getPropertyValue("type");
+  if (typeNode && typeNode->getNodeType() == AST::Entity) {
+    return ASTQuery::getNodeName(typeNode);
+  }
+  return std::string();
+}
+
+llvm::Value *StrideCompiler::convertValue(llvm::Value *V, llvm::Type *toType,
+                                          bool fromSigned, bool toSigned) {
+  if (!V || !toType) {
+    return V;
+  }
+  llvm::Type *fromType = V->getType();
+  if (fromType == toType) {
+    return V;
+  }
+  if (fromType->isIntegerTy() && toType->isIntegerTy()) {
+    if (toType->isIntegerTy(1)) {
+      return Builder->CreateICmpNE(V, llvm::ConstantInt::get(fromType, 0),
+                                   "tobool");
+    }
+    if (fromType->isIntegerTy(1)) {
+      return Builder->CreateZExt(V, toType, "frombool");
+    }
+    return Builder->CreateIntCast(V, toType, fromSigned, "intcast");
+  }
+  if (fromType->isIntegerTy() && toType->isFloatingPointTy()) {
+    if (fromSigned && !fromType->isIntegerTy(1)) {
+      return Builder->CreateSIToFP(V, toType, "sitofp");
+    }
+    return Builder->CreateUIToFP(V, toType, "uitofp");
+  }
+  if (fromType->isFloatingPointTy() && toType->isIntegerTy()) {
+    if (toType->isIntegerTy(1)) {
+      return Builder->CreateFCmpUNE(V, llvm::ConstantFP::get(fromType, 0.0),
+                                    "tobool");
+    }
+    if (toSigned) {
+      return Builder->CreateFPToSI(V, toType, "fptosi");
+    }
+    return Builder->CreateFPToUI(V, toType, "fptoui");
+  }
+  if (fromType->isFloatingPointTy() && toType->isFloatingPointTy()) {
+    return Builder->CreateFPCast(V, toType, "fpcast");
+  }
+  return V;
+}
+
+llvm::Value *StrideCompiler::convertToDataType(llvm::Value *V,
+                                               const std::string &fromDataType,
+                                               const std::string &toDataType) {
+  if (!V || toDataType.empty()) {
+    return V;
+  }
+  auto toInfo = getDataTypeInfo(toDataType);
+  if (!toInfo.isNumeric() && toInfo.kind != DataTypes::Kind::Switch) {
+    return V;
+  }
+  bool fromSigned = true;
+  if (!fromDataType.empty()) {
+    auto fromInfo = getDataTypeInfo(fromDataType);
+    if (fromInfo.valid()) {
+      fromSigned = fromInfo.isSigned;
+    }
+  }
+  return convertValue(V, getLLVMTypeForDataType(toInfo), fromSigned,
+                      toInfo.isSigned);
 }
 
 void StrideCompiler::addDynamicDomainField(ASTNode domainNode,
@@ -250,8 +392,8 @@ void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
       double v = std::static_pointer_cast<ValueNode>(valProp)->getRealValue();
       if (Type->isFloatingPointTy()) {
         Initializer = llvm::ConstantFP::get(Type, v);
-      } else if (Type->isIntegerTy(32)) {
-        Initializer = llvm::ConstantInt::get(Type, static_cast<int32_t>(v));
+      } else if (Type->isIntegerTy()) {
+        Initializer = llvm::ConstantInt::get(Type, static_cast<int64_t>(v));
       }
     } else if (valProp->getNodeType() == AST::Switch) {
       bool v = std::static_pointer_cast<ValueNode>(valProp)->getSwitchValue();
@@ -341,26 +483,26 @@ StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl) {
     return typesMap[""];
   }
   if (decl->getEntityType() == "switch" || decl->getEntityType() == "trigger") {
-    return typesMap["_SwitchType"];
+    return typesMap[DataTypes::Switch];
   }
   if (decl->getEntityType() == "string") {
-    return typesMap["_StringType"];
+    return typesMap[DataTypes::String];
   }
   if (decl->getEntityType() == "constant") {
     if (auto valProp = decl->getPropertyValue("value")) {
       if (valProp->getNodeType() == strd::AST::String) {
-        return typesMap["_StringType"];
+        return typesMap[DataTypes::String];
       } else if (valProp->getNodeType() == strd::AST::Int) {
-        return typesMap["_IntType"];
+        return typesMap[DataTypes::Int];
       } else if (valProp->getNodeType() == strd::AST::Switch) {
-        return typesMap["_SwitchType"];
+        return typesMap[DataTypes::Switch];
       } else if (valProp->getNodeType() == strd::AST::Real) {
-        return typesMap["_RealType"];
+        return typesMap[DataTypes::Real];
       }
     }
   }
   auto typePropNode = decl->getPropertyValue("type");
-  std::string type = "_RealType";
+  std::string type = DataTypes::Real;
   if (typePropNode) {
     if (typePropNode->getNodeType() == strd::AST::Entity) {
       type =
@@ -370,13 +512,13 @@ StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl) {
     }
   }
   if (decl->getEntityType() == "reaction") {
-    return typesMap["_SwitchType"];
+    return typesMap[DataTypes::Switch];
   }
   if (!type.empty() && typesMap.find(type) != typesMap.end() &&
       !typesMap[type]->isVoidTy()) {
     return typesMap[type];
   }
-  return typesMap["_RealType"];
+  return typesMap[DataTypes::Real];
 }
 
 llvm::Type *StrideCompiler::getLLVMTypeForCodegenEntity(
@@ -387,13 +529,13 @@ llvm::Type *StrideCompiler::getLLVMTypeForCodegenEntity(
     return typesMap[""];
   }
   if (decl->getEntityType() == "switch" || decl->getEntityType() == "trigger") {
-    return typesMap["_SwitchType"];
+    return typesMap[DataTypes::Switch];
   }
   if (decl->getEntityType() == "string") {
-    return typesMap["_StringType"];
+    return typesMap[DataTypes::String];
   }
   auto typePropNode = decl->getPropertyValue("type");
-  std::string type = "_RealType";
+  std::string type = DataTypes::Real;
   if (typePropNode) {
     if (typePropNode->getNodeType() == strd::AST::Entity) {
       type =
@@ -415,13 +557,13 @@ llvm::Type *StrideCompiler::getLLVMTypeForCodegenEntity(
     }
   }
   if (decl->getEntityType() == "reaction") {
-    return typesMap["_SwitchType"];
+    return typesMap[DataTypes::Switch];
   }
   if (!type.empty() && typesMap.find(type) != typesMap.end() &&
       !typesMap[type]->isVoidTy()) {
     return typesMap[type];
   }
-  return typesMap["_RealType"];
+  return typesMap[DataTypes::Real];
 }
 
 // Port types can chain through several functions (a >> Abs() >> Abs() >> b).
@@ -507,13 +649,13 @@ llvm::Type *StrideCompiler::getConnectedNodeType(ASTNode node,
   }
   switch (node->getNodeType()) {
   case AST::Int:
-    return typesMap["_IntType"];
+    return typesMap[DataTypes::Int];
   case AST::Real:
-    return typesMap["_RealType"];
+    return typesMap[DataTypes::Real];
   case AST::Switch:
-    return typesMap["_SwitchType"];
+    return typesMap[DataTypes::Switch];
   case AST::String:
-    return typesMap["_StringType"];
+    return typesMap[DataTypes::String];
   case AST::Entity:
   case AST::Array: {
     auto decl = findConnectedDeclaration(node);
@@ -625,7 +767,7 @@ llvm::Constant *StrideCompiler::makeDefaultConstant(ASTNode defaultNode,
         return llvm::ConstantInt::get(scalarType, val);
       } else if (scalarType->isIntegerTy(32)) {
         return llvm::ConstantInt::get(scalarType, static_cast<int32_t>(val));
-      } else if (scalarType->isIntegerTy(1) || scalarType->isIntegerTy(8)) {
+      } else if (scalarType->isIntegerTy(1)) {
         return llvm::ConstantInt::get(scalarType, val != 0 ? 1 : 0);
       } else if (scalarType->isIntegerTy()) {
         return llvm::ConstantInt::get(scalarType, val);
@@ -634,7 +776,7 @@ llvm::Constant *StrideCompiler::makeDefaultConstant(ASTNode defaultNode,
       double val = std::static_pointer_cast<ValueNode>(valNode)->getRealValue();
       if (scalarType->isFloatingPointTy()) {
         return llvm::ConstantFP::get(scalarType, val);
-      } else if (scalarType->isIntegerTy(1) || scalarType->isIntegerTy(8)) {
+      } else if (scalarType->isIntegerTy(1)) {
         return llvm::ConstantInt::get(scalarType, val != 0.0 ? 1 : 0);
       } else if (scalarType->isIntegerTy(32)) {
         return llvm::ConstantInt::get(scalarType, static_cast<int32_t>(val));

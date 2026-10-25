@@ -6,34 +6,34 @@ files = {
 	rate: -1
     substitutions: [ ]
     domainIncludes: []
-    inputs: [ signal List[3] { domain: RootDomain default: 1 type: _IntType } ]
-    outputs: [ signal Out { domain: RootDomain type: _IntType } ]
+    inputs: [ signal List[3] { domain: RootDomain default: 1 type: Int } ]
+    outputs: [ signal Out { domain: RootDomain type: Int } ]
 	domainFunctionCode: ''
 }
 module Equal {
     ports: [ mainOutputPort OutputPort { block: Output }, mainInputPort InputPort { block: Input } ]
-    blocks: [ signal Input[2] {domain: OutputPort.domain type: _IntType} switch Output {domain: OutputPort.domain} ]
+    blocks: [ signal Input[2] {domain: OutputPort.domain type: Int} switch Output {domain: OutputPort.domain} ]
     streams: [ [Input[0], Input[1]] >> __Equal() >> Output; ]
 }
 platformModule __Equal@Int_Bool {
-    inputs: [_IntType, _IntType]
-	outputs: [_SwitchType]
+    inputs: [Int, Int]
+	outputs: [Switch]
     processing: "%%outtokens:0%% = llvm::icmp eq %%intokens:0%%, %%intokens:1%%"
     inherits: [_Signal]
 }
 module AddTwo {
     ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
-    blocks: [ signal Input { type: _IntType domain: OutputPort.domain } signal Output { type: _IntType domain: OutputPort.domain } ]
+    blocks: [ signal Input { type: Int domain: OutputPort.domain } signal Output { type: Int domain: OutputPort.domain } ]
     streams: [ Input + 2 >> Output; ]
 }
 loop TestLoop {
 	ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
 	blocks: [
-		signal Input[InputPort.size] { type: _IntType domain: OutputPort.domain }
-		signal Output {default: 0 type: _IntType domain: OutputPort.domain }
-		signal Index { default: 0 type: _IntType reset: Reset domain: OutputPort.domain }
+		signal Input[InputPort.size] { type: Int domain: OutputPort.domain }
+		signal Output {default: 0 type: Int domain: OutputPort.domain }
+		signal Index { default: 0 type: Int reset: Reset domain: OutputPort.domain }
 		switch Done { default: off domain: OutputPort.domain }
-        signal AddResult { type: _IntType domain: OutputPort.domain }
+        signal AddResult { type: Int domain: OutputPort.domain }
 	]
 	terminateWhen: Done
 	streams: [
@@ -51,34 +51,34 @@ List >> TestLoop() >> Out;
 	rate: -1
     substitutions: [ ]
     domainIncludes: []
-    inputs: [ signal List[3] { domain: RootDomain default: 1 type: _IntType } ]
-    outputs: [ signal Out { domain: RootDomain type: _IntType } ]
+    inputs: [ signal List[3] { domain: RootDomain default: 1 type: Int } ]
+    outputs: [ signal Out { domain: RootDomain type: Int } ]
 	domainFunctionCode: ''
 }
 module Equal {
     ports: [ mainOutputPort OutputPort { block: Output }, mainInputPort InputPort { block: Input } ]
-    blocks: [ signal Input[2] {domain: OutputPort.domain type: _IntType} switch Output {domain: OutputPort.domain} ]
+    blocks: [ signal Input[2] {domain: OutputPort.domain type: Int} switch Output {domain: OutputPort.domain} ]
     streams: [ [Input[0], Input[1]] >> __Equal() >> Output; ]
 }
 platformModule __Equal@Int_Bool {
-    inputs: [_IntType, _IntType]
-	outputs: [_SwitchType]
+    inputs: [Int, Int]
+	outputs: [Switch]
     processing: "%%outtokens:0%% = llvm::icmp eq %%intokens:0%%, %%intokens:1%%"
     inherits: [_Signal]
 }
 reaction AddTwo {
     ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
-    blocks: [ signal Input { type: _IntType domain: OutputPort.domain } signal Output { type: _IntType domain: OutputPort.domain } ]
+    blocks: [ signal Input { type: Int domain: OutputPort.domain } signal Output { type: Int domain: OutputPort.domain } ]
     streams: [ Input + 2 >> Output; ]
 }
 loop TestLoop {
 	ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
 	blocks: [
-		signal Input[InputPort.size] { type: _IntType domain: OutputPort.domain }
-		signal Output {default: 0 type: _IntType domain: OutputPort.domain }
-		signal Index { default: 0 type: _IntType reset: Reset domain: OutputPort.domain }
+		signal Input[InputPort.size] { type: Int domain: OutputPort.domain }
+		signal Output {default: 0 type: Int domain: OutputPort.domain }
+		signal Index { default: 0 type: Int reset: Reset domain: OutputPort.domain }
 		switch Done { default: off domain: OutputPort.domain }
-        signal AddResult { type: _IntType domain: OutputPort.domain }
+        signal AddResult { type: Int domain: OutputPort.domain }
 	]
 	terminateWhen: Done
 	streams: [
@@ -96,28 +96,28 @@ List >> TestLoop() >> Out;
 	rate: -1
     substitutions: [ ]
     domainIncludes: []
-    inputs: [ signal List[3] { domain: RootDomain default: 1 type: _IntType } ]
-    outputs: [ signal Out { domain: RootDomain type: _IntType } ]
+    inputs: [ signal List[3] { domain: RootDomain default: 1 type: Int } ]
+    outputs: [ signal Out { domain: RootDomain type: Int } ]
 	domainFunctionCode: ''
 }
 module Equal {
     ports: [ mainOutputPort OutputPort { block: Output }, mainInputPort InputPort { block: Input } ]
-    blocks: [ signal Input[2] {domain: OutputPort.domain type: _IntType} switch Output {domain: OutputPort.domain} ]
+    blocks: [ signal Input[2] {domain: OutputPort.domain type: Int} switch Output {domain: OutputPort.domain} ]
     streams: [ [Input[0], Input[1]] >> __Equal() >> Output; ]
 }
 platformModule __Equal@Int_Bool {
-    inputs: [_IntType, _IntType]
-	outputs: [_SwitchType]
+    inputs: [Int, Int]
+	outputs: [Switch]
     processing: "%%outtokens:0%% = llvm::icmp eq %%intokens:0%%, %%intokens:1%%"
     inherits: [_Signal]
 }
 loop AddTwo {
     ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
     blocks: [
-        signal Input { type: _IntType domain: OutputPort.domain }
-        signal Output { default: 0 type: _IntType domain: OutputPort.domain }
+        signal Input { type: Int domain: OutputPort.domain }
+        signal Output { default: 0 type: Int domain: OutputPort.domain }
         switch Done { default: off domain: OutputPort.domain }
-        signal Step { default: 0 type: _IntType domain: OutputPort.domain reset: Reset }
+        signal Step { default: 0 type: Int domain: OutputPort.domain reset: Reset }
     ]
     terminateWhen: Done
     streams: [
@@ -129,11 +129,11 @@ loop AddTwo {
 loop TestLoop {
 	ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
 	blocks: [
-		signal Input[InputPort.size] { type: _IntType domain: OutputPort.domain }
-		signal Output {default: 0 type: _IntType domain: OutputPort.domain }
-		signal Index { default: 0 type: _IntType reset: Reset domain: OutputPort.domain }
+		signal Input[InputPort.size] { type: Int domain: OutputPort.domain }
+		signal Output {default: 0 type: Int domain: OutputPort.domain }
+		signal Index { default: 0 type: Int reset: Reset domain: OutputPort.domain }
 		switch Done { default: off domain: OutputPort.domain }
-        signal AddResult { type: _IntType domain: OutputPort.domain }
+        signal AddResult { type: Int domain: OutputPort.domain }
 	]
 	terminateWhen: Done
 	streams: [
@@ -151,20 +151,20 @@ List >> TestLoop() >> Out;
 	rate: -1
     substitutions: [ ]
     domainIncludes: []
-    inputs: [ signal In {domain: RootDomain type: _RealType} ]
-    outputs: [ signal Out {domain: RootDomain type: _RealType} ]
+    inputs: [ signal In {domain: RootDomain type: Real} ]
+    outputs: [ signal Out {domain: RootDomain type: Real} ]
 	domainFunctionCode: ''
 }
 module AddTwo {
     ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
-    blocks: [ signal Input { type: _RealType domain: OutputPort.domain } signal Output { type: _RealType domain: OutputPort.domain } ]
+    blocks: [ signal Input { type: Real domain: OutputPort.domain } signal Output { type: Real domain: OutputPort.domain } ]
     streams: [ Input + 2.0 >> Output; ]
 }
 reaction TestReaction {
     ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
     blocks: [
-        signal Input { type: _RealType domain: OutputPort.domain }
-        signal Output { type: _RealType domain: OutputPort.domain }
+        signal Input { type: Real domain: OutputPort.domain }
+        signal Output { type: Real domain: OutputPort.domain }
     ]
     streams: [
         Input >> AddTwo() >> Output;
@@ -178,20 +178,20 @@ In >> TestReaction() >> Out;
 	rate: -1
     substitutions: [ ]
     domainIncludes: []
-    inputs: [ signal In {domain: RootDomain type: _RealType} ]
-    outputs: [ signal Out {domain: RootDomain type: _RealType} ]
+    inputs: [ signal In {domain: RootDomain type: Real} ]
+    outputs: [ signal Out {domain: RootDomain type: Real} ]
 	domainFunctionCode: ''
 }
 reaction AddTwo {
     ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
-    blocks: [ signal Input { type: _RealType domain: OutputPort.domain } signal Output { type: _RealType domain: OutputPort.domain } ]
+    blocks: [ signal Input { type: Real domain: OutputPort.domain } signal Output { type: Real domain: OutputPort.domain } ]
     streams: [ Input + 2.0 >> Output; ]
 }
 reaction TestReaction {
     ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
     blocks: [
-        signal Input { type: _RealType domain: OutputPort.domain }
-        signal Output { type: _RealType domain: OutputPort.domain }
+        signal Input { type: Real domain: OutputPort.domain }
+        signal Output { type: Real domain: OutputPort.domain }
     ]
     streams: [
         Input >> AddTwo() >> Output;
@@ -205,28 +205,28 @@ In >> TestReaction() >> Out;
 	rate: -1
     substitutions: [ ]
     domainIncludes: []
-    inputs: [ signal In {domain: RootDomain type: _IntType} ]
-    outputs: [ signal Out {domain: RootDomain type: _IntType} ]
+    inputs: [ signal In {domain: RootDomain type: Int} ]
+    outputs: [ signal Out {domain: RootDomain type: Int} ]
 	domainFunctionCode: ''
 }
 module Equal {
     ports: [ mainOutputPort OutputPort { block: Output }, mainInputPort InputPort { block: Input } ]
-    blocks: [ signal Input[2] {domain: OutputPort.domain type: _IntType} switch Output {domain: OutputPort.domain} ]
+    blocks: [ signal Input[2] {domain: OutputPort.domain type: Int} switch Output {domain: OutputPort.domain} ]
     streams: [ [Input[0], Input[1]] >> __Equal() >> Output; ]
 }
 platformModule __Equal@Int_Bool {
-    inputs: [_IntType, _IntType]
-	outputs: [_SwitchType]
+    inputs: [Int, Int]
+	outputs: [Switch]
     processing: "%%outtokens:0%% = llvm::icmp eq %%intokens:0%%, %%intokens:1%%"
     inherits: [_Signal]
 }
 loop AddTwo {
     ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
     blocks: [
-        signal Input { type: _IntType domain: OutputPort.domain }
-        signal Output { default: 0 type: _IntType domain: OutputPort.domain }
+        signal Input { type: Int domain: OutputPort.domain }
+        signal Output { default: 0 type: Int domain: OutputPort.domain }
         switch Done { default: off domain: OutputPort.domain }
-        signal Step { default: 0 type: _IntType domain: OutputPort.domain reset: Reset }
+        signal Step { default: 0 type: Int domain: OutputPort.domain reset: Reset }
     ]
     terminateWhen: Done
     streams: [
@@ -238,8 +238,8 @@ loop AddTwo {
 reaction TestReaction {
     ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
     blocks: [
-        signal Input { type: _IntType domain: OutputPort.domain }
-        signal Output { type: _IntType domain: OutputPort.domain }
+        signal Input { type: Int domain: OutputPort.domain }
+        signal Output { type: Int domain: OutputPort.domain }
     ]
     streams: [
         Input >> AddTwo() >> Output;

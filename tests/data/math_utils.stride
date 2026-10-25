@@ -5,9 +5,9 @@ module Gain {
         propertyInputPort FactorPort { name: "factor" block: Factor }
     ]
     blocks: [
-        signal In     { type: _RealType domain: OutputPort.domain }
-        signal Out    { type: _RealType domain: OutputPort.domain }
-        signal Factor { type: _RealType domain: OutputPort.domain }
+        signal In     { type: Real domain: OutputPort.domain }
+        signal Out    { type: Real domain: OutputPort.domain }
+        signal Factor { type: Real domain: OutputPort.domain }
     ]
     streams: [
         In * Factor >> Out;
@@ -21,9 +21,9 @@ module Offset {
         propertyInputPort OffsetPort { name: "offset" block: OffsetVal }
     ]
     blocks: [
-        signal In        { type: _RealType domain: OutputPort.domain }
-        signal Out       { type: _RealType domain: OutputPort.domain }
-        signal OffsetVal { type: _RealType domain: OutputPort.domain }
+        signal In        { type: Real domain: OutputPort.domain }
+        signal Out       { type: Real domain: OutputPort.domain }
+        signal OffsetVal { type: Real domain: OutputPort.domain }
     ]
     streams: [
         In + OffsetVal >> Out;

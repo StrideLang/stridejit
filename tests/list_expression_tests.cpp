@@ -142,7 +142,7 @@ TEST(ListExprAST, MixedIntDoubleListWithTypecast) {
                                               "test.stride", 1);
   n1->setCompilerProperty(
       "typecast",
-      std::make_shared<strd::ValueNode>("_RealType", "test.stride", 1));
+      std::make_shared<strd::ValueNode>("Real", "test.stride", 1));
   auto n2 = std::make_shared<strd::ValueNode>(2.5, "test.stride", 2);
 
   std::vector<strd::ASTNode> elements = {n1, n2};

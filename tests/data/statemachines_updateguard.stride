@@ -9,9 +9,9 @@ _domainDefinition RootDomain {
 	domainFunctionCode: ''
 }
 
-signal Counter { domain: RootDomain type: _IntType default: 0 }
-signal ParentOrder { domain: RootDomain type: _IntType default: 0 }
-signal ChildOrder { domain: RootDomain type: _IntType default: 0 }
+signal Counter { domain: RootDomain type: Int default: 0 }
+signal ParentOrder { domain: RootDomain type: Int default: 0 }
+signal ChildOrder { domain: RootDomain type: Int default: 0 }
 
 state Child1 {
     updateGuard: [

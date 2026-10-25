@@ -13,16 +13,16 @@ _domainDefinition RootDomain {
         string OutLiteral { domain: RootDomain }
         string OutSub { domain: RootDomain }
         string OutTrim { domain: RootDomain }
-        signal OutPos { domain: RootDomain type: _IntType }
+        signal OutPos { domain: RootDomain type: Int }
         switch OutStarts { domain: RootDomain }
         switch OutEnds { domain: RootDomain }
         switch OutContains { domain: RootDomain }
         switch OutEqual { domain: RootDomain }
-        signal OutCmp { domain: RootDomain type: _IntType }
-        signal OutLen { domain: RootDomain type: _IntType }
+        signal OutCmp { domain: RootDomain type: Int }
+        signal OutLen { domain: RootDomain type: Int }
         switch OutEmpty { domain: RootDomain }
-        signal OutInt { domain: RootDomain type: _IntType }
-        signal OutReal { domain: RootDomain type: _RealType }
+        signal OutInt { domain: RootDomain type: Int }
+        signal OutReal { domain: RootDomain type: Real }
         string OutArrayElem { domain: RootDomain }
         string OutConcat { domain: RootDomain }
         string OutArraySub { domain: RootDomain }
@@ -31,7 +31,7 @@ _domainDefinition RootDomain {
         string OutConcat7 { domain: RootDomain }
         string OutPlus { domain: RootDomain }
         string OutRepeat { domain: RootDomain }
-        signal OutTokCount { domain: RootDomain type: _IntType }
+        signal OutTokCount { domain: RootDomain type: Int }
         string OutTok1 { domain: RootDomain }
         string OutFmt1 { domain: RootDomain }
         string OutFmt2 { domain: RootDomain }

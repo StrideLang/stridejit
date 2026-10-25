@@ -8,7 +8,7 @@ _domainDefinition TestDomain {
     inputs: [
     ]
     outputs: [
-        signal Out { domain: TestDomain type: _RealType}
+        signal Out { domain: TestDomain type: Real}
     ]
 	domainFunctionCode: ''
 }
@@ -23,9 +23,9 @@ module AddTwo {
         }
     ]
     blocks: [
-        signal Input { type: _RealType }
-        signal Output { type: _RealType }
-        signal Internal { type: _RealType }
+        signal Input { type: Real }
+        signal Output { type: Real }
+        signal Internal { type: Real }
     ]
     streams: [
         2.0 >> Internal;

@@ -4,7 +4,7 @@ _domainDefinition TestDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal InReal { domain: TestDomain type: _RealType }
+        signal InReal { domain: TestDomain type: Real }
     ]
     outputs: [
         switch Out { domain: TestDomain }
@@ -17,7 +17,7 @@ reaction MyReaction {
         propertyInputPort MyProp { block: _MyProp }
     ]
     blocks: [
-        signal _MyProp { type: _RealType }
+        signal _MyProp { type: Real }
     ]
     streams: [
         _MyProp >> Out;

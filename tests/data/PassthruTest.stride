@@ -2,10 +2,10 @@ _domainDefinition Passthru {
     framework: _JitFramework
     rate: -1
     inputs: [
-        signal In { domain: Passthru type: _RealType }
+        signal In { domain: Passthru type: Real }
     ]
     outputs: [
-        signal Out { domain: Passthru type: _RealType }
+        signal Out { domain: Passthru type: Real }
     ]
     domainFunctionCode: ''
 }

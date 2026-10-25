@@ -18,8 +18,8 @@ _domainDefinition RootDomain {
         switch OutAndBundle[3] { domain: RootDomain default: off }
         switch OutOrScalarBroadcast[3] { domain: RootDomain default: off }
         switch OutNotBundle[3] { domain: RootDomain default: off }
-        signal OutLiteralAdd[3] { domain: RootDomain default: 0 type: _IntType }
-        signal OutLiteralBroadcast[3] { domain: RootDomain default: 0 type: _IntType }
+        signal OutLiteralAdd[3] { domain: RootDomain default: 0 type: Int }
+        signal OutLiteralBroadcast[3] { domain: RootDomain default: 0 type: Int }
         switch OutE1 { domain: RootDomain default: off }
         switch OutE2 { domain: RootDomain default: off }
         switch OutE3 { domain: RootDomain default: off }
@@ -32,7 +32,7 @@ _domainDefinition RootDomain {
 
 module Add {
     ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
-    blocks: [ signal Input[2] { type: _IntType domain: OutputPort.domain } signal Output { type: _IntType domain: OutputPort.domain } ]
+    blocks: [ signal Input[2] { type: Int domain: OutputPort.domain } signal Output { type: Int domain: OutputPort.domain } ]
     streams: [ Input[0] + Input[1] >> Output; ]
 }
 

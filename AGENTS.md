@@ -35,7 +35,7 @@ This document outlines critical architectural patterns, code generation invarian
 ## 3. Typecasting & Compiler Properties
 
 - **Typecast Preprocessing**:
-  - The AST preprocessing pass (`CodeResolver::resolveTypeCastForStream`) identifies heterogeneous lists and streams, tagging AST nodes with the `"typecast"` compiler property (e.g. `_RealType` or `_IntType`).
+  - The AST preprocessing pass (`CodeResolver::resolveTypeCastForStream`) identifies heterogeneous lists and streams, tagging AST nodes with the `"typecast"` compiler property (e.g. `Real` or `Int`).
 - **Cached Out DataType Caveat**:
   - `CodeAnalysis::resolveNodeOutDataType` caches type names under `resolvedOutDataType_` *before* typecasting resolution finishes.
   - **Always inspect `node->getCompilerProperty("typecast")` first** before querying `resolveNodeOutDataType`:

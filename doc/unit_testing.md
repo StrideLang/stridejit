@@ -13,8 +13,8 @@ Create a test file named `PassthruTest.stride` (standard assertions like `Expect
 _domainDefinition TestDomain {
     framework: _JitFramework
     rate: -1
-    inputs:  [ signal In  { domain: TestDomain type: _RealType } ]
-    outputs: [ signal Out { domain: TestDomain type: _RealType } ]
+    inputs:  [ signal In  { domain: TestDomain type: Real } ]
+    outputs: [ signal Out { domain: TestDomain type: Real } ]
 }
 
 In >> Out;
@@ -200,8 +200,8 @@ When testing multiple modules connected in a stream pipeline, or testing rate co
 _domainDefinition AudioDomain {
     framework: _JitFramework
     rate: 44100
-    inputs:  [ signal In  { domain: AudioDomain type: _RealType } ]
-    outputs: [ signal Out { domain: AudioDomain type: _RealType } ]
+    inputs:  [ signal In  { domain: AudioDomain type: Real } ]
+    outputs: [ signal Out { domain: AudioDomain type: Real } ]
 }
 
 In >> Amplifier(gain: 3.0) >> Accumulator() >> Out;

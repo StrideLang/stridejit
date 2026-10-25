@@ -10,16 +10,16 @@ _domainDefinition RootDomain {
 }
 
 switch GuardArr[4] { default: off domain: RootDomain }
-signal ActionOutput { domain: RootDomain type: _IntType default: 0 }
-signal ActionIndex { domain: RootDomain type: _IntType default: -1 }
-signal State2Entered { domain: RootDomain type: _IntType default: 0 }
+signal ActionOutput { domain: RootDomain type: Int default: 0 }
+signal ActionIndex { domain: RootDomain type: Int default: -1 }
+signal State2Entered { domain: RootDomain type: Int default: 0 }
 
 reaction RecordReaction {
     ports: [
-        propertyInputPort LocPort { name: "loc" block: Loc allowedTypes: _IntType }
+        propertyInputPort LocPort { name: "loc" block: Loc allowedTypes: Int }
     ]
     blocks: [
-        signal Loc { type: _IntType }
+        signal Loc { type: Int }
     ]
     streams: [
         Loc >> ActionIndex;

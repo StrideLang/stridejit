@@ -22,6 +22,7 @@
 */
 
 #include "stride/stridejit/stridedebugemitter.hpp"
+#include "stride/utils/astquery.h"
 #include "stride/utils/logger.h"
 
 #include "llvm/IR/Constants.h"
@@ -187,17 +188,20 @@ llvm::DIType *StrideDebugEmitter::getOrCreateBasicType(
     return it->second;
   }
 
-  if (strideTypeName == "_RealType" || strideTypeName == "_DoubleType") {
-    return m_basicTypes["double"];
+  auto info = DataTypes::builtin(strideTypeName);
+  if (info.isFloat()) {
+    return m_basicTypes[info.bits == 32 ? "float" : "double"];
   }
-  if (strideTypeName == "_FloatType") {
-    return m_basicTypes["float"];
-  }
-  if (strideTypeName == "_IntType") {
-    return m_basicTypes["int"];
-  }
-  if (strideTypeName == "_SwitchType") {
+  if (info.kind == DataTypes::Kind::Switch) {
     return m_basicTypes["bool"];
+  }
+  if (info.isInteger()) {
+    auto encoding = info.isSigned ? llvm::dwarf::DW_ATE_signed
+                                  : llvm::dwarf::DW_ATE_unsigned;
+    auto *type = m_diBuilder.createBasicType(info.canonical, info.bits,
+                                              encoding);
+    m_basicTypes[strideTypeName] = type;
+    return type;
   }
 
   return m_basicTypes["int"];

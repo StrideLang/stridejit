@@ -9,7 +9,7 @@ _domainDefinition RootDomain {
 	domainFunctionCode: ''
 }
 
-signal Counter { domain: RootDomain type: _IntType default: 0 }
+signal Counter { domain: RootDomain type: Int default: 0 }
 
 state State1 {
     transitions: [

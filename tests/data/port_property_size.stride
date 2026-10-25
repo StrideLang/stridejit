@@ -7,10 +7,10 @@ _domainDefinition RootDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal In[16] { domain: RootDomain type: _IntType }
+        signal In[16] { domain: RootDomain type: Int }
     ]
     outputs: [
-        signal Out[2] { domain: RootDomain type: _IntType }
+        signal Out[2] { domain: RootDomain type: Int }
     ]
 	domainFunctionCode: ''
 }
@@ -26,8 +26,8 @@ module PortProperty {
         }
     ]
     blocks: [
-        signal Input[InputPort.size] { type: _IntType }
-        signal Output { type: _IntType }
+        signal Input[InputPort.size] { type: Int }
+        signal Output { type: Int }
     ]
     streams: [
         (Input[0] + 2) * InputPort.size >> Output;
@@ -37,7 +37,7 @@ module PortProperty {
 signal InternalList[4] {
     default: [0, 1, 2, 3]
     domain: RootDomain
-    type: _IntType
+    type: Int
 }
 
 In >> PortProperty() >> Out[0];

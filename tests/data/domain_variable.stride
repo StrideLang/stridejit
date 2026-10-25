@@ -6,13 +6,13 @@ _domainDefinition TestDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal In { domain: TestDomain default: 0 type: _IntType }
+        signal In { domain: TestDomain default: 0 type: Int }
     ]
     outputs: [
     ]
 	domainFunctionCode: ''
 }
 
-signal A {type: _IntType default: 0 domain: TestDomain}
+signal A {type: Int default: 0 domain: TestDomain}
 
 In >> A;

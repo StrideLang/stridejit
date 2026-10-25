@@ -8,10 +8,10 @@ _domainDefinition RootDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal In[16] {domain: RootDomain type: _RealType}
+        signal In[16] {domain: RootDomain type: Real}
     ]
     outputs: [
-        signal Out[16] {domain: RootDomain type: _RealType}
+        signal Out[16] {domain: RootDomain type: Real}
     ]
 	domainFunctionCode: ''
 }

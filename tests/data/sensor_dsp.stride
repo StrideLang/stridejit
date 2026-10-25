@@ -2,11 +2,11 @@ _domainDefinition SensorDSP {
     framework: _JitFramework
     rate: -1
     inputs: [
-        signal RawSensorValue { domain: SensorDSP type: _RealType }
-        signal AlertThreshold { domain: SensorDSP type: _RealType }
+        signal RawSensorValue { domain: SensorDSP type: Real }
+        signal AlertThreshold { domain: SensorDSP type: Real }
     ]
     outputs: [
-        signal FilteredValue  { domain: SensorDSP type: _RealType }
+        signal FilteredValue  { domain: SensorDSP type: Real }
         switch AlertTriggered { domain: SensorDSP }
     ]
     domainFunctionCode: ''
@@ -26,10 +26,10 @@ module LowPassFilter {
         }
     ]
     blocks: [
-        signal RawIn        { type: _RealType domain: OutputPort.domain }
-        signal FilteredOut  { type: _RealType domain: OutputPort.domain }
-        signal Alpha        { type: _RealType domain: OutputPort.domain }
-        signal PrevFiltered { default: 0.0 type: _RealType reset: Reset domain: OutputPort.domain }
+        signal RawIn        { type: Real domain: OutputPort.domain }
+        signal FilteredOut  { type: Real domain: OutputPort.domain }
+        signal Alpha        { type: Real domain: OutputPort.domain }
+        signal PrevFiltered { default: 0.0 type: Real reset: Reset domain: OutputPort.domain }
     ]
     streams: [
         (Alpha * RawIn) + ((1.0 - Alpha) * PrevFiltered) >> PrevFiltered;
@@ -51,8 +51,8 @@ module ThresholdTrigger {
         }
     ]
     blocks: [
-        signal Value       { type: _RealType domain: OutputPort.domain }
-        signal Threshold   { type: _RealType domain: OutputPort.domain }
+        signal Value       { type: Real domain: OutputPort.domain }
+        signal Threshold   { type: Real domain: OutputPort.domain }
         switch Triggered   { domain: OutputPort.domain }
     ]
     streams: [

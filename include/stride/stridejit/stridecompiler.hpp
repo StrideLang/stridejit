@@ -37,6 +37,7 @@
 #include "stride/parser/memberaccessnode.h"
 #include "stride/stridejit/functionast.hpp"
 #include "stride/stridejit/namemangler.hpp"
+#include "stride/utils/astquery.h"
 #include "stride/utils/logger.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -74,7 +75,18 @@ EXPORT double __stride_Greater_d_dd(double a, double b);
 }
 
 namespace strd {
-enum class DataType { DOUBLE, BOOL, INT32, INT64, STRING, CUSTOM, STATE };
+enum class DataType {
+  DOUBLE,
+  BOOL,
+  INT32,
+  INT64,
+  STRING,
+  CUSTOM,
+  STATE,
+  FLOAT32,
+  INT8,
+  INT16
+};
 
 struct ExternalFunction {
   std::string name;
@@ -101,6 +113,7 @@ enum StrideConfig {
 class StrideCompiler {
 public:
   StrideCompiler();
+  ~StrideCompiler();
 
   std::optional<ExternalFunction>
   getExternalFunction(std::string strideName, llvm::Type *returnType,
@@ -108,6 +121,29 @@ public:
                       bool allowConversion = false);
 
   llvm::Type *getLLVMType(std::shared_ptr<strd::DeclarationNode> decl);
+
+  // Reads the frameworkDataType declarations in tree into typesMap and
+  // dataTypes, so each framework decides e.g. the size of Int and Real.
+  void registerDataTypes(ASTNode tree);
+  // The LLVM type for a data type: integers by bits, Float32 and Float64,
+  // Switch is i1 and String is the {ptr, i32} string view.
+  llvm::Type *getLLVMTypeForDataType(const DataTypes::Info &info);
+  // The description of a data type name. Not valid() for unknown names.
+  DataTypes::Info getDataTypeInfo(const std::string &name);
+  // Name of the data type of decl, e.g. "Int" for signal X { type: Int }.
+  // Empty if unknown.
+  static std::string
+  getDataTypeName(std::shared_ptr<strd::DeclarationNode> decl);
+  // Converts V to toType. Integers are extended, truncated and converted to
+  // floats according to their signedness. Values of other types are
+  // returned unchanged.
+  llvm::Value *convertValue(llvm::Value *V, llvm::Type *toType,
+                            bool fromSigned = true, bool toSigned = true);
+  // Converts V, whose data type is fromDataType (may be empty), to the data
+  // type named toDataType.
+  llvm::Value *convertToDataType(llvm::Value *V,
+                                 const std::string &fromDataType,
+                                 const std::string &toDataType);
   llvm::Type *
   getLLVMTypeForCodegenEntity(std::shared_ptr<strd::DeclarationNode> decl,
                               std::shared_ptr<DeclarationNode> funcDecl,
@@ -227,7 +263,9 @@ public:
   CodeAnalysis::TypeTree m_intanceTree;
 
   std::unordered_map<std::string, std::vector<ExternalFunction>> functionMap;
+  // LLVM type and description of each data type name (Int, Real, UInt8, ...)
   std::unordered_map<std::string, llvm::Type *> typesMap;
+  std::unordered_map<std::string, DataTypes::Info> dataTypes;
 
   std::unordered_map<std::string, std::vector<DomainArg>> domainArgs;
 

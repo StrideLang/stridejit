@@ -275,6 +275,12 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
             std::make_unique<IntExprAST>(
                 std::get<int32_t>(extArg.defaultValue)));
         resetBody.push_back(std::move(varInit));
+      } else if (std::holds_alternative<int64_t>(extArg.defaultValue)) {
+        auto varInit = std::make_unique<BinaryExprAST>(
+            '=', std::make_unique<VariableExprAST>(extArg.name),
+            std::make_unique<IntExprAST>(
+                std::get<int64_t>(extArg.defaultValue), 64));
+        resetBody.push_back(std::move(varInit));
       } else if (std::holds_alternative<double>(extArg.defaultValue)) {
         auto varInit = std::make_unique<BinaryExprAST>(
             '=', std::make_unique<VariableExprAST>(extArg.name),
@@ -338,31 +344,31 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
             if (defaultValueNode->getNodeType() == AST::Real) {
               double val = std::static_pointer_cast<ValueNode>(defaultValueNode)
                                ->getRealValue();
-              if (llvmType->isDoubleTy())
+              if (llvmType->isFloatingPointTy())
                 valExpr = std::make_unique<RealExprAST>(val);
-              else if (llvmType->isIntegerTy(32))
+              else if (llvmType->isIntegerTy() && !llvmType->isIntegerTy(1))
                 valExpr =
-                    std::make_unique<IntExprAST>(static_cast<int32_t>(val));
+                    std::make_unique<IntExprAST>(static_cast<int64_t>(val), 64);
               else
                 valExpr = std::make_unique<BoolExprAST>(val != 0.0);
             } else if (defaultValueNode->getNodeType() == AST::Int) {
               int64_t val =
                   std::static_pointer_cast<ValueNode>(defaultValueNode)
                       ->getIntValue();
-              if (llvmType->isDoubleTy())
+              if (llvmType->isFloatingPointTy())
                 valExpr =
                     std::make_unique<RealExprAST>(static_cast<double>(val));
-              else if (llvmType->isIntegerTy(32))
+              else if (llvmType->isIntegerTy() && !llvmType->isIntegerTy(1))
                 valExpr =
-                    std::make_unique<IntExprAST>(static_cast<int32_t>(val));
+                    std::make_unique<IntExprAST>(static_cast<int64_t>(val), 64);
               else
                 valExpr = std::make_unique<BoolExprAST>(val != 0);
             } else if (defaultValueNode->getNodeType() == AST::Switch) {
               bool val = std::static_pointer_cast<ValueNode>(defaultValueNode)
                              ->getSwitchValue();
-              if (llvmType->isDoubleTy())
+              if (llvmType->isFloatingPointTy())
                 valExpr = std::make_unique<RealExprAST>(val ? 1.0 : 0.0);
-              else if (llvmType->isIntegerTy(32))
+              else if (llvmType->isIntegerTy() && !llvmType->isIntegerTy(1))
                 valExpr = std::make_unique<IntExprAST>(val ? 1 : 0);
               else
                 valExpr = std::make_unique<BoolExprAST>(val);
@@ -437,31 +443,31 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
                 if (defaultValue->getNodeType() == AST::Real) {
                   double val = std::static_pointer_cast<ValueNode>(defaultValue)
                                    ->getRealValue();
-                  if (llvmType->isDoubleTy())
+                  if (llvmType->isFloatingPointTy())
                     valExpr = std::make_unique<RealExprAST>(val);
-                  else if (llvmType->isIntegerTy(32))
+                  else if (llvmType->isIntegerTy() && !llvmType->isIntegerTy(1))
                     valExpr =
-                        std::make_unique<IntExprAST>(static_cast<int32_t>(val));
+                        std::make_unique<IntExprAST>(static_cast<int64_t>(val), 64);
                   else
                     valExpr = std::make_unique<BoolExprAST>(val != 0.0);
                 } else if (defaultValue->getNodeType() == AST::Int) {
                   int64_t val =
                       std::static_pointer_cast<ValueNode>(defaultValue)
                           ->getIntValue();
-                  if (llvmType->isDoubleTy())
+                  if (llvmType->isFloatingPointTy())
                     valExpr =
                         std::make_unique<RealExprAST>(static_cast<double>(val));
-                  else if (llvmType->isIntegerTy(32))
+                  else if (llvmType->isIntegerTy() && !llvmType->isIntegerTy(1))
                     valExpr =
-                        std::make_unique<IntExprAST>(static_cast<int32_t>(val));
+                        std::make_unique<IntExprAST>(static_cast<int64_t>(val), 64);
                   else
                     valExpr = std::make_unique<BoolExprAST>(val != 0);
                 } else if (defaultValue->getNodeType() == AST::Switch) {
                   bool val = std::static_pointer_cast<ValueNode>(defaultValue)
                                  ->getSwitchValue();
-                  if (llvmType->isDoubleTy())
+                  if (llvmType->isFloatingPointTy())
                     valExpr = std::make_unique<RealExprAST>(val ? 1.0 : 0.0);
-                  else if (llvmType->isIntegerTy(32))
+                  else if (llvmType->isIntegerTy() && !llvmType->isIntegerTy(1))
                     valExpr = std::make_unique<IntExprAST>(val ? 1 : 0);
                   else
                     valExpr = std::make_unique<BoolExprAST>(val);
@@ -731,6 +737,7 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
                                      StrideCompiler &state) {
 
   state.m_tree = tree;
+  state.registerDataTypes(tree);
   state.m_intanceTree = CodeAnalysis::getStateStructInformation({}, tree);
 
   // PRE-PASS: Find all domain variables, signals, switches, and state machine
@@ -917,13 +924,23 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
           generatedIRCode.domainArgs.push_back(
               {decl->getName(), DataType::DOUBLE});
         } else if (type->isFloatTy()) {
-          assert(0 == 1); // Not yet supported
+          generatedIRCode.domainArgs.push_back(
+              {decl->getName(), DataType::FLOAT32});
         } else if (type->isIntegerTy(1)) {
           generatedIRCode.domainArgs.push_back(
               {decl->getName(), DataType::BOOL});
+        } else if (type->isIntegerTy(8)) {
+          generatedIRCode.domainArgs.push_back(
+              {decl->getName(), DataType::INT8});
+        } else if (type->isIntegerTy(16)) {
+          generatedIRCode.domainArgs.push_back(
+              {decl->getName(), DataType::INT16});
         } else if (type->isIntegerTy(32)) {
           generatedIRCode.domainArgs.push_back(
               {decl->getName(), DataType::INT32});
+        } else if (type->isIntegerTy(64)) {
+          generatedIRCode.domainArgs.push_back(
+              {decl->getName(), DataType::INT64});
         } else if (type->isStructTy() || decl->getEntityType() == "string") {
           generatedIRCode.domainArgs.push_back(
               {decl->getName(), DataType::STRING});
@@ -1040,18 +1057,20 @@ bool StrideGenerator::processPreviousFunction(
                 if (!defaultNode) {
                   continue;
                 }
-                if (typeName == "_RealType" &&
-                    defaultNode->getNodeType() == AST::Real) {
+                auto typeInfo = state.getDataTypeInfo(typeName);
+                if (typeInfo.isFloat() &&
+                    (defaultNode->getNodeType() == AST::Real ||
+                     defaultNode->getNodeType() == AST::Int)) {
                   double defaultValue =
                       std::static_pointer_cast<ValueNode>(defaultNode)
-                          ->getRealValue();
+                          ->toReal();
                   auto varReal = std::make_unique<BinaryExprAST>(
                       '=',
                       std::make_unique<VariableExprAST>(
                           resetNodeDecl->getName()),
                       std::make_unique<RealExprAST>(defaultValue));
                   Expressions.push_back(std::move(varReal));
-                } else if (typeName == "_IntType" &&
+                } else if (typeInfo.isInteger() &&
                            defaultNode->getNodeType() == AST::Int) {
                   int64_t defaultValue =
                       std::static_pointer_cast<ValueNode>(defaultNode)
@@ -1185,18 +1204,12 @@ void StrideGenerator::collectInputArgs(
           }
         }
         if (!typeStr.empty()) {
-          if (typeStr == "_IntType") {
-            args.MainIn.argTypes.push_back(
-                llvm::Type::getInt32Ty(*state.TheContext));
-          } else if (typeStr == "_SwitchType") {
-            args.MainIn.argTypes.push_back(
-                llvm::Type::getInt1Ty(*state.TheContext));
-          } else if (typeStr == "_StringType") {
-            args.MainIn.argTypes.push_back(
-                state.typesMap["_StringType"]);
+          auto typeIt = state.typesMap.find(typeStr);
+          if (typeIt != state.typesMap.end() && typeIt->second &&
+              !typeIt->second->isVoidTy()) {
+            args.MainIn.argTypes.push_back(typeIt->second);
           } else {
-            args.MainIn.argTypes.push_back(
-                llvm::Type::getDoubleTy(*state.TheContext));
+            args.MainIn.argTypes.push_back(state.typesMap[DataTypes::Real]);
           }
         } else if (currentChildNode) {
           auto elemDecl = ASTQuery::findDeclarationByName(
@@ -1214,7 +1227,7 @@ void StrideGenerator::collectInputArgs(
                 llvm::Type::getDoubleTy(*state.TheContext));
           } else if (currentChildNode->getNodeType() == AST::String) {
             args.MainIn.argTypes.push_back(
-                state.typesMap["_StringType"]);
+                state.typesMap[DataTypes::String]);
           } else if (currentChildNode->getNodeType() == AST::MemberAccess) {
             auto pp =
                 std::static_pointer_cast<MemberAccessNode>(currentChildNode);
@@ -1540,7 +1553,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
             args.MainIn.args.insert(args.MainIn.args.begin(),
                                     std::move(fmtExpr));
             args.MainIn.argTypes.insert(args.MainIn.argTypes.begin(),
-                                        state.typesMap["_StringType"]);
+                                        state.typesMap[DataTypes::String]);
           }
         }
       }
@@ -1622,7 +1635,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                         << std::endl;
           }
           if (!state.TheModule->getFunction(fnName)) {
-            // Aggregates (e.g. _StringType {ptr, i32}) cannot be passed by
+            // Aggregates (e.g. String {ptr, i32}) cannot be passed by
             // value across the JIT/host-C++ boundary: MSVC passes 16-byte
             // structs by hidden reference and returns them via sret, while
             // LLVM splits them into registers. Lower to pointers instead.
@@ -1676,6 +1689,15 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               std::move(args.MainIn.args),
               std::vector<std::unique_ptr<ExprAST>>{},
               std::vector<std::unique_ptr<ExprAST>>{});
+          // Leading data types of the inputs. A variadic entry ends them.
+          if (auto inputs = funcDecl->getPropertyValue("inputs")) {
+            for (const auto &input : inputs->getChildren()) {
+              if (input->getNodeType() != AST::Entity) {
+                break;
+              }
+              newCall->InArgDataTypes.push_back(ASTQuery::getNodeName(input));
+            }
+          }
 
           generated[domainName].expr.push_back(std::move(newCall));
         }
@@ -2579,6 +2601,32 @@ void StrideGenerator::setTypeCastMetadata(ASTNode node, ExprAST *V) {
           std::static_pointer_cast<ValueNode>(typecastNode)->getStringValue();
     }
   }
+  switch (node->getNodeType()) {
+  case AST::Int:
+    V->dataType = DataTypes::Int;
+    break;
+  case AST::Real:
+    V->dataType = DataTypes::Real;
+    break;
+  case AST::Switch:
+    V->dataType = DataTypes::Switch;
+    break;
+  case AST::String:
+    V->dataType = DataTypes::String;
+    break;
+  case AST::Entity:
+  case AST::Array: {
+    auto declNode = node->getCompilerProperty("declaration");
+    if (declNode && (declNode->getNodeType() == AST::Declaration ||
+                     declNode->getNodeType() == AST::ArrayDeclaration)) {
+      V->dataType = StrideCompiler::getDataTypeName(
+          std::static_pointer_cast<DeclarationNode>(declNode));
+    }
+    break;
+  }
+  default:
+    break;
+  }
 }
 
 DefaultVariant
@@ -2587,9 +2635,9 @@ StrideGenerator::getDefaultValue(std::shared_ptr<DeclarationNode> decl,
   DefaultVariant defaultValue;
   auto *type = state.getLLVMType(decl);
 
-  if (type->isDoubleTy()) {
+  if (type->isFloatingPointTy()) {
     defaultValue = double(0.0);
-  } else if (type->isIntegerTy(32)) {
+  } else if (type->isIntegerTy() && !type->isIntegerTy(1)) {
     defaultValue = int32_t(0);
   } else if (type->isIntegerTy(1)) {
     defaultValue = bool(false);
@@ -2606,16 +2654,18 @@ StrideGenerator::getDefaultValue(std::shared_ptr<DeclarationNode> decl,
           std::static_pointer_cast<ValueNode>(defaultNode)->getStringValue();
     } else if (defaultNode && (defaultNode->getNodeType() == AST::Int ||
                                defaultNode->getNodeType() == AST::Real)) {
-      if (type->isDoubleTy()) {
+      if (type->isFloatingPointTy()) {
         defaultValue =
             std::static_pointer_cast<ValueNode>(defaultNode)->toReal();
-      } else if (type->isIntegerTy(32)) {
+      } else if (type->isIntegerTy() && !type->isIntegerTy(1)) {
         if (defaultNode->getNodeType() == AST::Int) {
           auto intValue =
               std::static_pointer_cast<ValueNode>(defaultNode)->getIntValue();
-          assert(intValue <= INT32_MAX);
-          assert(intValue >= INT32_MIN);
-          defaultValue = (int32_t)intValue;
+          if (intValue <= INT32_MAX && intValue >= INT32_MIN) {
+            defaultValue = (int32_t)intValue;
+          } else {
+            defaultValue = (int64_t)intValue;
+          }
         } else if (defaultNode->getNodeType() == AST::Real) {
           auto doubleValue =
               std::static_pointer_cast<ValueNode>(defaultNode)->getRealValue();
@@ -2646,6 +2696,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::generateStandaloneFunction(
     return nullptr;
   }
   state.m_tree = tree;
+  state.registerDataTypes(tree);
   if (tree) {
     for (const auto &node : tree->getChildren()) {
       if (node->getNodeType() == AST::Declaration ||

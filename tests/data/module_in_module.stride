@@ -6,10 +6,10 @@ _domainDefinition RootDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal In {domain: RootDomain type: _RealType}
+        signal In {domain: RootDomain type: Real}
     ]
     outputs: [
-        signal Out {domain: RootDomain type: _RealType}
+        signal Out {domain: RootDomain type: Real}
     ]
 	domainFunctionCode: ''
 }
@@ -46,8 +46,8 @@ module Add5 {
         }
     ]
     blocks: [
-        signal Input { type: _RealType domain: OutputPort.domain }
-        signal Output { type: _RealType domain: OutputPort.domain }
+        signal Input { type: Real domain: OutputPort.domain }
+        signal Output { type: Real domain: OutputPort.domain }
     ]
     streams: [
         Input + 5 >> Output;

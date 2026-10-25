@@ -10,6 +10,7 @@
 
 // stride
 #include "stride/stridegen/coderesolver.hpp"
+#include "stride/stridegen/codevalidator.hpp"
 #include "stride/utils/astfunctions.h"
 #include "stride/utils/astquery.h"
 
@@ -1079,25 +1080,35 @@ static void fillTypeInfo(llvm::Type *ty, const llvm::DataLayout *DL,
     outElemSize = 0;
     return;
   }
+  // The type name assumes signed integers. Callers that know the declaration
+  // replace it with the declared data type.
   if (ty->isDoubleTy()) {
     outType = DataType::DOUBLE;
-    outTypeName = "_RealType";
+    outTypeName = "Float64";
     outElemSize = DL ? DL->getTypeAllocSize(ty) : 8;
   } else if (ty->isIntegerTy(32)) {
     outType = DataType::INT32;
-    outTypeName = "_IntType";
+    outTypeName = "Int32";
     outElemSize = DL ? DL->getTypeAllocSize(ty) : 4;
   } else if (ty->isIntegerTy(1)) {
     outType = DataType::BOOL;
-    outTypeName = "_SwitchType";
+    outTypeName = DataTypes::Switch;
     outElemSize = DL ? DL->getTypeAllocSize(ty) : 1;
   } else if (ty->isIntegerTy(64)) {
     outType = DataType::INT64;
-    outTypeName = "_IntType";
+    outTypeName = "Int64";
     outElemSize = DL ? DL->getTypeAllocSize(ty) : 8;
+  } else if (ty->isIntegerTy(16)) {
+    outType = DataType::INT16;
+    outTypeName = "Int16";
+    outElemSize = DL ? DL->getTypeAllocSize(ty) : 2;
+  } else if (ty->isIntegerTy(8)) {
+    outType = DataType::INT8;
+    outTypeName = "Int8";
+    outElemSize = DL ? DL->getTypeAllocSize(ty) : 1;
   } else if (ty->isFloatTy()) {
-    outType = DataType::DOUBLE;
-    outTypeName = "_RealType";
+    outType = DataType::FLOAT32;
+    outTypeName = "Float32";
     outElemSize = DL ? DL->getTypeAllocSize(ty) : 4;
   } else if (ty->isStructTy()) {
     auto *structTy = llvm::cast<llvm::StructType>(ty);
@@ -1105,7 +1116,7 @@ static void fillTypeInfo(llvm::Type *ty, const llvm::DataLayout *DL,
         structTy->getElementType(0)->isPointerTy() &&
         structTy->getElementType(1)->isIntegerTy(32)) {
       outType = DataType::STRING;
-      outTypeName = "_StringType";
+      outTypeName = DataTypes::String;
       outElemSize = DL ? DL->getTypeAllocSize(ty) : sizeof(StrideStringView);
     } else {
       outType = DataType::STATE;
@@ -1117,6 +1128,15 @@ static void fillTypeInfo(llvm::Type *ty, const llvm::DataLayout *DL,
     outTypeName = "";
     outElemSize = DL ? DL->getTypeAllocSize(ty) : 0;
   }
+}
+
+std::vector<LangError> StrideEnvironment::getConversionWarnings() const {
+  std::vector<LangError> warnings;
+  for (const auto &tree : m_trees) {
+    auto treeWarnings = CodeValidator::findLossyConversions(tree);
+    warnings.insert(warnings.end(), treeWarnings.begin(), treeWarnings.end());
+  }
+  return warnings;
 }
 
 std::vector<FunctionArgInfo>
@@ -1180,6 +1200,10 @@ StrideEnvironment::getFunctionArgs(const std::string &funcName) const {
             : nullptr;
     info.count = 1;
     if (entityDecl) {
+      auto dataTypeName = StrideCompiler::getDataTypeName(entityDecl);
+      if (!dataTypeName.empty()) {
+        info.typeName = dataTypeName;
+      }
       int sz =
           ASTQuery::getEntityDeclaredSize(entityDecl, {}, mStrideEnv.m_tree);
       if (sz > 0) {
@@ -1419,12 +1443,16 @@ int32_t StrideEnvironment::invoke(const std::string &funcName,
 int32_t StrideEnvironment::stepTick(const std::string &domainOrFuncName,
                                    void *statePtr,
                                    const std::vector<void *> &inOutArgs) {
+  // A domain name runs its process function, <domain>_process
   std::string targetFunc = domainOrFuncName;
   if (mStrideEnv.FunctionProtos.find(targetFunc) ==
       mStrideEnv.FunctionProtos.end()) {
-    if (mStrideEnv.FunctionProtos.find(targetFunc + "::process") !=
-        mStrideEnv.FunctionProtos.end()) {
-      targetFunc = targetFunc + "::process";
+    for (const auto &suffix : {"_process", "::process"}) {
+      if (mStrideEnv.FunctionProtos.find(targetFunc + suffix) !=
+          mStrideEnv.FunctionProtos.end()) {
+        targetFunc = targetFunc + suffix;
+        break;
+      }
     }
   }
 
@@ -1687,8 +1715,14 @@ bool StrideEnvironment::compileObjectToDisk(std::string path) {
           f << "bool *";
         } else if (domainFunc.type == DataType::STRING) {
           f << "StrideStringView *";
-          //        } else if (domainFunc.type == DataType::INT64) {
-          //          f << "int64_t *";
+        } else if (domainFunc.type == DataType::FLOAT32) {
+          f << "float *";
+        } else if (domainFunc.type == DataType::INT8) {
+          f << "int8_t *";
+        } else if (domainFunc.type == DataType::INT16) {
+          f << "int16_t *";
+        } else if (domainFunc.type == DataType::INT64) {
+          f << "int64_t *";
         } else {
           f << "void *";
         }
@@ -2183,7 +2217,7 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
   ss << "extern \"C\" {\n";
   ss << "#endif\n\n";
 
-  auto strTyIt = mStrideEnv.typesMap.find("_StringType");
+  auto strTyIt = mStrideEnv.typesMap.find(DataTypes::String);
   llvm::Type *strTy =
       (strTyIt != mStrideEnv.typesMap.end()) ? strTyIt->second : nullptr;
   auto llvmTypeToCType = [&](llvm::Type *ty) -> std::string {
@@ -2193,6 +2227,10 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
       return "StrideStringView";
     if (ty->isIntegerTy(1))
       return "bool";
+    if (ty->isIntegerTy(8))
+      return "int8_t";
+    if (ty->isIntegerTy(16))
+      return "int16_t";
     if (ty->isIntegerTy(32))
       return "int32_t";
     if (ty->isIntegerTy(64))

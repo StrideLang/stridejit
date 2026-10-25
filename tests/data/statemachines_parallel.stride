@@ -9,9 +9,9 @@ _domainDefinition RootDomain {
 	domainFunctionCode: ''
 }
 
-signal ParentCounter { domain: RootDomain type: _IntType default: 0 }
-signal Region1Counter { domain: RootDomain type: _IntType default: 0 }
-signal Region2Counter { domain: RootDomain type: _IntType default: 0 }
+signal ParentCounter { domain: RootDomain type: Int default: 0 }
+signal Region1Counter { domain: RootDomain type: Int default: 0 }
+signal Region2Counter { domain: RootDomain type: Int default: 0 }
 
 state Region1 {
     onProcess: [

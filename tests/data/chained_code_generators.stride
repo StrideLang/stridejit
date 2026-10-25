@@ -1,6 +1,6 @@
 # Test chaining code generators (reactions) directly in a stream
 
-signal Result { type: _IntType }
+signal Result { type: Int }
 switch Trigger { default: off }
 
 reaction StepOne {
@@ -14,8 +14,8 @@ reaction StepOne {
         }
     ]
     blocks: [
-        signal Factor { type: _IntType }
-        signal Intermediate { type: _IntType }
+        signal Factor { type: Int }
+        signal Intermediate { type: Int }
     ]
     streams: [
         Factor * 2 >> Intermediate;
@@ -36,9 +36,9 @@ reaction StepTwo {
         }
     ]
     blocks: [
-        signal Input { type: _IntType }
-        signal Offset { type: _IntType }
-        signal Output { type: _IntType }
+        signal Input { type: Int }
+        signal Offset { type: Int }
+        signal Output { type: Int }
     ]
     streams: [
         Input + Offset >> Output;

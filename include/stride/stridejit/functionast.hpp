@@ -206,6 +206,9 @@ public:
   std::vector<std::unique_ptr<ExprAST>> OutArgs;
   std::vector<std::unique_ptr<ExprAST>> ExternalArgs;
   std::vector<std::unique_ptr<ExprAST>> PortPropArgs;
+  // Data types of the platformModule inputs, e.g. "Int". Arguments are
+  // converted to them before substitution in the command.
+  std::vector<std::string> InArgDataTypes;
   std::unique_ptr<ExprAST> ret;
 
 private:

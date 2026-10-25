@@ -23,7 +23,7 @@ std::pair<llvm::Value *, std::optional<llvm::Type *>>
 StringExprAST::codegen(StrideCompiler &state) {
   llvm::Value *strGlobal =
       state.Builder->CreateGlobalStringPtr(Val, "str_lit", 0, state.TheModule.get());
-  llvm::Type *stringTy = state.typesMap["_StringType"];
+  llvm::Type *stringTy = state.typesMap[DataTypes::String];
   llvm::Value *lenVal = llvm::ConstantInt::get(
       llvm::Type::getInt32Ty(*state.TheContext), Val.size());
   llvm::Value *strStruct = llvm::UndefValue::get(stringTy);

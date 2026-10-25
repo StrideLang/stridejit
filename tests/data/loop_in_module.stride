@@ -4,10 +4,10 @@ _domainDefinition RootDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-		signal List[3] { domain: RootDomain default: 1 type: _IntType }
+		signal List[3] { domain: RootDomain default: 1 type: Int }
     ]
     outputs: [
-        signal Out { domain: RootDomain type: _IntType }
+        signal Out { domain: RootDomain type: Int }
     ]
 	domainFunctionCode: ''
 }
@@ -25,7 +25,7 @@ module Equal {
         }
     ]
     blocks: [
-        signal Input[2] {domain: OutputPort.domain type: _IntType}
+        signal Input[2] {domain: OutputPort.domain type: Int}
 		switch Output {domain: OutputPort.domain}
     ]
     streams: [
@@ -35,8 +35,8 @@ module Equal {
 }
 
 platformModule __Equal@Int_Bool {
-    inputs: [_IntType, _IntType]
-	outputs: [_SwitchType]
+    inputs: [Int, Int]
+	outputs: [Switch]
     processing: "%%outtokens:0%% = llvm::icmp eq %%intokens:0%%, %%intokens:1%%"
     inherits: [_Signal]
 }
@@ -51,9 +51,9 @@ loop MyLoop {
 		}
 	]
 	blocks: [
-		signal Input[InputPort.size] { type: _IntType domain: OutputPort.domain }
-		signal Output {default: 0 type: _IntType domain: OutputPort.domain }
-		signal Index { default: 0 type: _IntType reset: Reset domain: OutputPort.domain }
+		signal Input[InputPort.size] { type: Int domain: OutputPort.domain }
+		signal Output {default: 0 type: Int domain: OutputPort.domain }
+		signal Index { default: 0 type: Int reset: Reset domain: OutputPort.domain }
 		switch Done { default: off domain: OutputPort.domain }
 	]
 	terminateWhen: Done
@@ -74,8 +74,8 @@ module TestModule {
         }
     ]
     blocks: [
-        signal Input[3] { type: _IntType domain: OutputPort.domain }
-        signal Output { type: _IntType domain: OutputPort.domain }
+        signal Input[3] { type: Int domain: OutputPort.domain }
+        signal Output { type: Int domain: OutputPort.domain }
     ]
     streams: [
         Input >> MyLoop() >> Output;

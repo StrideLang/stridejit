@@ -12,6 +12,13 @@ BinaryExprAST::BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS,
                              std::unique_ptr<ExprAST> RHS)
     : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
 
+// Integers of unknown data type are signed.
+static bool isUnsignedDataType(StrideCompiler &state,
+                               const std::string &dataType) {
+  auto info = state.getDataTypeInfo(dataType);
+  return info.isInteger() && !info.isSigned;
+}
+
 static llvm::Function *getOrCreateFunction(StrideCompiler &state) {
   llvm::BasicBlock *curBB = state.Builder->GetInsertBlock();
   if (curBB && curBB->getParent()) {
@@ -207,13 +214,14 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         state.Builder->CreateStore(loadInst, Variable);
     } else {
       if (VariableType.has_value()) {
-        if (VariableType.value()->isIntegerTy(1) && Val->getType()->isDoubleTy()) {
-          Val = state.Builder->CreateFPToUI(
-              Val, llvm::Type::getInt1Ty(*state.TheContext), "fptoui");
-        } else if (VariableType.value()->isIntegerTy(32) && Val->getType()->isDoubleTy()) {
-          Val = state.Builder->CreateFPToSI(
-              Val, llvm::Type::getInt32Ty(*state.TheContext), "fptosi");
+        // Convert to the data type of the destination, e.g. Int to UInt8
+        llvm::Type *storeType = VariableType.value();
+        if (storeType->isArrayTy() && !Val->getType()->isArrayTy()) {
+          storeType = storeType->getArrayElementType();
         }
+        Val = state.convertValue(
+            Val, storeType, !isUnsignedDataType(state, RHS->dataType),
+            !isUnsignedDataType(state, LHSE->dataType));
       }
       if (state.NamedValues.find(LHSE->getName()) != state.NamedValues.end()) {
         if (state.NamedValues[LHSE->getName()]
@@ -228,13 +236,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
     }
 
     if (typecast.size() > 0) {
-      if (Val->getType()->isIntegerTy() && typecast == "_RealType") {
-        Val = state.Builder->CreateSIToFP(
-            Val, llvm::Type::getDoubleTy(*state.TheContext));
-      } else if (Val->getType()->isDoubleTy() && typecast == "_IntType") {
-        Val = state.Builder->CreateFPToSI(
-            Val, llvm::Type::getInt32Ty(*state.TheContext));
-      }
+      Val = state.convertToDataType(Val, LHSE->dataType, typecast);
     }
     if (state.NamedValues.find(LHSE->getName()) != state.NamedValues.end()) {
       if (!state.NamedValues[LHSE->getName()].first->getType()->isPointerTy()) {
@@ -360,23 +362,63 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       RType = R->getType();
     }
 
-    if ((*LType)->isDoubleTy() && (*RType)->isIntegerTy()) {
-      R = state.Builder->CreateSIToFP(
-          R, llvm::Type::getDoubleTy(*state.TheContext), "sitofp");
-      RType = llvm::Type::getDoubleTy(*state.TheContext);
-    } else if ((*LType)->isIntegerTy() && (*RType)->isDoubleTy()) {
-      L = state.Builder->CreateSIToFP(
-          L, llvm::Type::getDoubleTy(*state.TheContext), "sitofp");
-      LType = llvm::Type::getDoubleTy(*state.TheContext);
+    // Mixed operands are converted to their promoted type (see
+    // DataTypes::promote): integers to floats, and signed with unsigned to a
+    // signed type that holds both. The promoted type's sign decides signed
+    // or unsigned division and comparison.
+    bool lUnsigned = isUnsignedDataType(state, LHS->dataType);
+    bool rUnsigned = isUnsignedDataType(state, RHS->dataType);
+    bool opUnsigned = false;
+    std::string promoted;
+    if (!LHS->dataType.empty() && !RHS->dataType.empty()) {
+      promoted = DataTypes::promote(LHS->dataType, RHS->dataType, state.m_tree);
+    }
+    auto promotedInfo = state.getDataTypeInfo(promoted);
+    bool numericOperands =
+        ((*LType)->isIntegerTy() || (*LType)->isFloatingPointTy()) &&
+        ((*RType)->isIntegerTy() || (*RType)->isFloatingPointTy());
+    if (promotedInfo.isNumeric() && numericOperands) {
+      auto *promotedType = state.getLLVMTypeForDataType(promotedInfo);
+      L = state.convertValue(L, promotedType, !lUnsigned,
+                             promotedInfo.isSigned);
+      R = state.convertValue(R, promotedType, !rUnsigned,
+                             promotedInfo.isSigned);
+      LType = promotedType;
+      RType = promotedType;
+      opUnsigned = promotedInfo.isInteger() && !promotedInfo.isSigned;
+      dataType = promoted;
+    } else if ((*LType)->isFloatingPointTy() && (*RType)->isIntegerTy()) {
+      R = state.convertValue(R, *LType, !rUnsigned);
+      RType = LType;
+    } else if ((*LType)->isIntegerTy() && (*RType)->isFloatingPointTy()) {
+      L = state.convertValue(L, *RType, !lUnsigned);
+      LType = RType;
+    } else if ((*LType)->isFloatingPointTy() &&
+               (*RType)->isFloatingPointTy()) {
+      if ((*LType)->getPrimitiveSizeInBits() <
+          (*RType)->getPrimitiveSizeInBits()) {
+        L = state.convertValue(L, *RType);
+        LType = RType;
+      } else if ((*RType)->getPrimitiveSizeInBits() <
+                 (*LType)->getPrimitiveSizeInBits()) {
+        R = state.convertValue(R, *LType);
+        RType = LType;
+      }
     } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
       unsigned lBits = (*LType)->getIntegerBitWidth();
       unsigned rBits = (*RType)->getIntegerBitWidth();
       if (lBits < rBits) {
-        L = state.Builder->CreateIntCast(L, *RType, true, "intcast");
+        L = state.convertValue(L, *RType, !lUnsigned);
         LType = RType;
+        opUnsigned = lUnsigned && rUnsigned;
       } else if (rBits < lBits) {
-        R = state.Builder->CreateIntCast(R, *LType, true, "intcast");
+        R = state.convertValue(R, *LType, !rUnsigned);
         RType = LType;
+        opUnsigned = lUnsigned && rUnsigned;
+      } else {
+        // Without data types the operands are treated as signed unless both
+        // are unsigned
+        opUnsigned = lUnsigned && rUnsigned;
       }
     }
 
@@ -384,10 +426,10 @@ BinaryExprAST::codegen(StrideCompiler &state) {
     std::optional<llvm::Type *> Type;
     switch (Op) {
     case '+': {
-      if (*LType == state.typesMap["_StringType"] &&
-          *RType == state.typesMap["_StringType"]) {
+      if (*LType == state.typesMap[DataTypes::String] &&
+          *RType == state.typesMap[DataTypes::String]) {
         llvm::Function *TheFunction = getOrCreateFunction(state);
-        llvm::Type *stringTy = state.typesMap["_StringType"];
+        llvm::Type *stringTy = state.typesMap[DataTypes::String];
         llvm::ArrayType *arrayTy = llvm::ArrayType::get(stringTy, 2);
         llvm::AllocaInst *arrayAlloc =
             state.CreateEntryBlockAlloca(TheFunction, "concat_arr", arrayTy);
@@ -423,9 +465,9 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         Type = stringTy;
         break;
       }
-      if ((*LType)->isDoubleTy() && (*RType)->isDoubleTy()) {
+      if ((*LType)->isFloatingPointTy() && (*RType)->isFloatingPointTy()) {
         Val = state.Builder->CreateFAdd(L, R, "addtmp");
-        Type = llvm::Type::getDoubleTy(*state.TheContext);
+        Type = *LType;
       } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
         Val = state.Builder->CreateAdd(L, R, "addtmp");
         Type = *LType;
@@ -433,9 +475,9 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       break;
     }
     case '-': {
-      if ((*LType)->isDoubleTy() && (*RType)->isDoubleTy()) {
+      if ((*LType)->isFloatingPointTy() && (*RType)->isFloatingPointTy()) {
         Val = state.Builder->CreateFSub(L, R, "subtmp");
-        Type = llvm::Type::getDoubleTy(*state.TheContext);
+        Type = *LType;
       } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
         Val = state.Builder->CreateSub(L, R, "subtmp");
         Type = *LType;
@@ -443,9 +485,9 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       break;
     }
     case '*': {
-      if ((*LType)->isDoubleTy() && (*RType)->isDoubleTy()) {
+      if ((*LType)->isFloatingPointTy() && (*RType)->isFloatingPointTy()) {
         Val = state.Builder->CreateFMul(L, R, "multmp");
-        Type = llvm::Type::getDoubleTy(*state.TheContext);
+        Type = *LType;
       } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
         Val = state.Builder->CreateMul(L, R, "multmp");
         Type = *LType;
@@ -453,20 +495,21 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       break;
     }
     case '/': {
-      if ((*LType)->isDoubleTy() && (*RType)->isDoubleTy()) {
+      if ((*LType)->isFloatingPointTy() && (*RType)->isFloatingPointTy()) {
         Val = state.Builder->CreateFDiv(L, R, "divtmp");
-        Type = llvm::Type::getDoubleTy(*state.TheContext);
+        Type = *LType;
       } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
-        Val = state.Builder->CreateSDiv(L, R, "divtmp");
+        Val = opUnsigned ? state.Builder->CreateUDiv(L, R, "divtmp")
+                         : state.Builder->CreateSDiv(L, R, "divtmp");
         Type = *LType;
       }
       break;
     }
     case ':': { // equal
-      if (*LType == state.typesMap["_StringType"] &&
-          *RType == state.typesMap["_StringType"]) {
+      if (*LType == state.typesMap[DataTypes::String] &&
+          *RType == state.typesMap[DataTypes::String]) {
         llvm::Function *TheFunction = getOrCreateFunction(state);
-        llvm::Type *stringTy = state.typesMap["_StringType"];
+        llvm::Type *stringTy = state.typesMap[DataTypes::String];
         llvm::AllocaInst *allocA =
             state.CreateEntryBlockAlloca(TheFunction, "streq_a", stringTy);
         llvm::AllocaInst *allocB =
@@ -491,7 +534,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         Type = llvm::Type::getInt1Ty(*state.TheContext);
         break;
       }
-      if ((*LType)->isDoubleTy() && (*RType)->isDoubleTy()) {
+      if ((*LType)->isFloatingPointTy() && (*RType)->isFloatingPointTy()) {
         L = state.Builder->CreateFCmpUEQ(L, R, "cmptmp");
       } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
         L = state.Builder->CreateICmpEQ(L, R, "cmptmp");
@@ -504,10 +547,10 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       break;
     }
     case '!': { // not equal
-      if (*LType == state.typesMap["_StringType"] &&
-          *RType == state.typesMap["_StringType"]) {
+      if (*LType == state.typesMap[DataTypes::String] &&
+          *RType == state.typesMap[DataTypes::String]) {
         llvm::Function *TheFunction = getOrCreateFunction(state);
-        llvm::Type *stringTy = state.typesMap["_StringType"];
+        llvm::Type *stringTy = state.typesMap[DataTypes::String];
         llvm::AllocaInst *allocA =
             state.CreateEntryBlockAlloca(TheFunction, "strne_a", stringTy);
         llvm::AllocaInst *allocB =
@@ -534,7 +577,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         Type = llvm::Type::getInt1Ty(*state.TheContext);
         break;
       }
-      if ((*LType)->isDoubleTy() && (*RType)->isDoubleTy()) {
+      if ((*LType)->isFloatingPointTy() && (*RType)->isFloatingPointTy()) {
         L = state.Builder->CreateFCmpUNE(L, R, "cmptmp");
       } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
         L = state.Builder->CreateICmpNE(L, R, "cmptmp");
@@ -547,10 +590,10 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       break;
     }
     case '<': {
-      if (*LType == state.typesMap["_StringType"] &&
-          *RType == state.typesMap["_StringType"]) {
+      if (*LType == state.typesMap[DataTypes::String] &&
+          *RType == state.typesMap[DataTypes::String]) {
         llvm::Function *TheFunction = getOrCreateFunction(state);
-        llvm::Type *stringTy = state.typesMap["_StringType"];
+        llvm::Type *stringTy = state.typesMap[DataTypes::String];
         llvm::AllocaInst *allocA =
             state.CreateEntryBlockAlloca(TheFunction, "strlt_a", stringTy);
         llvm::AllocaInst *allocB =
@@ -579,10 +622,11 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         Type = llvm::Type::getInt1Ty(*state.TheContext);
         break;
       }
-      if ((*LType)->isDoubleTy() && (*RType)->isDoubleTy()) {
+      if ((*LType)->isFloatingPointTy() && (*RType)->isFloatingPointTy()) {
         L = state.Builder->CreateFCmpULT(L, R, "cmptmp");
       } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
-        L = state.Builder->CreateICmpULT(L, R, "cmptmp");
+        L = opUnsigned ? state.Builder->CreateICmpULT(L, R, "cmptmp")
+                       : state.Builder->CreateICmpSLT(L, R, "cmptmp");
       }
       // Convert bool 0/1 to double 0.0 or 1.0
       Val = state.Builder->CreateUIToFP(
@@ -592,10 +636,10 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       break;
     }
     case '>': {
-      if (*LType == state.typesMap["_StringType"] &&
-          *RType == state.typesMap["_StringType"]) {
+      if (*LType == state.typesMap[DataTypes::String] &&
+          *RType == state.typesMap[DataTypes::String]) {
         llvm::Function *TheFunction = getOrCreateFunction(state);
-        llvm::Type *stringTy = state.typesMap["_StringType"];
+        llvm::Type *stringTy = state.typesMap[DataTypes::String];
         llvm::AllocaInst *allocA =
             state.CreateEntryBlockAlloca(TheFunction, "strgt_a", stringTy);
         llvm::AllocaInst *allocB =
@@ -624,10 +668,11 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         Type = llvm::Type::getInt1Ty(*state.TheContext);
         break;
       }
-      if ((*LType)->isDoubleTy() && (*RType)->isDoubleTy()) {
+      if ((*LType)->isFloatingPointTy() && (*RType)->isFloatingPointTy()) {
         L = state.Builder->CreateFCmpUGT(L, R, "cmptmp");
       } else if ((*LType)->isIntegerTy() && (*RType)->isIntegerTy()) {
-        L = state.Builder->CreateICmpUGT(L, R, "cmptmp");
+        L = opUnsigned ? state.Builder->CreateICmpUGT(L, R, "cmptmp")
+                       : state.Builder->CreateICmpSGT(L, R, "cmptmp");
       }
       // Convert bool 0/1 to double 0.0 or 1.0
       Val = state.Builder->CreateUIToFP(
@@ -641,13 +686,10 @@ BinaryExprAST::codegen(StrideCompiler &state) {
     }
     if (Val) {
       if (typecast.size() > 0) {
-        if (Val->getType()->isIntegerTy() && typecast == "_RealType") {
-          Val = state.Builder->CreateSIToFP(
-              Val, llvm::Type::getDoubleTy(*state.TheContext));
-          Type = llvm::Type::getDoubleTy(*state.TheContext);
-        } else if (Val->getType()->isDoubleTy() && typecast == "_IntType") {
-          Val = state.Builder->CreateFPToSI(
-              Val, llvm::Type::getInt32Ty(*state.TheContext));
+        auto *original = Val;
+        Val = state.convertToDataType(Val, dataType, typecast);
+        if (Val != original) {
+          Type = Val->getType();
         }
       }
       return {Val, Type};
@@ -695,14 +737,10 @@ MemberAccessAST::codegen(StrideCompiler &state) {
     V = state.Builder->CreateLoad(elemTy, V, portToken);
   }
   if (typecast.size() > 0) {
-    if (V->getType()->isIntegerTy() && typecast == "_RealType") {
-      V = state.Builder->CreateSIToFP(
-          V, llvm::Type::getDoubleTy(*state.TheContext));
-      VType = llvm::Type::getDoubleTy(*state.TheContext);
-    } else if (V->getType()->isDoubleTy() && typecast == "_IntType") {
-      V = state.Builder->CreateFPToSI(
-          V, llvm::Type::getInt32Ty(*state.TheContext));
-      VType = llvm::Type::getInt32Ty(*state.TheContext);
+    auto *original = V;
+    V = state.convertToDataType(V, dataType, typecast);
+    if (V != original) {
+      VType = V->getType();
     }
   }
   return {V, VType};
@@ -723,10 +761,9 @@ ResetExprAST::codegen(StrideCompiler &state) {
     V = state.Builder->CreateLoad(
         llvm::Type::getInt1Ty(*state.TheContext), V, "cond");
   }
-  if (V->getType()->isDoubleTy()) {
+  if (V->getType()->isFloatingPointTy()) {
     V = state.Builder->CreateFCmpONE(
-        V, llvm::ConstantFP::get(*state.TheContext, llvm::APFloat(0.0)),
-        "ifcond");
+        V, llvm::ConstantFP::get(V->getType(), 0.0), "ifcond");
   } else if (V->getType()->isIntegerTy() &&
              !V->getType()->isIntegerTy(1)) {
     V = state.Builder->CreateICmpNE(

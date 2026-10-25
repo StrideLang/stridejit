@@ -29,10 +29,10 @@ _domainDefinition GainDomain {
     substitutions: []
     domainIncludes: []
     inputs: [
-        signal In { domain: GainDomain type: _RealType }
+        signal In { domain: GainDomain type: Real }
     ]
     outputs: [
-        signal Out { domain: GainDomain type: _RealType }
+        signal Out { domain: GainDomain type: Real }
     ]
     domainFunctionCode: ''
 }

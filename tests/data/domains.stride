@@ -6,10 +6,10 @@ _domainDefinition TestDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal In { domain: TestDomain type: _RealType}
+        signal In { domain: TestDomain type: Real}
     ]
     outputs: [
-        signal Out { domain: TestDomain type: _RealType }
+        signal Out { domain: TestDomain type: Real }
     ]
 	domainFunctionCode: ''
 }

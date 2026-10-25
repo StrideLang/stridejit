@@ -1,7 +1,7 @@
 _domainDefinition RootDomain {
     framework: _JitFramework
     rate: -1
-    outputs: [ signal Out { domain: RootDomain type: _RealType } ]
+    outputs: [ signal Out { domain: RootDomain type: Real } ]
     domainFunctionCode: ''
 }
 

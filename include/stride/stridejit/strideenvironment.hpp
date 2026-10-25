@@ -292,6 +292,10 @@ public:
   // Programmatic function inspection and dynamic invocation
   std::vector<FunctionArgInfo>
   getFunctionArgs(const std::string &funcName) const;
+
+  // Conversions in the loaded code that can lose data or change values, as
+  // LossyConversion warnings. See CodeValidator::findLossyConversions().
+  std::vector<LangError> getConversionWarnings() const;
   size_t getFunctionArgCount(const std::string &funcName) const;
   std::optional<FunctionArgInfo> getFunctionArg(const std::string &funcName,
                                                 size_t index) const;

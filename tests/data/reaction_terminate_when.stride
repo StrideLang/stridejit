@@ -3,7 +3,7 @@ _domainDefinition TestDomain {
     rate: -1
     inputs: []
     outputs: [
-        signal Out { domain: TestDomain type: _IntType }
+        signal Out { domain: TestDomain type: Int }
         switch Done { domain: TestDomain default: off }
     ]
     domainFunctionCode: ''

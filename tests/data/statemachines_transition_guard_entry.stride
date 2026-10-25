@@ -9,9 +9,9 @@ _domainDefinition RootDomain {
 	domainFunctionCode: ''
 }
 
-signal InputVal { domain: RootDomain type: _IntType default: 42 }
-signal TargetGuard { domain: RootDomain type: _IntType default: 0 }
-signal TargetEntryRan { domain: RootDomain type: _IntType default: 0 }
+signal InputVal { domain: RootDomain type: Int default: 42 }
+signal TargetGuard { domain: RootDomain type: Int default: 0 }
+signal TargetEntryRan { domain: RootDomain type: Int default: 0 }
 
 state State1 {
     transitions: [

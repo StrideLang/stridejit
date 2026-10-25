@@ -6,10 +6,10 @@ _domainDefinition RootDomain {
     substitutions: [ ]
     domainIncludes: []
     inputs: [
-        signal In {domain: RootDomain type: _RealType}
+        signal In {domain: RootDomain type: Real}
     ]
     outputs: [
-        signal Out {domain: RootDomain type: _RealType}
+        signal Out {domain: RootDomain type: Real}
     ]
 	domainFunctionCode: ''
 }
@@ -37,15 +37,15 @@ module Greater {
 }
 
 platformModule __Greater@Int_Bool {
-    inputs: [_IntType, _IntType]
-	outputs: [_SwitchType]
+    inputs: [Int, Int]
+	outputs: [Switch]
     processing: "%%outtokens:0%% = llvm::icmp sgt %%intokens:0%%, %%intokens:1%%"
     inherits: [_Signal]
 }
 
 platformModule __Greater@Real_Bool {
-    inputs: [_RealType, _RealType]
-	outputs: [_SwitchType]
+    inputs: [Real, Real]
+	outputs: [Switch]
     processing: "%%outtokens:0%% = llvm::fcmp ogt %%intokens:0%%, %%intokens:1%%"
     inherits: [_Signal]
 }
@@ -60,8 +60,8 @@ module Max {
         }
     ]
     blocks: [
-        signal Input { type: _RealType domain: OutputPort.domain }
-        signal Output { type: _RealType domain: OutputPort.domain type: _RealType }
+        signal Input { type: Real domain: OutputPort.domain }
+        signal Output { type: Real domain: OutputPort.domain type: Real }
     ]
     streams: [
         [Input, 5.0] >> Greater() >> reaction { Input >> Output; };

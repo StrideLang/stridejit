@@ -1,7 +1,7 @@
 # Test chaining modules / functions in a continuous stream pipeline
 
-signal InputValue { type: _IntType default: 10 }
-signal OutputValue { type: _IntType }
+signal InputValue { type: Int default: 10 }
+signal OutputValue { type: Int }
 
 module Multiply {
     ports: [
@@ -10,9 +10,9 @@ module Multiply {
         mainOutputPort OutPort { block: Output }
     ]
     blocks: [
-        signal Input { type: _IntType }
-        signal Factor { type: _IntType }
-        signal Output { type: _IntType }
+        signal Input { type: Int }
+        signal Factor { type: Int }
+        signal Output { type: Int }
     ]
     streams: [
         Input * Factor >> Output;
@@ -26,9 +26,9 @@ module AddOffset {
         mainOutputPort OutPort { block: Output }
     ]
     blocks: [
-        signal Input { type: _IntType }
-        signal Offset { type: _IntType }
-        signal Output { type: _IntType }
+        signal Input { type: Int }
+        signal Offset { type: Int }
+        signal Output { type: Int }
     ]
     streams: [
         Input + Offset >> Output;
@@ -42,9 +42,9 @@ module SubtractBase {
         mainOutputPort OutPort { block: Output }
     ]
     blocks: [
-        signal Input { type: _IntType }
-        signal Base { type: _IntType }
-        signal Output { type: _IntType }
+        signal Input { type: Int }
+        signal Base { type: Int }
+        signal Output { type: Int }
     ]
     streams: [
         Input - Base >> Output;

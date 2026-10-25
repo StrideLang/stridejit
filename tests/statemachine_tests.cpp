@@ -855,6 +855,9 @@ TEST(StateMachine, ParameterizedGeneratorTransition) {
 
   strd::CodeValidator validator(tree);
   EXPECT_TRUE(validator.isValid());
+  for (auto &error : validator.getErrors()) {
+    ADD_FAILURE() << error.getErrorText();
+  }
 
   bool success = strenv.generateIr(tree);
   EXPECT_TRUE(success);

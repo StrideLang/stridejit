@@ -9,8 +9,8 @@ _domainDefinition TestDomain {
     inputs: [
     ]
     outputs: [
-        signal Out { domain: TestDomain type: _RealType }
-        signal Counter { domain: TestDomain type: _RealType }
+        signal Out { domain: TestDomain type: Real }
+        signal Counter { domain: TestDomain type: Real }
     ]
 	domainFunctionCode: ''
 }
