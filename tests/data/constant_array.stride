@@ -1,0 +1,47 @@
+_domainDefinition RootDomain {
+    framework: _JitFramework
+    rate: -1
+    inputs: []
+    outputs: [
+        signal Sum { domain: RootDomain type: Int }
+        signal Third { domain: RootDomain type: Int }
+    ]
+    domainFunctionCode: ''
+}
+
+platformModule __AtLeastSix@Int_Bool {
+    inputs: [Int]
+    outputs: [Switch]
+    processing: "%%outtokens:0%% = llvm::icmp sgt %%intokens:0%%, 5"
+    inherits: [_Signal]
+}
+
+# A lookup table written with a range. It is read-only data outside the domain
+# state.
+constant Table[6] {
+    value: [10..14, 99]
+}
+
+# Reads the table with an index known only at run time.
+loop SumTable {
+    ports: [
+        mainOutputPort OutputPort { block: Output }
+    ]
+    blocks: [
+        signal Output { default: 0 type: Int }
+        signal Index { default: 0 type: Int }
+        signal Element { default: 0 type: Int }
+        switch Done { default: off }
+    ]
+    terminateWhen: Done
+    streams: [
+        Table[Index] >> Element;
+        Output + Element >> Output;
+        Index + 1 >> Index;
+        Index >> __AtLeastSix() >> Done;
+    ]
+}
+
+SumTable() >> Sum;
+# A constant index is folded by the resolver.
+Table[2] >> Third;

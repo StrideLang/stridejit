@@ -682,13 +682,26 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     allocateInternalVariables(state, TheFunction);
   }
 
-  if (callType != CallableType::Loop && !terminateWhenName.empty()) {
-    ReactionExitBB = llvm::BasicBlock::Create(
-        *state.TheContext, TheFunction->getName() + ".exit", TheFunction);
+  // A terminateWhen switch ends the callable as soon as a statement turns it
+  // on: a reaction returns, and a loop leaves without finishing the iteration.
+  // Loop variables only need values on the back edge, so leaving from the
+  // middle of the body keeps the loop's PHI nodes valid.
+  llvm::BasicBlock *LoopAfterBB = nullptr;
+  if (!terminateWhenName.empty()) {
+    if (callType == CallableType::Loop) {
+      LoopAfterBB =
+          llvm::BasicBlock::Create(*state.TheContext, "afterloop", TheFunction);
+    } else {
+      ReactionExitBB = llvm::BasicBlock::Create(
+          *state.TheContext, TheFunction->getName() + ".exit", TheFunction);
+    }
   }
+  llvm::BasicBlock *TerminateBB = LoopAfterBB ? LoopAfterBB : ReactionExitBB;
 
   // Generate the function body
-  for (const auto &statement : Body) {
+  for (size_t statementIndex = 0; statementIndex < Body.size();
+       ++statementIndex) {
+    const auto &statement = Body[statementIndex];
     if (!statement) {
       return nullptr;
     }
@@ -698,8 +711,11 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     }
     auto [RetVal, retType] = statement->codegen(state);
 
-    if (callType != CallableType::Loop && ReactionExitBB &&
-        !terminateWhenName.empty() && statement->writesTo(terminateWhenName)) {
+    // The end-of-iteration check already covers a loop's last statement.
+    bool isLastLoopStatement =
+        LoopAfterBB && statementIndex + 1 == Body.size();
+    if (TerminateBB && !isLastLoopStatement &&
+        statement->writesTo(terminateWhenName)) {
       if (!state.Builder->GetInsertBlock()->getTerminator()) {
         llvm::Value *condVal = nullptr;
         if (state.NamedValues.find(terminateWhenName) !=
@@ -734,7 +750,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
           }
           llvm::BasicBlock *ContBB = llvm::BasicBlock::Create(
               *state.TheContext, TheFunction->getName() + ".cont", TheFunction);
-          state.Builder->CreateCondBr(condVal, ReactionExitBB, ContBB);
+          state.Builder->CreateCondBr(condVal, TerminateBB, ContBB);
           state.Builder->SetInsertPoint(ContBB);
         }
       }
@@ -795,8 +811,13 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
 
     // Create the "after loop" block and insert it.
     llvm::BasicBlock *LoopEndBB = state.Builder->GetInsertBlock();
-    llvm::BasicBlock *AfterBB =
-        llvm::BasicBlock::Create(*state.TheContext, "afterloop", TheFunction);
+    llvm::BasicBlock *AfterBB = LoopAfterBB;
+    if (AfterBB) {
+      AfterBB->moveAfter(LoopEndBB);
+    } else {
+      AfterBB =
+          llvm::BasicBlock::Create(*state.TheContext, "afterloop", TheFunction);
+    }
 
     // Insert the conditional branch into the end of LoopEndBB.
     state.Builder->CreateCondBr(EndCond, AfterBB, LoopBB);

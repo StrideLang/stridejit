@@ -12,6 +12,8 @@
 #include "stride/utils/astquery.h"
 
 // llvm
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/raw_ostream.h"
 
 TEST(Basic, Assignment) {
@@ -1113,6 +1115,48 @@ TEST(JIT, Loop) {
   EXPECT_EQ(Out, 1118);
 }
 
+// A constant array is read-only, internal data outside the domain state. It
+// can be read with a run-time index, and a constant index is folded.
+TEST(JIT, ConstantArray) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "constant_array.stride"));
+
+  llvm::GlobalVariable *table = nullptr;
+  for (auto &global : strenv.mStrideEnv.TheModule->globals()) {
+    if (global.getName().ends_with("Table")) {
+      table = &global;
+    }
+  }
+  ASSERT_NE(table, nullptr);
+  EXPECT_TRUE(table->isConstant());
+  EXPECT_TRUE(table->hasInternalLinkage());
+  auto *values =
+      llvm::dyn_cast<llvm::ConstantDataArray>(table->getInitializer());
+  ASSERT_NE(values, nullptr);
+  ASSERT_EQ(values->getNumElements(), 6u);
+  EXPECT_EQ(values->getElementAsInteger(0), 10u);
+  EXPECT_EQ(values->getElementAsInteger(4), 14u);
+  EXPECT_EQ(values->getElementAsInteger(5), 99u);
+
+  ASSERT_TRUE(strenv.compileInMemory());
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_process", args);
+
+  EXPECT_EQ(strenv
+                .getStateVar<int32_t>(statePtr.get(), "Sum", std::nullopt,
+                                      "RootDomain")
+                .value_or(0),
+            10 + 11 + 12 + 13 + 14 + 99);
+  EXPECT_EQ(strenv
+                .getStateVar<int32_t>(statePtr.get(), "Third", std::nullopt,
+                                      "RootDomain")
+                .value_or(0),
+            12);
+}
+
 TEST(JIT, PortPropertySize) {
 
   strd::StrideEnvironment strenv;
@@ -1381,6 +1425,51 @@ TEST(JIT, FunctionStandaloneLoopSimple) {
   int32_t out = 0;
   Entry(&out);
   EXPECT_EQ(out, 11);
+}
+
+// terminateWhen ends a loop as soon as a stream turns it on, without running
+// the rest of that iteration.
+TEST(JIT, FunctionStandaloneLoopTerminateWhen) {
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                              "loop_terminate_when.stride");
+  ASSERT_NE(tree, nullptr);
+
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+  strenv.mStrideEnv.m_intanceTree =
+      strd::CodeAnalysis::getStateStructInformation({}, tree);
+
+  strd::ScopeStack scope;
+  scope.push_back({nullptr, {}});
+  for (const auto &node : tree->getChildren()) {
+    if (node->getNodeType() == strd::AST::Declaration ||
+        node->getNodeType() == strd::AST::ArrayDeclaration) {
+      auto decl = std::static_pointer_cast<strd::DeclarationNode>(node);
+      if (decl->getEntityType() == "platformModule") {
+        strd::StrideGenerator::generatePlatformFunctionSignature(
+            decl, scope.back().second, strenv.mStrideEnv);
+      }
+    }
+  }
+
+  auto funcDecl =
+      strd::ASTQuery::findDeclarationByName("LoopTerminateWhen", scope, tree);
+  ASSERT_NE(funcDecl, nullptr);
+
+  auto func = strd::StrideGenerator::createFunctionDeclaration(
+      funcDecl, nullptr, tree, &scope, strenv.mStrideEnv);
+  ASSERT_NE(func, nullptr);
+  ASSERT_NE(func->codegen(strenv.mStrideEnv), nullptr);
+  ASSERT_TRUE(strenv.compileInMemory());
+
+  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
+      strenv.getFunction("LoopTerminateWhen");
+  ASSERT_TRUE(static_cast<bool>(EntrySym));
+
+  int32_t out = 0;
+  EntrySym->toPtr<void (*)(int32_t *)>()(&out);
+  EXPECT_EQ(out, 10);
 }
 
 TEST(JIT, FunctionStandaloneModule) {

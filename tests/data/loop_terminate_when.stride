@@ -1,0 +1,34 @@
+_domainDefinition RootDomain {
+    framework: _JitFramework
+    rate: -1
+    outputs: [ signal Out { domain: RootDomain type: Int } ]
+    domainFunctionCode: ''
+}
+
+platformModule __Threshold@Int_Bool {
+    inputs: [Int]
+    outputs: [Switch]
+    processing: "%%outtokens:0%% = llvm::icmp sgt %%intokens:0%%, 10"
+    inherits: [_Signal]
+}
+
+# Done turns on in the middle of the body, so the last iteration stops before
+# counting it: Output ends at 10, not 11.
+loop LoopTerminateWhen {
+    ports: [
+        mainOutputPort OutputPort { block: Output }
+    ]
+    blocks: [
+        signal Output { default: 0 type: Int }
+        signal Index { default: 0 type: Int }
+        switch Done { default: off }
+    ]
+    terminateWhen: Done
+    streams: [
+        Index + 1 >> Index;
+        Index >> __Threshold() >> Done;
+        Output + 1 >> Output;
+    ]
+}
+
+LoopTerminateWhen() >> Out;

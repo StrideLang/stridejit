@@ -414,21 +414,33 @@ void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
           llvm::Type::getInt32Ty(*TheContext), static_cast<int32_t>(s.size()));
       Initializer = llvm::ConstantStruct::get(
           llvm::cast<llvm::StructType>(Type), {ptrConst, lenConst});
+    } else if (valProp->getNodeType() == AST::List && Type->isArrayTy()) {
+      Initializer = makeDefaultConstant(valProp, Type);
+      if (!Initializer) {
+        LOG_ERROR() << "Initial values of '" << globalDecl->getName()
+                    << "' do not match its size of "
+                    << Type->getArrayNumElements() << std::endl;
+      }
     }
   }
   if (!Initializer) {
     Initializer = llvm::Constant::getNullValue(Type);
   }
 
+  // A constant is read-only data, private to the module. Lookups with a
+  // constant index are folded, and LLVM removes the global when nothing reads
+  // it at run time.
+  bool isConstant = ASTQuery::isConstant(globalDecl, {}, m_tree);
   llvm::GlobalVariable *MyGlobal = new llvm::GlobalVariable(
-      *TheModule, Type,
-      false, // Is it constant (read-only)? false = mutable
-      llvm::GlobalValue::ExternalLinkage, // Linkage type (External makes it
-      // visible to the JIT)
+      *TheModule, Type, isConstant,
+      // External linkage makes signals visible to the JIT
+      isConstant ? llvm::GlobalValue::InternalLinkage
+                 : llvm::GlobalValue::ExternalLinkage,
       Initializer, fullName);
 
   // Avoid optimization to force memory location
-  MyGlobal->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::None);
+  MyGlobal->setUnnamedAddr(isConstant ? llvm::GlobalValue::UnnamedAddr::Global
+                                      : llvm::GlobalValue::UnnamedAddr::None);
   // Optional: Set data alignment for optimal CPU access
   MyGlobal->setAlignment(llvm::MaybeAlign(4));
   LOG_INFO() << "global: " << fullName << std::endl;
