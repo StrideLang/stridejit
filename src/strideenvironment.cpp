@@ -9,7 +9,7 @@
 #include <unordered_set>
 
 // stride
-#include "stride/codegen/coderesolver.hpp"
+#include "stride/stridegen/coderesolver.hpp"
 #include "stride/utils/astfunctions.h"
 #include "stride/utils/astquery.h"
 

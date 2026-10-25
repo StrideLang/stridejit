@@ -162,7 +162,7 @@ add_library(StrideJit
 if (NOT MSVC)
   target_compile_options(StrideJit PRIVATE -fPIC)
 endif()
-target_link_libraries(StrideJit PUBLIC StrideRuntime StrideParser StrideUtils StrideCodegen)
+target_link_libraries(StrideJit PUBLIC StrideRuntime StrideParser StrideUtils StrideGen)
 target_include_directories(StrideJit PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # Link against LLVM libraries -----------------------

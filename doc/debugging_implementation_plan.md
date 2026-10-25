@@ -9,7 +9,7 @@ This document outlines the concrete, phased engineering roadmap for implementing
 ```
                       Stride Source (.stride)
                                  │
-                     strideparser / codegen
+                     strideparser / stridegen
              (AST with line, column, relative & absolute paths)
                                  │
                   ┌──────────────┴──────────────┐
@@ -47,7 +47,7 @@ This document outlines the concrete, phased engineering roadmap for implementing
 
 ```mermaid
 flowchart TD
-    P1["Phase 1: Source Tracking<br/>(strideparser)"] --> P2["Phase 2: DWARF Generation<br/>(stridejit / codegen)"]
+    P1["Phase 1: Source Tracking<br/>(strideparser)"] --> P2["Phase 2: DWARF Generation<br/>(stridejit / stridegen)"]
     P2 --> P3["Phase 3: Runtime & Build Config<br/>(stridejit & stridelang)"]
     P3 --> P4["Phase 4: Declarative Tools<br/>(strideroot & stridejit)"]
     P4 --> P5["Phase 5: IDE Integration & Tests<br/>(vscode-stride-lang)"]
@@ -66,12 +66,12 @@ flowchart TD
   - Add `int m_column` (1-indexed) to `AST` and update constructors.
   - Enable Bison location tracking (`%locations`, `yylloc`) in `lang_stride.y` to capture column numbers for stream connections (`>>`), blocks, and property tokens.
 - [ ] **AST Transformation Location Preservation**:
-  - In `strideutils` and `codegen` (`coderesolver.cpp`, `codeanalysis.cpp`), ensure synthetic nodes, desugared loops, and expanded streams copy their parent node's location instead of defaulting to `-1`.
+  - In `strideutils` and `stridegen` (`coderesolver.cpp`, `codeanalysis.cpp`), ensure synthetic nodes, desugared loops, and expanded streams copy their parent node's location instead of defaulting to `-1`.
 
 ---
 
 ### Phase 2: DWARF Metadata Generation (`DIBuilder`)
-**Target Repositories:** `stridejit`, `codegen`
+**Target Repositories:** `stridejit`, `stridegen`
 
 - [ ] **`StrideDebugEmitter` Class**:
   - Create a dedicated debug helper wrapping `llvm::DIBuilder`.

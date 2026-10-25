@@ -8,7 +8,7 @@
 #include "stride/stridejit/stridecompiler.hpp"
 #include "stride/stridejit/strideenvironment.hpp"
 #include "stride/stridejit/stridegenerator.hpp"
-#include "stride/codegen/codeanalysis.hpp"
+#include "stride/stridegen/codeanalysis.hpp"
 
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"

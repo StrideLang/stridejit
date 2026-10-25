@@ -26,7 +26,7 @@
 // #include "numberstride/stridejit/exprast.hpp"
 #include "stride/stridejit/stridecompiler.hpp"
 
-#include "stride/codegen/codeanalysis.hpp"
+#include "stride/stridegen/codeanalysis.hpp"
 // #include "stride/parser/declarationnode.h"
 //  #include "stride/utils/astfunctions.h"
 

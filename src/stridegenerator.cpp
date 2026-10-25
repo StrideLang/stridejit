@@ -11,7 +11,7 @@
 #include "stride/stridejit/stridegenerator.hpp"
 
 // stride
-#include "stride/codegen/codeanalysis.hpp"
+#include "stride/stridegen/codeanalysis.hpp"
 #include "stride/utils/astquery.h"
 
 // llvm

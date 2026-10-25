@@ -1,12 +1,12 @@
 #include "gtest/gtest.h"
 
 // stridejit
-#include "stride/codegen/coderesolver.hpp"
+#include "stride/stridegen/coderesolver.hpp"
 #include "stride/stridejit/strideenvironment.hpp"
 #include "stride/stridejit/stridegenerator.hpp"
 
 // stride
-#include "stride/codegen/codeanalysis.hpp"
+#include "stride/stridegen/codeanalysis.hpp"
 #include "stride/utils/astfunctions.h"
 
 // llvm

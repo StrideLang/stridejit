@@ -31,7 +31,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "stride/codegen/codeanalysis.hpp"
+#include "stride/stridegen/codeanalysis.hpp"
 #include "stride/parser/declarationnode.h"
 #include "stride/parser/functionnode.h"
 #include "stride/parser/memberaccessnode.h"
