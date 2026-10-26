@@ -510,6 +510,14 @@ StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl) {
         return typesMap[DataTypes::Switch];
       } else if (valProp->getNodeType() == strd::AST::Real) {
         return typesMap[DataTypes::Real];
+      } else if (valProp->getNodeType() == strd::AST::List) {
+        // A constant array takes the type of its values
+        auto listType =
+            CodeAnalysis::getDataTypeForDeclaration(decl, {}, m_tree);
+        if (typesMap.find(listType) != typesMap.end() &&
+            !typesMap[listType]->isVoidTy()) {
+          return typesMap[listType];
+        }
       }
     }
   }
@@ -545,6 +553,9 @@ llvm::Type *StrideCompiler::getLLVMTypeForCodegenEntity(
   }
   if (decl->getEntityType() == "string") {
     return typesMap[DataTypes::String];
+  }
+  if (decl->getEntityType() == "constant") {
+    return getLLVMType(decl);
   }
   auto typePropNode = decl->getPropertyValue("type");
   std::string type = DataTypes::Real;
