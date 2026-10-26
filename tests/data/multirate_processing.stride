@@ -1,0 +1,55 @@
+# Test multi-rate processing:
+# - Integer downsampling (100 Hz domain -> 25 Hz signal, factor 4)
+# - Non-integer downsampling (100 Hz domain -> 40 Hz signal, ratio 2.5 -> 5:2)
+# - Integer upsampling (100 Hz domain -> 400 Hz signal, factor 4)
+# - Non-integer upsampling (100 Hz domain -> 250 Hz signal, ratio 2.5 -> 2:5)
+# - On-the-fly mid-stream rate transition (400 Hz -> 25 Hz in one stream)
+
+constant BaseRate { value: 100 }
+
+_domainDefinition RateDom {
+    rate: BaseRate
+}
+
+# 0a. Equivalent to 07_downsample.stride (rate: BaseRate / 2, streaming into domain-rate output)
+signal DownSampledBy2 { type: Int default: 0 rate: BaseRate / 2 domain: RateDom }
+signal DownSampledOut { type: Int default: 0 domain: RateDom }
+DownSampledBy2 + 1 >> DownSampledBy2;
+DownSampledBy2 >> DownSampledOut;
+
+# 0b. Equivalent to 08_upsample.stride (rate: BaseRate * 3, streaming into domain-rate output)
+signal UpSampledBy3 { type: Int default: 0 rate: BaseRate * 3 domain: RateDom }
+signal UpSampledOut { type: Int default: 0 domain: RateDom }
+UpSampledBy3 + 1 >> UpSampledBy3;
+UpSampledBy3 >> UpSampledOut;
+
+# 1. Integer downsampling (25 Hz in 100 Hz domain -> runs every 4th tick: 0, 4, 8...)
+signal DownIntCount { type: Int default: 0 rate: 25 domain: RateDom }
+DownIntCount + 1 >> DownIntCount;
+
+# 2. Non-integer downsampling (40 Hz in 100 Hz domain -> runs on ticks 0, 3, 5, 8...)
+signal DownFracCount { type: Int default: 0 rate: 40 domain: RateDom }
+DownFracCount + 1 >> DownFracCount;
+
+# 3. Integer upsampling (400 Hz in 100 Hz domain -> runs 4 times per domain tick)
+signal UpIntCount { type: Int default: 0 rate: 400 domain: RateDom }
+UpIntCount + 1 >> UpIntCount;
+
+# 4. Non-integer upsampling (250 Hz in 100 Hz domain -> runs 3, 2, 3, 2 times per tick)
+signal UpFracCount { type: Int default: 0 rate: 250 domain: RateDom }
+UpFracCount + 1 >> UpFracCount;
+
+# 5. Mid-stream rate transition in a single stream:
+# FastStage (400 Hz) increments 4 times per tick, SlowStage (25 Hz) captures FastStage on tick 0, 4, 8...
+signal FastStage { type: Int default: 0 rate: 400 domain: RateDom }
+signal SlowStage { type: Int default: 0 rate: 25 domain: RateDom }
+FastStage + 1 >> FastStage >> SlowStage;
+
+# 6. One-shot domain (rate: -1) ignores signal rates and executes once per call
+_domainDefinition OneShotDom {
+    rate: -1
+}
+signal OneShotFast { type: Int default: 0 rate: 500 domain: OneShotDom }
+signal OneShotSlow { type: Int default: 0 rate: 10 domain: OneShotDom }
+OneShotFast + 1 >> OneShotFast;
+OneShotSlow + 1 >> OneShotSlow;

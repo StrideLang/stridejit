@@ -319,6 +319,26 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
       }
     }
 
+    if (const auto *dynFields = state.findDynamicDomainFields(domainDecl)) {
+      for (const auto &field : *dynFields) {
+        if (field.name.rfind("__rate_phase_", 0) == 0 && field.type) {
+          std::unique_ptr<ExprAST> zeroExpr;
+          if (field.type->isIntegerTy(32)) {
+            zeroExpr = std::make_unique<IntExprAST>(0, 32);
+          } else if (field.type->isIntegerTy(64)) {
+            zeroExpr = std::make_unique<IntExprAST>(0, 64);
+          } else if (field.type->isDoubleTy()) {
+            zeroExpr = std::make_unique<RealExprAST>(0.0);
+          }
+          if (zeroExpr) {
+            resetBody.push_back(std::make_unique<BinaryExprAST>(
+                '=', std::make_unique<VariableExprAST>(field.name),
+                std::move(zeroExpr)));
+          }
+        }
+      }
+    }
+
     auto addDeclToResetBody =
         [&](const std::shared_ptr<DeclarationNode> &decl) {
           auto defaultValueNode = decl->getPropertyValue("default");
@@ -869,6 +889,104 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
     }
   }
 
+  // Pre-scan top-level streams to register dynamic domain fields for multi-rate phase state
+  // before state.buildStateStructTypes is invoked.
+  for (const auto &node : tree->getChildren()) {
+    if (node->getNodeType() == AST::Stream) {
+      auto stream = std::static_pointer_cast<StreamNode>(node);
+      StreamNodeIterator streamIt(stream);
+      ASTNode current;
+      ASTNode next = streamIt.next();
+      ASTNode prev = nullptr;
+
+      struct PreScanSegState {
+        double activeRate{-1.0};
+        double domainRate{-1.0};
+        ASTNode domainDecl{nullptr};
+        bool domainResolved{false};
+        bool hasActiveExprs{false};
+      };
+      std::map<std::string, PreScanSegState> segStates;
+
+      auto resolveDomain = [&](const std::string &domName) -> PreScanSegState & {
+        auto &seg = segStates[domName];
+        if (!seg.domainResolved) {
+          seg.domainResolved = true;
+          auto domDecl = CodeAnalysis::findDomainDeclaration(domName, tree);
+          if (!domDecl) {
+            domDecl = ASTQuery::findDeclarationByName(domName, scope, tree);
+          }
+          seg.domainDecl = domDecl;
+          if (domDecl) {
+            seg.domainRate = CodeAnalysis::getDomainDefaultRate(domDecl);
+          }
+        }
+        return seg;
+      };
+
+      auto phaseFieldsList = std::make_shared<ListNode>(__FILE__, __LINE__);
+
+      auto flushPreScanSegment = [&](const std::string &domName) {
+        auto &seg = resolveDomain(domName);
+        if (!seg.hasActiveExprs) return;
+        seg.hasActiveExprs = false;
+        if (seg.domainRate <= 0.0 || seg.activeRate <= 0.0 ||
+            std::abs(seg.activeRate - seg.domainRate) < 1e-9) {
+          return;
+        }
+        std::string fieldName =
+            "__rate_phase_" + domName + "_" + std::to_string(state.m_idCounter++);
+        auto spec = RateScheduleSpec::build(seg.domainRate, seg.activeRate, fieldName);
+        if (spec.needsPersistentPhaseState() && seg.domainDecl) {
+          llvm::Type *phaseTy =
+              spec.isExactInteger
+                  ? llvm::Type::getInt32Ty(*state.TheContext)
+                  : (spec.useInt64Phase
+                         ? llvm::Type::getInt64Ty(*state.TheContext)
+                         : llvm::Type::getDoubleTy(*state.TheContext));
+          llvm::Constant *zeroConst = llvm::Constant::getNullValue(phaseTy);
+          state.addDynamicDomainField(seg.domainDecl, fieldName, phaseTy, zeroConst);
+          phaseFieldsList->addChild(std::make_shared<ValueNode>(fieldName, __FILE__, __LINE__));
+        }
+      };
+
+      while (next) {
+        prev = current;
+        current = next;
+        next = streamIt.next();
+        auto domainName = CodeAnalysis::getNodeDomainName(current, scope, tree);
+        if (domainName.empty()) {
+          StreamNodeIterator lookaheadIt(stream);
+          while (auto n = lookaheadIt.next()) {
+            if (n == current) break;
+          }
+          while (auto n = lookaheadIt.next()) {
+            auto d = CodeAnalysis::getNodeDomainName(n, scope, tree);
+            if (!d.empty()) {
+              domainName = d;
+              break;
+            }
+          }
+          if (domainName.empty()) domainName = "RootDomain";
+        }
+        auto &segState = resolveDomain(domainName);
+        double currentRate = CodeAnalysis::getNodeRate(current, scope, tree);
+        if (currentRate > 0.0 && segState.activeRate <= 0.0) {
+          segState.activeRate = currentRate;
+        } else if (currentRate > 0.0 && segState.activeRate > 0.0 &&
+                   std::abs(currentRate - segState.activeRate) > 1e-9) {
+          flushPreScanSegment(domainName);
+          segState.activeRate = currentRate;
+        }
+        segState.hasActiveExprs = true;
+      }
+      for (const auto &pair : segStates) {
+        flushPreScanSegment(pair.first);
+      }
+      stream->setCompilerProperty("__rate_phase_fields", phaseFieldsList);
+    }
+  }
+
   state.buildStateStructTypes(state.m_intanceTree, scope, tree);
   StrideGenerator::GeneratedIRCode generatedIRCode;
   for (const auto &node : tree->getChildren()) {
@@ -1364,6 +1482,89 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
   ASTNode current;
   ASTNode next = streamIt.next();
 
+  // Track active rate segment per domain for on-the-fly multi-rate wrapping.
+  // Only top-level domain streams (scope.size() <= 1) wrap segments in
+  // DownsampleExprAST / UpsampleExprAST; streams inside modules/loops/reactions
+  // inherit their caller's execution rate.
+  const bool isTopLevelDomainStream = (scope.size() <= 1);
+  size_t nextPhaseFieldIdx = 0;
+  struct DomainRateSegmentState {
+    double activeRate{-1.0};
+    double domainRate{-1.0};
+    ASTNode domainDecl{nullptr};
+    bool domainResolved{false};
+    std::vector<std::unique_ptr<ExprAST>> committedExprs;
+  };
+  std::map<std::string, DomainRateSegmentState> rateSegments;
+
+  auto resolveDomainRateInfo = [&](const std::string &domName) -> DomainRateSegmentState & {
+    auto &seg = rateSegments[domName];
+    if (!seg.domainResolved) {
+      seg.domainResolved = true;
+      auto domDecl = CodeAnalysis::findDomainDeclaration(domName, tree);
+      if (!domDecl) {
+        domDecl = ASTQuery::findDeclarationByName(domName, scope, tree);
+      }
+      seg.domainDecl = domDecl;
+      if (domDecl) {
+        seg.domainRate = CodeAnalysis::getDomainDefaultRate(domDecl);
+      }
+    }
+    return seg;
+  };
+
+  auto flushRateSegment = [&](const std::string &domName,
+                              const std::string &boundarySignal = "") {
+    auto &seg = resolveDomainRateInfo(domName);
+    auto &activeExprs = generated[domName].expr;
+    if (activeExprs.empty()) {
+      return;
+    }
+    if (!isTopLevelDomainStream || seg.domainRate <= 0.0 ||
+        seg.activeRate <= 0.0 ||
+        std::abs(seg.activeRate - seg.domainRate) < 1e-9) {
+      for (auto &e : activeExprs) {
+        seg.committedExprs.push_back(std::move(e));
+      }
+      activeExprs.clear();
+      return;
+    }
+
+    auto spec = RateScheduleSpec::build(seg.domainRate, seg.activeRate,
+                                        "", boundarySignal);
+    if (spec.needsPersistentPhaseState()) {
+      ASTNode phaseProp =
+          stream ? stream->getCompilerProperty("__rate_phase_fields") : nullptr;
+      if (phaseProp && phaseProp->getNodeType() == AST::List) {
+        if (nextPhaseFieldIdx < phaseProp->getChildren().size()) {
+          auto valNode = std::static_pointer_cast<ValueNode>(
+              phaseProp->getChildren().at(nextPhaseFieldIdx++));
+          if (valNode) {
+            spec.phaseStateFieldName = valNode->getStringValue();
+          }
+        }
+      }
+      if (spec.phaseStateFieldName.empty()) {
+        spec.phaseStateFieldName =
+            "__rate_phase_" + domName + "_" + std::to_string(state.m_idCounter++);
+      }
+    }
+
+    std::vector<std::unique_ptr<ExprAST>> bodyExprs = std::move(activeExprs);
+    activeExprs.clear();
+    if (spec.isDownsample()) {
+      seg.committedExprs.push_back(
+          std::make_unique<DownsampleExprAST>(std::move(spec), std::move(bodyExprs)));
+    } else if (spec.isUpsample()) {
+      seg.committedExprs.push_back(
+          std::make_unique<UpsampleExprAST>(std::move(spec), std::move(bodyExprs)));
+    } else {
+      for (auto &e : bodyExprs) {
+        seg.committedExprs.push_back(std::move(e));
+      }
+    }
+  };
+
   while (next) {
     prev = current;
     current = next;
@@ -1405,6 +1606,11 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       if (domainName.empty()) {
         domainName = "RootDomain";
       }
+    }
+    auto &segState = resolveDomainRateInfo(domainName);
+    double currentRate = CodeAnalysis::getNodeRate(current, scope, tree);
+    if (currentRate > 0.0 && segState.activeRate <= 0.0) {
+      segState.activeRate = currentRate;
     }
     if (current->getNodeType() == AST::Expression) {
       // -------------------------------------------------------------
@@ -1475,7 +1681,48 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                 state)) {
           continue;
         }
+        if (next) {
+          bool rateTransition =
+              (currentRate > 0.0 && segState.activeRate > 0.0 &&
+               std::abs(currentRate - segState.activeRate) > 1e-9);
+          auto *backCall =
+              generated[domainName].expr.empty()
+                  ? nullptr
+                  : dynamic_cast<CallExprAST *>(
+                        generated[domainName].expr.back().get());
+          bool needsMidStreamReload =
+              rateTransition || (backCall && !backCall->OutArgs.empty());
+          if (rateTransition) {
+            flushRateSegment(domainName, ASTQuery::getNodeName(current));
+            segState.activeRate = currentRate;
+          }
+          if (needsMidStreamReload) {
+            generated[domainName].expr.push_back(createExpr(current));
+          }
+        } else if (currentRate > 0.0 && segState.activeRate <= 0.0) {
+          segState.activeRate = currentRate;
+        }
       } else if (generated[domainName].expr.size() > 0) {
+        bool rateTransition =
+            (currentRate > 0.0 && segState.activeRate > 0.0 &&
+             std::abs(currentRate - segState.activeRate) > 1e-9);
+        if (rateTransition) {
+          // If the previous expression is already a completed assignment to an
+          // intermediate variable (e.g. FastA >> FastB >> SlowC), flush the
+          // upstream rate segment first, switch to currentRate, and read the
+          // upstream variable as the RHS of the new assignment.
+          auto *prevBin = dynamic_cast<BinaryExprAST *>(
+              generated[domainName].expr.back().get());
+          if (prevBin && prev &&
+              (prev->getNodeType() == AST::Entity ||
+               prev->getNodeType() == AST::Array)) {
+            flushRateSegment(domainName, ASTQuery::getNodeName(prev));
+            segState.activeRate = currentRate;
+            generated[domainName].expr.push_back(createExpr(prev));
+          } else {
+            segState.activeRate = currentRate;
+          }
+        }
         // Connect to previous stream node
         generated[domainName].expr.back() = std::make_unique<BinaryExprAST>(
             '=', std::move(entityExpr),
@@ -1483,12 +1730,29 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         if (stream) {
           generated[domainName].expr.back()->setLocationFrom(stream);
         }
+        if (next && next->getNodeType() == AST::Function) {
+          double nextRate = CodeAnalysis::getNodeRate(next, scope, tree);
+          if (nextRate > 0.0 && segState.activeRate > 0.0 &&
+              std::abs(nextRate - segState.activeRate) > 1e-9) {
+            flushRateSegment(domainName, ASTQuery::getNodeName(current));
+            segState.activeRate = nextRate;
+            generated[domainName].expr.push_back(createExpr(current));
+          }
+        }
       } else {
         generated[domainName].expr.push_back(std::move(entityExpr));
       }
     } else if (current->getNodeType() == AST::Function) {
       // -------------------------------------------------------------
       // Function
+      if (currentRate > 0.0 && segState.activeRate > 0.0 &&
+          std::abs(currentRate - segState.activeRate) > 1e-9) {
+        if (prev && prev->getNodeType() == AST::Function &&
+            !generated[domainName].expr.empty()) {
+          flushRateSegment(domainName, ASTQuery::getNodeName(prev));
+        }
+        segState.activeRate = currentRate;
+      }
       auto func = std::static_pointer_cast<FunctionNode>(current);
       auto decls = ASTQuery::findAllDeclarations(func->getName(), scope, tree);
       {
@@ -1966,6 +2230,13 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       LOG_ERROR() << "ERROR: Unsupported type" << std::endl;
     }
   };
+  for (auto &domainCode : generated) {
+    flushRateSegment(domainCode.first);
+    auto segIt = rateSegments.find(domainCode.first);
+    if (segIt != rateSegments.end() && !segIt->second.committedExprs.empty()) {
+      domainCode.second.expr = std::move(segIt->second.committedExprs);
+    }
+  }
   if (isTriggeredReactionStream) {
     for (auto &domainCode : generated) {
       if (!domainCode.second.expr.empty()) {

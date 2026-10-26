@@ -1,4 +1,6 @@
+#include <cmath>
 #include <iostream>
+#include <numeric>
 #include "stride/utils/logger.h"
 
 #include "stride/stridejit/binaryexprast.hpp"
@@ -797,6 +799,369 @@ bool BinaryExprAST::writesTo(const std::string &varName) const {
 }
 
 bool ResetExprAST::writesTo(const std::string &varName) const {
+  for (const auto &expr : Expressions) {
+    if (expr->writesTo(varName))
+      return true;
+  }
+  return false;
+}
+
+RateScheduleSpec RateScheduleSpec::build(double domainRate, double chainRate,
+                                         const std::string &phaseFieldName,
+                                         const std::string &boundarySignal) {
+  RateScheduleSpec spec;
+  spec.domainRate = domainRate;
+  spec.chainRate = chainRate;
+  spec.phaseStateFieldName = phaseFieldName;
+  spec.transitionSignalName = boundarySignal;
+
+  if (domainRate <= 0.0 || chainRate <= 0.0 ||
+      std::abs(domainRate - chainRate) < 1e-9) {
+    spec.isExactInteger = true;
+    spec.intFactor = 1;
+    return spec;
+  }
+
+  double ratio =
+      (chainRate > domainRate) ? (chainRate / domainRate) : (domainRate / chainRate);
+  int64_t roundedRatio = static_cast<int64_t>(std::llround(ratio));
+  if (roundedRatio >= 1 && std::abs(ratio - static_cast<double>(roundedRatio)) < 1e-9) {
+    spec.isExactInteger = true;
+    spec.intFactor = roundedRatio;
+    spec.useInt64Phase = true;
+    spec.stepD = (chainRate < domainRate) ? roundedRatio : 1;
+    spec.stepC = (chainRate > domainRate) ? roundedRatio : 1;
+    return spec;
+  }
+
+  spec.isExactInteger = false;
+  // Check if both rates can be scaled to exact integers (up to 1e6 scale for decimal rates)
+  constexpr double kMaxIntRate = 1e12;
+  bool canUseInt64 = false;
+  int64_t scaledD = 0;
+  int64_t scaledC = 0;
+  for (double scale : {1.0, 1000.0, 1000000.0}) {
+    double dScaled = domainRate * scale;
+    double cScaled = chainRate * scale;
+    if (dScaled < kMaxIntRate && cScaled < kMaxIntRate) {
+      int64_t dInt = static_cast<int64_t>(std::llround(dScaled));
+      int64_t cInt = static_cast<int64_t>(std::llround(cScaled));
+      if (dInt > 0 && cInt > 0 &&
+          std::abs(dScaled - static_cast<double>(dInt)) < 1e-6 &&
+          std::abs(cScaled - static_cast<double>(cInt)) < 1e-6) {
+        int64_t g = std::gcd(dInt, cInt);
+        scaledD = dInt / g;
+        scaledC = cInt / g;
+        canUseInt64 = true;
+        break;
+      }
+    }
+  }
+
+  if (canUseInt64) {
+    spec.useInt64Phase = true;
+    spec.stepD = scaledD;
+    spec.stepC = scaledC;
+  } else {
+    spec.useInt64Phase = false;
+  }
+
+  return spec;
+}
+
+DownsampleExprAST::DownsampleExprAST(
+    RateScheduleSpec schedule,
+    std::vector<std::unique_ptr<ExprAST>> expressions, DownsampleMode mode)
+    : Schedule(std::move(schedule)), Mode(mode),
+      Expressions(std::move(expressions)) {}
+
+void DownsampleExprAST::emitPreDecimateTick(StrideCompiler & /*state*/) {
+  // Extension hook for DownsampleMode::SlidingAverage / LowPassFilter:
+  // accumulate or filter input samples on every domain tick before decimation.
+}
+
+void DownsampleExprAST::emitActiveTickBody(StrideCompiler &state) {
+  for (auto &expr : Expressions) {
+    expr->codegen(state);
+  }
+}
+
+void DownsampleExprAST::emitTickAdvance(StrideCompiler &state,
+                                        llvm::Value *phasePtr,
+                                        llvm::Value *currentPhase,
+                                        llvm::BasicBlock *execEndBB,
+                                        llvm::BasicBlock *entryBB,
+                                        llvm::BasicBlock *mergeBB) {
+  state.Builder->SetInsertPoint(mergeBB);
+  if (Schedule.isExactInteger) {
+    // Integer counter (i32): next = (counter + 1 >= N) ? 0 : (counter + 1)
+    llvm::Type *i32Ty = llvm::Type::getInt32Ty(*state.TheContext);
+    llvm::Value *one = llvm::ConstantInt::get(i32Ty, 1);
+    llvm::Value *limit =
+        llvm::ConstantInt::get(i32Ty, static_cast<int32_t>(Schedule.intFactor));
+    llvm::Value *inc = state.Builder->CreateAdd(currentPhase, one, "ds.inc");
+    llvm::Value *wrapCond =
+        state.Builder->CreateICmpSGE(inc, limit, "ds.wrap.cond");
+    llvm::Value *zero = llvm::ConstantInt::get(i32Ty, 0);
+    llvm::Value *nextCount =
+        state.Builder->CreateSelect(wrapCond, zero, inc, "ds.next");
+    state.Builder->CreateStore(nextCount, phasePtr);
+  } else if (Schedule.useInt64Phase) {
+    // Exact integer Bresenham phase accumulator (i64):
+    // In active branch: phaseAfterExec = currentPhase + stepD
+    // In merge block:   nextPhase = phi(phaseAfterExec, currentPhase) - stepC
+    llvm::Type *i64Ty = llvm::Type::getInt64Ty(*state.TheContext);
+    state.Builder->SetInsertPoint(execEndBB);
+    llvm::Value *stepDVal = llvm::ConstantInt::get(i64Ty, Schedule.stepD);
+    llvm::Value *phaseAfterExec =
+        state.Builder->CreateAdd(currentPhase, stepDVal, "ds.phase.exec");
+    state.Builder->CreateBr(mergeBB);
+
+    state.Builder->SetInsertPoint(mergeBB);
+    llvm::PHINode *phasePhi =
+        state.Builder->CreatePHI(i64Ty, 2, "ds.phase.merged");
+    phasePhi->addIncoming(phaseAfterExec, execEndBB);
+    phasePhi->addIncoming(currentPhase, entryBB);
+    llvm::Value *stepCVal = llvm::ConstantInt::get(i64Ty, Schedule.stepC);
+    llvm::Value *nextPhase =
+        state.Builder->CreateSub(phasePhi, stepCVal, "ds.phase.next");
+    state.Builder->CreateStore(nextPhase, phasePtr);
+  } else {
+    // Floating-point phase accumulator (double):
+    llvm::Type *dblTy = llvm::Type::getDoubleTy(*state.TheContext);
+    state.Builder->SetInsertPoint(execEndBB);
+    llvm::Value *stepDVal = llvm::ConstantFP::get(dblTy, Schedule.domainRate);
+    llvm::Value *phaseAfterExec =
+        state.Builder->CreateFAdd(currentPhase, stepDVal, "ds.phase.exec");
+    state.Builder->CreateBr(mergeBB);
+
+    state.Builder->SetInsertPoint(mergeBB);
+    llvm::PHINode *phasePhi =
+        state.Builder->CreatePHI(dblTy, 2, "ds.phase.merged");
+    phasePhi->addIncoming(phaseAfterExec, execEndBB);
+    phasePhi->addIncoming(currentPhase, entryBB);
+    llvm::Value *stepCVal = llvm::ConstantFP::get(dblTy, Schedule.chainRate);
+    llvm::Value *nextPhase =
+        state.Builder->CreateFSub(phasePhi, stepCVal, "ds.phase.next");
+    state.Builder->CreateStore(nextPhase, phasePtr);
+  }
+}
+
+std::pair<llvm::Value *, std::optional<llvm::Type *>>
+DownsampleExprAST::codegen(StrideCompiler &state) {
+  if (Expressions.empty()) {
+    return {nullptr, std::nullopt};
+  }
+
+  auto it = state.NamedValues.find(Schedule.phaseStateFieldName);
+  if (it == state.NamedValues.end() || !it->second.first) {
+    // Fallback if state field is unavailable: execute directly
+    for (auto &expr : Expressions) {
+      expr->codegen(state);
+    }
+    return {nullptr, std::nullopt};
+  }
+
+  emitPreDecimateTick(state);
+
+  llvm::Value *phasePtr = it->second.first;
+  llvm::Type *phaseTy =
+      Schedule.isExactInteger
+          ? llvm::Type::getInt32Ty(*state.TheContext)
+          : (Schedule.useInt64Phase
+                 ? llvm::Type::getInt64Ty(*state.TheContext)
+                 : llvm::Type::getDoubleTy(*state.TheContext));
+
+  llvm::BasicBlock *entryBB = state.Builder->GetInsertBlock();
+  llvm::Function *TheFunction = entryBB->getParent();
+
+  llvm::Value *currentPhase =
+      state.Builder->CreateLoad(phaseTy, phasePtr, "ds.phase");
+  llvm::Value *shouldRun = nullptr;
+  if (Schedule.isExactInteger) {
+    shouldRun = state.Builder->CreateICmpEQ(
+        currentPhase, llvm::ConstantInt::get(phaseTy, 0), "ds.cond");
+  } else if (Schedule.useInt64Phase) {
+    shouldRun = state.Builder->CreateICmpSLE(
+        currentPhase, llvm::ConstantInt::get(phaseTy, 0), "ds.cond");
+  } else {
+    shouldRun = state.Builder->CreateFCmpOLE(
+        currentPhase, llvm::ConstantFP::get(phaseTy, 1e-9), "ds.cond");
+  }
+
+  llvm::BasicBlock *thenBB =
+      llvm::BasicBlock::Create(*state.TheContext, "downsample.exec", TheFunction);
+  llvm::BasicBlock *mergeBB =
+      llvm::BasicBlock::Create(*state.TheContext, "downsample.cont", TheFunction);
+
+  state.Builder->CreateCondBr(shouldRun, thenBB, mergeBB);
+  state.Builder->SetInsertPoint(thenBB);
+
+  emitActiveTickBody(state);
+
+  llvm::BasicBlock *execEndBB = state.Builder->GetInsertBlock();
+  if (Schedule.isExactInteger) {
+    state.Builder->CreateBr(mergeBB);
+  }
+
+  emitTickAdvance(state, phasePtr, currentPhase, execEndBB, entryBB, mergeBB);
+
+  return {nullptr, std::nullopt};
+}
+
+bool DownsampleExprAST::writesTo(const std::string &varName) const {
+  for (const auto &expr : Expressions) {
+    if (expr->writesTo(varName))
+      return true;
+  }
+  return false;
+}
+
+UpsampleExprAST::UpsampleExprAST(
+    RateScheduleSpec schedule,
+    std::vector<std::unique_ptr<ExprAST>> expressions, UpsampleMode mode)
+    : Schedule(std::move(schedule)), Mode(mode),
+      Expressions(std::move(expressions)) {}
+
+void UpsampleExprAST::emitPreLoopCapture(StrideCompiler & /*state*/) {
+  // Extension hook for UpsampleMode::LinearInterpolate / WindowedSinc:
+  // capture previous and current upstream boundary sample before sub-tick loop.
+}
+
+void UpsampleExprAST::emitSubTickBody(StrideCompiler &state,
+                                      llvm::Value * /*subTickIndex*/,
+                                      llvm::Value * /*subTickCount*/) {
+  for (auto &expr : Expressions) {
+    expr->codegen(state);
+  }
+}
+
+void UpsampleExprAST::emitPostLoopUpdate(StrideCompiler & /*state*/) {
+  // Extension hook for UpsampleMode::LinearInterpolate / WindowedSinc:
+  // update history state after the sub-tick loop finishes.
+}
+
+std::pair<llvm::Value *, std::optional<llvm::Type *>>
+UpsampleExprAST::codegen(StrideCompiler &state) {
+  if (Expressions.empty()) {
+    return {nullptr, std::nullopt};
+  }
+
+  emitPreLoopCapture(state);
+
+  llvm::BasicBlock *preheaderBB = state.Builder->GetInsertBlock();
+  llvm::Function *TheFunction = preheaderBB->getParent();
+
+  llvm::BasicBlock *headerBB =
+      llvm::BasicBlock::Create(*state.TheContext, "upsample.cond", TheFunction);
+  llvm::BasicBlock *bodyBB =
+      llvm::BasicBlock::Create(*state.TheContext, "upsample.body", TheFunction);
+  llvm::BasicBlock *afterBB =
+      llvm::BasicBlock::Create(*state.TheContext, "upsample.end", TheFunction);
+
+  if (Schedule.isExactInteger) {
+    llvm::Type *i32Ty = llvm::Type::getInt32Ty(*state.TheContext);
+    llvm::Value *zero = llvm::ConstantInt::get(i32Ty, 0);
+    llvm::Value *one = llvm::ConstantInt::get(i32Ty, 1);
+    llvm::Value *countVal =
+        llvm::ConstantInt::get(i32Ty, static_cast<int32_t>(Schedule.intFactor));
+
+    state.Builder->CreateBr(headerBB);
+    state.Builder->SetInsertPoint(headerBB);
+
+    llvm::PHINode *idxPhi = state.Builder->CreatePHI(i32Ty, 2, "us.idx");
+    idxPhi->addIncoming(zero, preheaderBB);
+    llvm::Value *cond =
+        state.Builder->CreateICmpSLT(idxPhi, countVal, "us.cond");
+    state.Builder->CreateCondBr(cond, bodyBB, afterBB);
+
+    state.Builder->SetInsertPoint(bodyBB);
+    emitSubTickBody(state, idxPhi, countVal);
+    llvm::BasicBlock *bodyEndBB = state.Builder->GetInsertBlock();
+    llvm::Value *nextIdx = state.Builder->CreateAdd(idxPhi, one, "us.next");
+    idxPhi->addIncoming(nextIdx, bodyEndBB);
+    state.Builder->CreateBr(headerBB);
+
+    state.Builder->SetInsertPoint(afterBB);
+  } else {
+    auto it = state.NamedValues.find(Schedule.phaseStateFieldName);
+    if (it == state.NamedValues.end() || !it->second.first) {
+      // Fallback if state field is unavailable: execute once
+      for (auto &expr : Expressions) {
+        expr->codegen(state);
+      }
+      return {nullptr, std::nullopt};
+    }
+
+    llvm::Value *phasePtr = it->second.first;
+    if (Schedule.useInt64Phase) {
+      llvm::Type *i64Ty = llvm::Type::getInt64Ty(*state.TheContext);
+      llvm::Value *initPhase =
+          state.Builder->CreateLoad(i64Ty, phasePtr, "us.phase.init");
+      llvm::Value *stepCVal = llvm::ConstantInt::get(i64Ty, Schedule.stepC);
+      llvm::Value *stepDVal = llvm::ConstantInt::get(i64Ty, Schedule.stepD);
+
+      state.Builder->CreateBr(headerBB);
+      state.Builder->SetInsertPoint(headerBB);
+
+      llvm::PHINode *phasePhi = state.Builder->CreatePHI(i64Ty, 2, "us.phase");
+      phasePhi->addIncoming(initPhase, preheaderBB);
+      llvm::Value *cond =
+          state.Builder->CreateICmpSLT(phasePhi, stepCVal, "us.cond");
+      state.Builder->CreateCondBr(cond, bodyBB, afterBB);
+
+      state.Builder->SetInsertPoint(bodyBB);
+      emitSubTickBody(state, nullptr, nullptr);
+      llvm::BasicBlock *bodyEndBB = state.Builder->GetInsertBlock();
+      llvm::Value *nextPhase =
+          state.Builder->CreateAdd(phasePhi, stepDVal, "us.phase.step");
+      phasePhi->addIncoming(nextPhase, bodyEndBB);
+      state.Builder->CreateBr(headerBB);
+
+      state.Builder->SetInsertPoint(afterBB);
+      llvm::Value *remPhase =
+          state.Builder->CreateSub(phasePhi, stepCVal, "us.phase.rem");
+      state.Builder->CreateStore(remPhase, phasePtr);
+    } else {
+      llvm::Type *dblTy = llvm::Type::getDoubleTy(*state.TheContext);
+      llvm::Value *initPhase =
+          state.Builder->CreateLoad(dblTy, phasePtr, "us.phase.init");
+      llvm::Value *stepCVal =
+          llvm::ConstantFP::get(dblTy, Schedule.chainRate);
+      llvm::Value *stepCThreshold =
+          llvm::ConstantFP::get(dblTy, Schedule.chainRate - 1e-9);
+      llvm::Value *stepDVal =
+          llvm::ConstantFP::get(dblTy, Schedule.domainRate);
+
+      state.Builder->CreateBr(headerBB);
+      state.Builder->SetInsertPoint(headerBB);
+
+      llvm::PHINode *phasePhi = state.Builder->CreatePHI(dblTy, 2, "us.phase");
+      phasePhi->addIncoming(initPhase, preheaderBB);
+      llvm::Value *cond = state.Builder->CreateFCmpOLT(
+          phasePhi, stepCThreshold, "us.cond");
+      state.Builder->CreateCondBr(cond, bodyBB, afterBB);
+
+      state.Builder->SetInsertPoint(bodyBB);
+      emitSubTickBody(state, nullptr, nullptr);
+      llvm::BasicBlock *bodyEndBB = state.Builder->GetInsertBlock();
+      llvm::Value *nextPhase =
+          state.Builder->CreateFAdd(phasePhi, stepDVal, "us.phase.step");
+      phasePhi->addIncoming(nextPhase, bodyEndBB);
+      state.Builder->CreateBr(headerBB);
+
+      state.Builder->SetInsertPoint(afterBB);
+      llvm::Value *remPhase =
+          state.Builder->CreateFSub(phasePhi, stepCVal, "us.phase.rem");
+      state.Builder->CreateStore(remPhase, phasePtr);
+    }
+  }
+
+  emitPostLoopUpdate(state);
+  return {nullptr, std::nullopt};
+}
+
+bool UpsampleExprAST::writesTo(const std::string &varName) const {
   for (const auto &expr : Expressions) {
     if (expr->writesTo(varName))
       return true;
