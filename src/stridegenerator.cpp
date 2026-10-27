@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <iostream>
 #include <optional>
+#include <set>
 
 #include "stride/stridejit/binaryexprast.hpp"
 #include "stride/stridejit/exprast.hpp"
@@ -889,10 +890,83 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
     }
   }
 
+  std::set<ASTNode> stagedStreams;
+  std::set<ASTNode> uniformStagedStreams;
+  for (const auto &node : tree->getChildren()) {
+    if (node->getNodeType() == AST::Declaration ||
+        node->getNodeType() == AST::ArrayDeclaration) {
+      auto decl = std::static_pointer_cast<DeclarationNode>(node);
+      if (decl->getEntityType() == "_domainDefinition" ||
+          decl->getEntityType() == "gameDefinition") {
+        auto stagesProp = decl->getCompilerProperty("streamStages");
+        if (stagesProp && stagesProp->getNodeType() == AST::List) {
+          double domRate = CodeAnalysis::getDomainDefaultRate(decl);
+          std::string domName = decl->getName();
+          for (const auto &stageNode : stagesProp->getChildren()) {
+            double stageRate = -1.0;
+            auto rateProp = stageNode->getCompilerProperty("rate");
+            if (rateProp && (rateProp->getNodeType() == AST::Real ||
+                             rateProp->getNodeType() == AST::Int)) {
+              stageRate = static_cast<ValueNode *>(rateProp.get())->toReal();
+            }
+            if (stageRate <= 0.0)
+              stageRate = domRate;
+
+            bool stageHasUniformStreams = false;
+            for (const auto &sNode : stageNode->getChildren()) {
+              stagedStreams.insert(sNode);
+              auto s = std::static_pointer_cast<StreamNode>(sNode);
+              StreamNodeIterator it(s);
+              double firstRate = -1.0;
+              bool internalTransitions = false;
+              while (auto n = it.next()) {
+                double r = CodeAnalysis::getNodeRate(n, scope, tree);
+                if (r > 0.0) {
+                  if (firstRate <= 0.0) {
+                    firstRate = r;
+                  } else if (std::abs(r - firstRate) > 1e-9) {
+                    internalTransitions = true;
+                    break;
+                  }
+                }
+              }
+              if (!internalTransitions) {
+                uniformStagedStreams.insert(sNode);
+                stageHasUniformStreams = true;
+              }
+            }
+
+            if (stageHasUniformStreams && domRate > 0.0 && stageRate > 0.0 &&
+                std::abs(stageRate - domRate) > 1e-9) {
+              std::string fieldName = "__rate_phase_" + domName + "_" +
+                                      std::to_string(state.m_idCounter++);
+              auto spec = RateScheduleSpec::build(domRate, stageRate, fieldName);
+              if (spec.needsPersistentPhaseState()) {
+                llvm::Type *phaseTy =
+                    spec.isExactInteger
+                        ? llvm::Type::getInt32Ty(*state.TheContext)
+                        : (spec.useInt64Phase
+                               ? llvm::Type::getInt64Ty(*state.TheContext)
+                               : llvm::Type::getDoubleTy(*state.TheContext));
+                llvm::Constant *zeroConst =
+                    llvm::Constant::getNullValue(phaseTy);
+                state.addDynamicDomainField(decl, fieldName, phaseTy,
+                                            zeroConst);
+                stageNode->setCompilerProperty(
+                    "__phase_field",
+                    std::make_shared<ValueNode>(fieldName, __FILE__, __LINE__));
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   // Pre-scan top-level streams to register dynamic domain fields for multi-rate phase state
   // before state.buildStateStructTypes is invoked.
   for (const auto &node : tree->getChildren()) {
-    if (node->getNodeType() == AST::Stream) {
+    if (node->getNodeType() == AST::Stream && uniformStagedStreams.count(node) == 0) {
       auto stream = std::static_pointer_cast<StreamNode>(node);
       StreamNodeIterator streamIt(stream);
       ASTNode current;
@@ -989,7 +1063,113 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
 
   state.buildStateStructTypes(state.m_intanceTree, scope, tree);
   StrideGenerator::GeneratedIRCode generatedIRCode;
+
+  // Emit streams grouped into topological rate stages where available
   for (const auto &node : tree->getChildren()) {
+    if (node->getNodeType() == AST::Declaration ||
+        node->getNodeType() == AST::ArrayDeclaration) {
+      auto decl = std::static_pointer_cast<DeclarationNode>(node);
+      if (decl->getEntityType() == "_domainDefinition" ||
+          decl->getEntityType() == "gameDefinition") {
+        auto stagesProp = decl->getCompilerProperty("streamStages");
+        if (stagesProp && stagesProp->getNodeType() == AST::List) {
+          double domRate = CodeAnalysis::getDomainDefaultRate(decl);
+          std::string domName = decl->getName();
+          for (const auto &stageNode : stagesProp->getChildren()) {
+            double stageRate = -1.0;
+            auto rateProp = stageNode->getCompilerProperty("rate");
+            if (rateProp && (rateProp->getNodeType() == AST::Real ||
+                             rateProp->getNodeType() == AST::Int)) {
+              stageRate = static_cast<ValueNode *>(rateProp.get())->toReal();
+            }
+            if (stageRate <= 0.0)
+              stageRate = domRate;
+
+            std::vector<std::unique_ptr<ExprAST>> stageExprs;
+            for (const auto &sNode : stageNode->getChildren()) {
+              auto stream = std::static_pointer_cast<StreamNode>(sNode);
+              bool internalTransitions = false;
+              StreamNodeIterator it(stream);
+              double firstRate = -1.0;
+              while (auto n = it.next()) {
+                double r = CodeAnalysis::getNodeRate(n, scope, tree);
+                if (r > 0.0) {
+                  if (firstRate <= 0.0) {
+                    firstRate = r;
+                  } else if (std::abs(r - firstRate) > 1e-9) {
+                    internalTransitions = true;
+                    break;
+                  }
+                }
+              }
+
+              if (internalTransitions) {
+                auto code = createStreamCode(stream, tree, scope, state, true);
+                for (auto &domainCode : code) {
+                  for (const auto &f : domainCode.second.functions) {
+                    f->codegen(state);
+                  }
+                  while (!domainCode.second.expr.empty()) {
+                    generatedIRCode.domainGeneratedCode[domainCode.first].push_back(
+                        std::move(domainCode.second.expr.front()));
+                    domainCode.second.expr.erase(domainCode.second.expr.begin());
+                  }
+                }
+              } else {
+                auto code = createStreamCode(stream, tree, scope, state, false);
+                for (auto &domainCode : code) {
+                  for (const auto &f : domainCode.second.functions) {
+                    f->codegen(state);
+                  }
+                  while (!domainCode.second.expr.empty()) {
+                    stageExprs.push_back(
+                        std::move(domainCode.second.expr.front()));
+                    domainCode.second.expr.erase(
+                        domainCode.second.expr.begin());
+                  }
+                }
+              }
+            }
+
+            if (!stageExprs.empty()) {
+              if (domRate > 0.0 && stageRate > 0.0 &&
+                  std::abs(stageRate - domRate) > 1e-9) {
+                std::string phaseFieldName;
+                auto phaseNode = stageNode->getCompilerProperty("__phase_field");
+                if (phaseNode && phaseNode->getNodeType() == AST::String) {
+                  phaseFieldName = static_cast<ValueNode *>(phaseNode.get())
+                                       ->getStringValue();
+                }
+                auto spec =
+                    RateScheduleSpec::build(domRate, stageRate, phaseFieldName);
+                if (stageRate < domRate) {
+                  auto downsampleExpr = std::make_unique<DownsampleExprAST>(
+                      std::move(spec), std::move(stageExprs));
+                  generatedIRCode.domainGeneratedCode[domName].push_back(
+                      std::move(downsampleExpr));
+                } else {
+                  auto upsampleExpr = std::make_unique<UpsampleExprAST>(
+                      std::move(spec), std::move(stageExprs));
+                  generatedIRCode.domainGeneratedCode[domName].push_back(
+                      std::move(upsampleExpr));
+                }
+              } else {
+                for (auto &e : stageExprs) {
+                  generatedIRCode.domainGeneratedCode[domName].push_back(
+                      std::move(e));
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  for (const auto &node : tree->getChildren()) {
+    if (node->getNodeType() == AST::Stream && stagedStreams.count(node) > 0) {
+      continue;
+    }
     if (node->getNodeType() == AST::Stream) {
       auto stream = std::static_pointer_cast<StreamNode>(node);
 
@@ -1431,7 +1611,8 @@ void StrideGenerator::collectPropertyArgs(
 StrideGenerator::GeneratedCode
 StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                                   ASTNode tree, ScopeStack &scope,
-                                  StrideCompiler &state) {
+                                  StrideCompiler &state,
+                                  bool wrapMultiRate) {
   StrideGenerator::GeneratedCode generated;
   ASTNode prev = nullptr;
   bool isTriggeredReactionStream = false;
@@ -1522,7 +1703,8 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
     }
     if (!isTopLevelDomainStream || seg.domainRate <= 0.0 ||
         seg.activeRate <= 0.0 ||
-        std::abs(seg.activeRate - seg.domainRate) < 1e-9) {
+        std::abs(seg.activeRate - seg.domainRate) < 1e-9 ||
+        !wrapMultiRate) {
       for (auto &e : activeExprs) {
         seg.committedExprs.push_back(std::move(e));
       }

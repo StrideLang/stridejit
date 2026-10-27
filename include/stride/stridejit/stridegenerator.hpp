@@ -143,7 +143,8 @@ public:
 
   static GeneratedCode createStreamCode(std::shared_ptr<StreamNode> stream,
                                         ASTNode tree, ScopeStack &scope,
-                                        StrideCompiler &state);
+                                        StrideCompiler &state,
+                                        bool wrapMultiRate = true);
 
 private:
   static bool

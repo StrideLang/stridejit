@@ -1086,6 +1086,9 @@ UpsampleExprAST::codegen(StrideCompiler &state) {
   } else {
     auto it = state.NamedValues.find(Schedule.phaseStateFieldName);
     if (it == state.NamedValues.end() || !it->second.first) {
+      headerBB->eraseFromParent();
+      bodyBB->eraseFromParent();
+      afterBB->eraseFromParent();
       // Fallback if state field is unavailable: execute once
       for (auto &expr : Expressions) {
         expr->codegen(state);
