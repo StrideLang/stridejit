@@ -18,7 +18,7 @@
 
 using namespace llvm;
 
-TEST(StateMachine, DomainInitialization) {
+TEST(JITStateMachineTest, DomainInitialization) {
   strd::ASTNode tree;
   tree =
       strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "statemachines.stride");
@@ -55,7 +55,7 @@ TEST(StateMachine, DomainInitialization) {
   EXPECT_TRUE(foundVar);
 }
 
-TEST(StateMachine, Flattening) {
+TEST(JITStateMachineTest, Flattening) {
   strd::ASTNode tree;
   tree =
       strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "statemachines.stride");
@@ -106,7 +106,7 @@ TEST(StateMachine, Flattening) {
   EXPECT_EQ(sm.flattenedStates[3].stateDecl->getName(), "State3");
 }
 
-TEST(StateMachine, StreamScoping) {
+TEST(JITStateMachineTest, StreamScoping) {
   strd::ASTNode tree;
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
                               "statemachines_streams.stride");
@@ -121,7 +121,7 @@ TEST(StateMachine, StreamScoping) {
   EXPECT_TRUE(success);
 }
 
-TEST(StateMachine, DomainInvokerGeneration) {
+TEST(JITStateMachineTest, DomainInvokerGeneration) {
   strd::ASTNode tree;
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
                               "statemachines_streams.stride");
@@ -150,7 +150,7 @@ TEST(StateMachine, DomainInvokerGeneration) {
     llvm::consumeError(processSym.takeError());
 }
 
-TEST(StateMachine, CodegenExecution) {
+TEST(JITStateMachineTest, CodegenExecution) {
   strd::ASTNode tree;
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
                               "statemachines_streams.stride");
@@ -187,7 +187,7 @@ TEST(StateMachine, CodegenExecution) {
   EXPECT_EQ(counter(), 4);
 }
 
-TEST(StateMachine, TransitionLoading) {
+TEST(JITStateMachineTest, TransitionLoading) {
   strd::ASTNode tree;
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
                               "statemachines_transitions.stride");
@@ -236,7 +236,7 @@ TEST(StateMachine, TransitionLoading) {
   EXPECT_EQ(state3.transitions.size(), 0);
 }
 
-TEST(StateMachine, TransitionExecution) {
+TEST(JITStateMachineTest, TransitionExecution) {
   strd::ASTNode tree;
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
                               "statemachines_transitions.stride");
@@ -295,7 +295,7 @@ TEST(StateMachine, TransitionExecution) {
   EXPECT_EQ(counter(), 2);
 }
 
-TEST(StateMachine, AdvancedFormalizations) {
+TEST(JITStateMachineTest, AdvancedFormalizations) {
   strd::ASTNode tree;
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
                               "statemachines_advanced.stride");
@@ -375,7 +375,7 @@ TEST(StateMachine, AdvancedFormalizations) {
   EXPECT_EQ(strenv.getStateId("Child2"), child2->id);
 }
 
-TEST(StateMachine, AdvancedFormalizationsExecution) {
+TEST(JITStateMachineTest, AdvancedFormalizationsExecution) {
   strd::ASTNode tree;
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
                               "statemachines_advanced.stride");
@@ -503,7 +503,7 @@ TEST(StateMachine, AdvancedFormalizationsExecution) {
   EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), finalStateId);
 }
 
-TEST(StateMachine, TransitionGuardBlocking) {
+TEST(JITStateMachineTest, TransitionGuardBlocking) {
   strd::ASTNode tree;
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
                               "statemachines_guard.stride");
@@ -546,7 +546,7 @@ TEST(StateMachine, TransitionGuardBlocking) {
   EXPECT_EQ(counter(), 1); // onTransition stream executed
 }
 
-TEST(StateMachine, UpdateGuardParentBeforeChild) {
+TEST(JITStateMachineTest, UpdateGuardParentBeforeChild) {
   strd::ASTNode tree;
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
                               "statemachines_updateguard.stride");
@@ -589,7 +589,7 @@ TEST(StateMachine, UpdateGuardParentBeforeChild) {
   EXPECT_EQ(counter(), 2);
 }
 
-TEST(StateMachine, UpdateGuardOnTransitionEntry) {
+TEST(JITStateMachineTest, UpdateGuardOnTransitionEntry) {
   strd::ASTNode tree;
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
                               "statemachines_transition_guard_entry.stride");
@@ -639,7 +639,7 @@ TEST(StateMachine, UpdateGuardOnTransitionEntry) {
   EXPECT_EQ(targetGuard(), 42);
 }
 
-TEST(StateMachine, ParallelStateExecution) {
+TEST(JITStateMachineTest, ParallelStateExecution) {
   strd::ASTNode tree;
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
                               "statemachines_parallel.stride");
@@ -688,7 +688,7 @@ TEST(StateMachine, ParallelStateExecution) {
   EXPECT_EQ(region2Counter(), 40);
 }
 
-TEST(StateMachine, ResumeLastStateExecution) {
+TEST(JITStateMachineTest, ResumeLastStateExecution) {
   strd::ASTNode tree;
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
                               "statemachines_resumelast.stride");
@@ -733,7 +733,7 @@ TEST(StateMachine, ResumeLastStateExecution) {
   EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), 4); // Restored SubState2!
 }
 
-TEST(StateMachine, DomainSwitches) {
+TEST(JITStateMachineTest, DomainSwitches) {
   strd::ASTNode tree;
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
                               "statemachines_switches.stride");
@@ -777,7 +777,7 @@ TEST(StateMachine, DomainSwitches) {
   EXPECT_EQ(switchExit(), 1);
 }
 
-TEST(StateMachine, GuardArrayAndRootActionsInDomain) {
+TEST(JITStateMachineTest, GuardArrayAndRootActionsInDomain) {
   strd::ASTNode tree;
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
                               "statemachines_guard_array_actions.stride");
@@ -844,7 +844,7 @@ TEST(StateMachine, GuardArrayAndRootActionsInDomain) {
   EXPECT_EQ(state2Entered(), 1);
 }
 
-TEST(StateMachine, ParameterizedGeneratorTransition) {
+TEST(JITStateMachineTest, ParameterizedGeneratorTransition) {
   strd::ASTNode tree;
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
                               "statemachines_generator_transition.stride");

@@ -6,7 +6,7 @@
 // llvm
 #include "llvm/ExecutionEngine/JITSymbol.h"
 
-TEST(NestedFunctions, ModuleInLoop) {
+TEST(JITNestedFunctionTest, ModuleInLoop) {
   strd::StrideEnvironment strenv;
 
   auto ret =
@@ -43,7 +43,7 @@ TEST(NestedFunctions, ModuleInLoop) {
   }
 }
 
-TEST(NestedFunctions, ReactionInLoop) {
+TEST(JITNestedFunctionTest, ReactionInLoop) {
   strd::StrideEnvironment strenv;
 
   auto ret =
@@ -80,7 +80,7 @@ TEST(NestedFunctions, ReactionInLoop) {
   }
 }
 
-TEST(NestedFunctions, LoopInLoop) {
+TEST(JITNestedFunctionTest, LoopInLoop) {
   strd::StrideEnvironment strenv;
 
   auto ret =
@@ -117,7 +117,7 @@ TEST(NestedFunctions, LoopInLoop) {
   }
 }
 
-TEST(NestedFunctions, ModuleInReaction) {
+TEST(JITNestedFunctionTest, ModuleInReaction) {
   strd::StrideEnvironment strenv;
 
   auto ret =
@@ -142,7 +142,7 @@ TEST(NestedFunctions, ModuleInReaction) {
   EXPECT_DOUBLE_EQ(out2.value_or(0.0), 12.5);
 }
 
-TEST(NestedFunctions, ReactionInReaction) {
+TEST(JITNestedFunctionTest, ReactionInReaction) {
   strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
@@ -167,7 +167,7 @@ TEST(NestedFunctions, ReactionInReaction) {
   EXPECT_DOUBLE_EQ(out2.value_or(0.0), 12.5);
 }
 
-TEST(NestedFunctions, LoopInReaction) {
+TEST(JITNestedFunctionTest, LoopInReaction) {
   strd::StrideEnvironment strenv;
 
   auto ret =
@@ -192,7 +192,7 @@ TEST(NestedFunctions, LoopInReaction) {
   EXPECT_EQ(out2.value_or(0), 12);
 }
 
-TEST(NestedFunctions, ModuleInModule) {
+TEST(JITNestedFunctionTest, ModuleInModule) {
   strd::StrideEnvironment strenv;
 
   auto ret =
@@ -217,7 +217,7 @@ TEST(NestedFunctions, ModuleInModule) {
   EXPECT_DOUBLE_EQ(out2.value_or(0.0), 15.5);
 }
 
-TEST(NestedFunctions, ReactionInModule) {
+TEST(JITNestedFunctionTest, ReactionInModule) {
   strd::StrideEnvironment strenv;
 
   auto ret =
@@ -264,7 +264,7 @@ TEST(NestedFunctions, ReactionInModule) {
   }
 }
 
-TEST(NestedFunctions, LoopInModule) {
+TEST(JITNestedFunctionTest, LoopInModule) {
   strd::StrideEnvironment strenv;
 
   auto ret =
@@ -301,7 +301,7 @@ TEST(NestedFunctions, LoopInModule) {
   }
 }
 
-TEST(NestedFunctions, StatefulModuleInLoop) {
+TEST(JITNestedFunctionTest, StatefulModuleInLoop) {
   strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
@@ -338,7 +338,7 @@ TEST(NestedFunctions, StatefulModuleInLoop) {
   }
 }
 
-TEST(NestedFunctions, StatefulModuleInReaction) {
+TEST(JITNestedFunctionTest, StatefulModuleInReaction) {
   strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
@@ -371,7 +371,7 @@ TEST(NestedFunctions, StatefulModuleInReaction) {
   }
 }
 
-TEST(NestedFunctions, StatefulModuleInModule) {
+TEST(JITNestedFunctionTest, StatefulModuleInModule) {
   strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
@@ -404,7 +404,7 @@ TEST(NestedFunctions, StatefulModuleInModule) {
   }
 }
 
-TEST(NestedFunctions, MultipleStatefulModulesInLoop) {
+TEST(JITNestedFunctionTest, MultipleStatefulModulesInLoop) {
   strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
@@ -441,7 +441,7 @@ TEST(NestedFunctions, MultipleStatefulModulesInLoop) {
   }
 }
 
-TEST(NestedFunctions, StandaloneStatelessModuleInModule) {
+TEST(JITNestedFunctionTest, StandaloneStatelessModuleInModule) {
   strd::StrideEnvironment strenv;
 
   auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
@@ -477,7 +477,7 @@ TEST(NestedFunctions, StandaloneStatelessModuleInModule) {
   EXPECT_DOUBLE_EQ(out2, 15.5);
 }
 
-TEST(NestedFunctions, StandaloneReactionInModule) {
+TEST(JITNestedFunctionTest, StandaloneReactionInModule) {
   strd::StrideEnvironment strenv;
 
   auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
@@ -512,7 +512,7 @@ TEST(NestedFunctions, StandaloneReactionInModule) {
   EXPECT_DOUBLE_EQ(out2, 8.0);
 }
 
-TEST(NestedFunctions, StandaloneLoopInModule) {
+TEST(JITNestedFunctionTest, StandaloneLoopInModule) {
   strd::StrideEnvironment strenv;
 
   auto tree =
@@ -548,7 +548,7 @@ TEST(NestedFunctions, StandaloneLoopInModule) {
   EXPECT_EQ(out2, 60);
 }
 
-TEST(NestedFunctions, StandaloneStatefulAccumulator) {
+TEST(JITNestedFunctionTest, StandaloneStatefulAccumulator) {
   strd::StrideEnvironment strenv;
 
   auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
@@ -592,7 +592,7 @@ TEST(NestedFunctions, StandaloneStatefulAccumulator) {
   EXPECT_EQ(state.Acc, 23);
 }
 
-TEST(NestedFunctions, StandaloneStatefulModuleInModule) {
+TEST(JITNestedFunctionTest, StandaloneStatefulModuleInModule) {
   strd::StrideEnvironment strenv;
 
   auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
@@ -641,7 +641,7 @@ TEST(NestedFunctions, StandaloneStatefulModuleInModule) {
   EXPECT_EQ(state.inner.Acc, 23);
 }
 
-TEST(NestedFunctions, StandaloneStatefulModuleInReaction) {
+TEST(JITNestedFunctionTest, StandaloneStatefulModuleInReaction) {
   strd::StrideEnvironment strenv;
 
   auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
@@ -690,7 +690,7 @@ TEST(NestedFunctions, StandaloneStatefulModuleInReaction) {
   EXPECT_EQ(state.counter.Count, 12);
 }
 
-TEST(NestedFunctions, StandaloneStatefulModuleInLoop) {
+TEST(JITNestedFunctionTest, StandaloneStatefulModuleInLoop) {
   strd::StrideEnvironment strenv;
 
   auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
@@ -740,7 +740,7 @@ TEST(NestedFunctions, StandaloneStatefulModuleInLoop) {
   EXPECT_EQ(state.accumulator.Total, 66);
 }
 
-TEST(NestedFunctions, StandaloneStatefulOpaqueAllocation) {
+TEST(JITNestedFunctionTest, StandaloneStatefulOpaqueAllocation) {
   strd::StrideEnvironment strenv;
 
   auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
@@ -782,7 +782,7 @@ TEST(NestedFunctions, StandaloneStatefulOpaqueAllocation) {
   strenv.deallocateState(state);
 }
 
-TEST(NestedFunctions, StandaloneGenericInvocation) {
+TEST(JITNestedFunctionTest, StandaloneGenericInvocation) {
   strd::StrideEnvironment strenv;
 
   auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
@@ -830,7 +830,7 @@ TEST(NestedFunctions, StandaloneGenericInvocation) {
   strenv.deallocateState(state);
 }
 
-TEST(NestedFunctions, StandaloneLoopGenericInvocation) {
+TEST(JITNestedFunctionTest, StandaloneLoopGenericInvocation) {
   strd::StrideEnvironment strenv;
 
   auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
@@ -872,7 +872,7 @@ TEST(NestedFunctions, StandaloneLoopGenericInvocation) {
   strenv.deallocateState(state);
 }
 
-TEST(NestedFunctions, StandaloneArgumentQueries) {
+TEST(JITNestedFunctionTest, StandaloneArgumentQueries) {
   strd::StrideEnvironment strenv;
 
   auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
@@ -939,7 +939,7 @@ TEST(NestedFunctions, StandaloneArgumentQueries) {
   EXPECT_FALSE(args[3].isPointer);
 }
 
-TEST(NestedFunctions, StandaloneInvokerParameterList) {
+TEST(JITNestedFunctionTest, StandaloneInvokerParameterList) {
   strd::StrideEnvironment strenv;
 
   auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR

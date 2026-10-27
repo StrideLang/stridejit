@@ -10,14 +10,14 @@ using namespace strd;
 
 namespace {
 
-TEST(NameMangler, PlainNameIsUnchanged) {
+TEST(NameManglerTest, PlainNameIsUnchanged) {
   NameMangler mangler;
   EXPECT_EQ(mangler.mangle("Abs"), "Abs");
   ASSERT_NE(mangler.resolve("Abs"), nullptr);
   EXPECT_EQ(mangler.resolve("Abs")->name, "Abs");
 }
 
-TEST(NameMangler, TypeSignatureSelectsVariant) {
+TEST(NameManglerTest, TypeSignatureSelectsVariant) {
   llvm::LLVMContext ctx;
   auto *i32 = llvm::Type::getInt32Ty(ctx);
   auto *f64 = llvm::Type::getDoubleTy(ctx);
@@ -46,7 +46,7 @@ TEST(NameMangler, TypeSignatureSelectsVariant) {
   EXPECT_FALSE(mangler.lookup("Abs", {}, {i32, f64}).has_value());
 }
 
-TEST(NameMangler, SingleVariantResolvesFromPlainName) {
+TEST(NameManglerTest, SingleVariantResolvesFromPlainName) {
   llvm::LLVMContext ctx;
   NameMangler mangler;
   auto mangled =
@@ -55,7 +55,7 @@ TEST(NameMangler, SingleVariantResolvesFromPlainName) {
   EXPECT_FALSE(mangler.resolveUnique("Missing").has_value());
 }
 
-TEST(NameMangler, ScopeIsLengthPrefixed) {
+TEST(NameManglerTest, ScopeIsLengthPrefixed) {
   NameMangler mangler;
   // Without length prefixes these would both encode as "a_b".
   auto first = mangler.mangle("b", {"a_"});
@@ -66,7 +66,7 @@ TEST(NameMangler, ScopeIsLengthPrefixed) {
   EXPECT_EQ(mangler.resolve(first)->scope, std::vector<std::string>{"a_"});
 }
 
-TEST(NameMangler, TypeCodes) {
+TEST(NameManglerTest, TypeCodes) {
   llvm::LLVMContext ctx;
   EXPECT_EQ(NameMangler::typeCode(llvm::Type::getInt1Ty(ctx)), "b");
   EXPECT_EQ(NameMangler::typeCode(llvm::Type::getInt32Ty(ctx)), "i");

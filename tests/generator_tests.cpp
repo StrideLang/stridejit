@@ -1,201 +1,88 @@
 #include "gtest/gtest.h"
 
-#include "stride/parser/entitynode.h"
 #include "stride/parser/declarationnode.h"
+#include "stride/parser/entitynode.h"
 #include "stride/parser/functionnode.h"
-#include "stride/parser/listnode.h"
-#include "stride/parser/propertynode.h"
-#include "stride/stridejit/stridecompiler.hpp"
+#include "stride/parser/streamnode.h"
+#include "stride/parser/valuenode.h"
+#include "stride/stridejit/numberexprast.hpp"
 #include "stride/stridejit/strideenvironment.hpp"
 #include "stride/stridejit/stridegenerator.hpp"
-#include "stride/stridegen/codeanalysis.hpp"
+#include "stride/utils/astquery.h"
 
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
+#include "llvm/Support/raw_ostream.h"
 
 namespace {
 
 // ============================================================================
-// StrideGenerator ResolveFunctionOverload Tests
+// Low-Level AST Code Generation Tests (migrated from basic.cpp)
 // ============================================================================
 
-TEST(StrideGeneratorTest, ResolveFunctionOverload_EmptyDecls) {
-  strd::StrideCompiler compiler;
-  std::vector<std::shared_ptr<strd::DeclarationNode>> decls;
-  auto func = std::make_shared<strd::FunctionNode>("test_func", nullptr, __FILE__, __LINE__);
-  std::vector<llvm::Type*> argTypes;
+TEST(StrideGeneratorTest, ManualStreamAssignmentCodegen) {
+  auto decl = std::make_shared<strd::DeclarationNode>("G", "signal", nullptr,
+                                                      __FILE__, __LINE__);
+  auto value1 = std::make_shared<strd::ValueNode>(3.3, __FILE__, __LINE__);
+  auto block = std::make_shared<strd::EntityNode>("G", __FILE__, __LINE__);
 
-  auto resolved = strd::StrideGenerator::resolveFunctionOverload(decls, func, compiler, argTypes);
-  EXPECT_EQ(resolved, nullptr);
-}
+  auto str =
+      std::make_shared<strd::StreamNode>(value1, block, __FILE__, __LINE__);
 
-TEST(StrideGeneratorTest, ResolveFunctionOverload_NonPlatformModule) {
-  strd::StrideCompiler compiler;
-  auto decl1 = std::make_shared<strd::DeclarationNode>("func1", "module", nullptr, __FILE__, __LINE__);
-  auto decl2 = std::make_shared<strd::DeclarationNode>("func2", "module", nullptr, __FILE__, __LINE__);
-  std::vector<std::shared_ptr<strd::DeclarationNode>> decls = {decl1, decl2};
-  auto func = std::make_shared<strd::FunctionNode>("test_func", nullptr, __FILE__, __LINE__);
-  std::vector<llvm::Type*> argTypes;
-
-  auto resolved = strd::StrideGenerator::resolveFunctionOverload(decls, func, compiler, argTypes);
-  EXPECT_EQ(resolved, decl2); // Returns the last non-platform module
-}
-
-TEST(StrideGeneratorTest, ResolveFunctionOverload_PlatformModuleNoArgs) {
-  strd::StrideCompiler compiler;
-  auto decl = std::make_shared<strd::DeclarationNode>("func1", "platformModule", nullptr, __FILE__, __LINE__);
-  std::vector<std::shared_ptr<strd::DeclarationNode>> decls = {decl};
-  auto func = std::make_shared<strd::FunctionNode>("test_func", nullptr, __FILE__, __LINE__);
-  std::vector<llvm::Type*> argTypes;
-
-  auto resolved = strd::StrideGenerator::resolveFunctionOverload(decls, func, compiler, argTypes);
-  EXPECT_EQ(resolved, decl);
-}
-
-TEST(StrideGeneratorTest, ResolveFunctionOverload_PlatformModuleWithArgs) {
-  strd::StrideCompiler compiler;
-  compiler.typesMap["Int"] = llvm::Type::getInt32Ty(*compiler.TheContext);
-  compiler.typesMap["Real"] = llvm::Type::getDoubleTy(*compiler.TheContext);
-
-  auto decl1 = std::make_shared<strd::DeclarationNode>("func1", "platformModule", nullptr, __FILE__, __LINE__);
-  auto inputs1 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  inputs1->addChild(std::make_shared<strd::EntityNode>("Int", __FILE__, __LINE__));
-  decl1->addProperty(std::make_shared<strd::PropertyNode>("inputs", inputs1, __FILE__, __LINE__));
-  auto outputs1 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  outputs1->addChild(std::make_shared<strd::EntityNode>("Real", __FILE__, __LINE__));
-  decl1->addProperty(std::make_shared<strd::PropertyNode>("outputs", outputs1, __FILE__, __LINE__));
-  auto decl2 = std::make_shared<strd::DeclarationNode>("func2", "platformModule", nullptr, __FILE__, __LINE__);
-  auto inputs2 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  inputs2->addChild(std::make_shared<strd::EntityNode>("Real", __FILE__, __LINE__));
-  decl2->addProperty(std::make_shared<strd::PropertyNode>("inputs", inputs2, __FILE__, __LINE__));
-  auto outputs2 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  outputs2->addChild(std::make_shared<strd::EntityNode>("Int", __FILE__, __LINE__));
-  decl2->addProperty(std::make_shared<strd::PropertyNode>("outputs", outputs2, __FILE__, __LINE__));
-  std::vector<std::shared_ptr<strd::DeclarationNode>> decls = {decl1, decl2};
-  auto func = std::make_shared<strd::FunctionNode>("test_func", nullptr, __FILE__, __LINE__);
-  
-  std::vector<llvm::Type*> argTypesInt = {llvm::Type::getInt32Ty(*compiler.TheContext)};
-  
-  // Test with inputs only (outputs ignored since typeTree is null)
-  auto resolvedInt = strd::StrideGenerator::resolveFunctionOverload(decls, func, compiler, argTypesInt);
-  EXPECT_EQ(resolvedInt, decl1);
-
-  // Test with inputs and matching outputs
-  strd::CodeAnalysis::TypeTree typeTreeOutReal;
-  typeTreeOutReal.output.push_back({nullptr, "Real"});
-  auto resolvedIntOutReal = strd::StrideGenerator::resolveFunctionOverload(decls, func, compiler, argTypesInt, &typeTreeOutReal);
-  EXPECT_EQ(resolvedIntOutReal, decl1);
-
-  // Test with inputs and mismatching outputs
-  strd::CodeAnalysis::TypeTree typeTreeOutInt;
-  typeTreeOutInt.output.push_back({nullptr, "Int"});
-  auto resolvedIntOutInt = strd::StrideGenerator::resolveFunctionOverload(decls, func, compiler, argTypesInt, &typeTreeOutInt);
-  EXPECT_EQ(resolvedIntOutInt, nullptr);
-
-  std::vector<llvm::Type*> argTypesReal = {llvm::Type::getDoubleTy(*compiler.TheContext)};
-  auto resolvedReal = strd::StrideGenerator::resolveFunctionOverload(decls, func, compiler, argTypesReal);
-  EXPECT_EQ(resolvedReal, decl2);
-}
-
-TEST(StrideGeneratorTest, ResolveFunctionOverload_TypeTreeInference) {
-  strd::StrideCompiler compiler;
-  compiler.typesMap["Int"] = llvm::Type::getInt32Ty(*compiler.TheContext);
-  compiler.typesMap["Real"] = llvm::Type::getDoubleTy(*compiler.TheContext);
-
-  auto decl1 = std::make_shared<strd::DeclarationNode>("func1", "platformModule", nullptr, __FILE__, __LINE__);
-  auto inputs1 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  inputs1->addChild(std::make_shared<strd::EntityNode>("Int", __FILE__, __LINE__));
-  decl1->addProperty(std::make_shared<strd::PropertyNode>("inputs", inputs1, __FILE__, __LINE__));
-
-  auto decl2 = std::make_shared<strd::DeclarationNode>("func2", "platformModule", nullptr, __FILE__, __LINE__);
-  auto inputs2 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  inputs2->addChild(std::make_shared<strd::EntityNode>("Real", __FILE__, __LINE__));
-  decl2->addProperty(std::make_shared<strd::PropertyNode>("inputs", inputs2, __FILE__, __LINE__));
-
-  std::vector<std::shared_ptr<strd::DeclarationNode>> decls = {decl1, decl2};
-  auto func = std::make_shared<strd::FunctionNode>("test_func", nullptr, __FILE__, __LINE__);
-  
-  std::vector<llvm::Type*> emptyArgTypes;
-
-  strd::CodeAnalysis::TypeTree typeTreeInt;
-  typeTreeInt.input.push_back({nullptr, "Int"});
-
-  auto resolvedInt = strd::StrideGenerator::resolveFunctionOverload(decls, func, compiler, emptyArgTypes, &typeTreeInt);
-  EXPECT_EQ(resolvedInt, decl1);
-
-  strd::CodeAnalysis::TypeTree typeTreeReal;
-  typeTreeReal.input.push_back({nullptr, "Real"});
-
-  auto resolvedReal = strd::StrideGenerator::resolveFunctionOverload(decls, func, compiler, emptyArgTypes, &typeTreeReal);
-  EXPECT_EQ(resolvedReal, decl2);
-}
-
-TEST(StrideGeneratorTest, ResolveFunctionOverload_TypeTreeInference_WithOutputs) {
-  strd::StrideCompiler compiler;
-  compiler.typesMap["Int"] = llvm::Type::getInt32Ty(*compiler.TheContext);
-  compiler.typesMap["Real"] = llvm::Type::getDoubleTy(*compiler.TheContext);
-
-  auto decl1 = std::make_shared<strd::DeclarationNode>("func1", "platformModule", nullptr, __FILE__, __LINE__);
-  auto inputs1 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  inputs1->addChild(std::make_shared<strd::EntityNode>("Int", __FILE__, __LINE__));
-  decl1->addProperty(std::make_shared<strd::PropertyNode>("inputs", inputs1, __FILE__, __LINE__));
-  auto outputs1 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  outputs1->addChild(std::make_shared<strd::EntityNode>("Int", __FILE__, __LINE__));
-  decl1->addProperty(std::make_shared<strd::PropertyNode>("outputs", outputs1, __FILE__, __LINE__));
-
-  auto decl2 = std::make_shared<strd::DeclarationNode>("func2", "platformModule", nullptr, __FILE__, __LINE__);
-  auto inputs2 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  inputs2->addChild(std::make_shared<strd::EntityNode>("Int", __FILE__, __LINE__));
-  decl2->addProperty(std::make_shared<strd::PropertyNode>("inputs", inputs2, __FILE__, __LINE__));
-  auto outputs2 = std::make_shared<strd::ListNode>(__FILE__, __LINE__);
-  outputs2->addChild(std::make_shared<strd::EntityNode>("Real", __FILE__, __LINE__));
-  decl2->addProperty(std::make_shared<strd::PropertyNode>("outputs", outputs2, __FILE__, __LINE__));
-
-  std::vector<std::shared_ptr<strd::DeclarationNode>> decls = {decl1, decl2};
-  auto func = std::make_shared<strd::FunctionNode>("test_func", nullptr, __FILE__, __LINE__);
-  
-  std::vector<llvm::Type*> emptyArgTypes;
-
-  strd::CodeAnalysis::TypeTree typeTreeOutInt;
-  typeTreeOutInt.input.push_back({nullptr, "Int"});
-  typeTreeOutInt.output.push_back({nullptr, "Int"});
-
-  auto resolvedOutInt = strd::StrideGenerator::resolveFunctionOverload(decls, func, compiler, emptyArgTypes, &typeTreeOutInt);
-  EXPECT_EQ(resolvedOutInt, decl1);
-
-  strd::CodeAnalysis::TypeTree typeTreeOutReal;
-  typeTreeOutReal.input.push_back({nullptr, "Int"});
-  typeTreeOutReal.output.push_back({nullptr, "Real"});
-
-  auto resolvedOutReal = strd::StrideGenerator::resolveFunctionOverload(decls, func, compiler, emptyArgTypes, &typeTreeOutReal);
-  EXPECT_EQ(resolvedOutReal, decl2);
-}
-
-TEST(StrideGeneratorTest, ResolveFunctionOverload_FromFile) {
   strd::StrideEnvironment strenv;
 
-  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "function_overload.stride");
-  EXPECT_TRUE(ret);
-  ret = strenv.compileInMemory();
-  EXPECT_TRUE(ret);
+  strenv.mStrideEnv.NamedValues[decl->getName()] =
+      strd::RealExprAST(0.0).codegen(strenv.mStrideEnv);
 
-  llvm::Expected<llvm::orc::ExecutorAddr> EntrySym =
-      strenv.getFunction("TestDomain_process");
-  EXPECT_TRUE((bool)EntrySym);
+  auto left = str->getLeft();
+  auto right = str->getRight();
+  std::unique_ptr<strd::ExprAST> n1, n2;
+  if (left->getNodeType() == strd::AST::Real) {
+    n1 = std::make_unique<strd::RealExprAST>(
+        std::static_pointer_cast<strd::ValueNode>(left)->getRealValue());
+  }
+  if (right->getNodeType() == strd::AST::Entity) {
+    strenv.mStrideEnv
+        .NamedValues[std::static_pointer_cast<strd::EntityNode>(right)
+                         ->getName()] = n1->codegen(strenv.mStrideEnv);
+  }
 
-  auto statePtr = strenv.allocateSharedState("TestDomain");
-  ASSERT_NE(statePtr.get(), nullptr);
-  void *args[] = {statePtr.get()};
+  EXPECT_TRUE(strenv.mStrideEnv.NamedValues["G"].second.value()->isDoubleTy());
+  llvm::ConstantFP *CFP = llvm::dyn_cast<llvm::ConstantFP>(
+      strenv.mStrideEnv.NamedValues["G"].first);
+  EXPECT_NE(CFP, nullptr);
+  EXPECT_EQ(CFP->getValue().convertToDouble(), 3.3);
+}
 
-  strenv.setStateVar(statePtr.get(), "InInt", 10, std::nullopt, "TestDomain");
-  strenv.setStateVar(statePtr.get(), "InReal", 10.0, std::nullopt, "TestDomain");
-  strenv.invoke("TestDomain_process", args);
+TEST(StrideGeneratorTest, CreateFunctionDeclaration) {
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
+  EXPECT_NE(tree, nullptr);
 
-  auto outInt = strenv.getStateVar<int>(statePtr.get(), "OutInt", std::nullopt, "TestDomain").value_or(0);
-  auto outReal = strenv.getStateVar<double>(statePtr.get(), "OutReal", std::nullopt, "TestDomain").value_or(0.0);
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
 
-  EXPECT_EQ(outInt, 12);
-  EXPECT_DOUBLE_EQ(outReal, 12.5);
+  auto stream = tree->getChildren()[2];
+  ASSERT_EQ(stream->getNodeType(), strd::AST::Stream);
+
+  auto addFunc = std::static_pointer_cast<strd::FunctionNode>(
+      std::static_pointer_cast<strd::StreamNode>(
+          std::static_pointer_cast<strd::StreamNode>(stream)->getRight())
+          ->getLeft());
+
+  strd::ScopeStack scope;
+  auto funcDecl =
+      strd::ASTQuery::findDeclarationByName(addFunc->getName(), scope, tree);
+  EXPECT_NE(funcDecl, nullptr);
+  auto func = strd::StrideGenerator::createFunctionDeclaration(
+      funcDecl, addFunc, tree, &scope, strenv.mStrideEnv);
+  auto *v = func->codegen(strenv.mStrideEnv);
+  EXPECT_NE(v, nullptr);
+
+  EXPECT_TRUE(v->getType()->isPointerTy());
+  strenv.mStrideEnv.TheModule->print(llvm::outs(), nullptr);
+  llvm::outs() << "\n";
 }
 
 } // namespace

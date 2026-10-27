@@ -6,7 +6,7 @@
 #include "stride/parser/ast.h"
 #include "stride/stridejit/strideenvironment.hpp"
 
-TEST(StridecCompilerTest, SensorDSPHeaderAndObjectGeneration) {
+TEST(StridecTest, SensorDSPHeaderAndObjectGeneration) {
   strd::StrideEnvironment env;
   bool ok = env.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "sensor_dsp.stride");
   ASSERT_TRUE(ok);
@@ -51,7 +51,7 @@ TEST(StridecCompilerTest, SensorDSPHeaderAndObjectGeneration) {
   std::filesystem::remove_all(tempDir);
 }
 
-TEST(StridecCompilerTest, SensorDSPExecution) {
+TEST(StridecTest, SensorDSPExecution) {
   strd::StrideEnvironment env;
   bool ok = env.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "sensor_dsp.stride");
   ASSERT_TRUE(ok);
@@ -97,7 +97,7 @@ TEST(StridecCompilerTest, SensorDSPExecution) {
   EXPECT_TRUE(alertFinal.value_or(false));
 }
 
-TEST(StridecCompilerTest, MultiFileUnifiedCompilation) {
+TEST(StridecTest, MultiFileUnifiedCompilation) {
   strd::StrideEnvironment env;
   std::vector<std::string> files = {
       STRIDEJIT_TESTS_SOURCE_DIR "sensor_dsp.stride",
@@ -124,7 +124,7 @@ TEST(StridecCompilerTest, MultiFileUnifiedCompilation) {
   std::filesystem::remove_all(tempDir);
 }
 
-TEST(StridecCompilerTest, StandaloneFunctionLibraryWithFlag) {
+TEST(StridecTest, StandaloneFunctionLibraryWithFlag) {
   strd::StrideEnvironment env;
   bool ok = env.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "math_utils.stride", /*emitAllFunctions=*/true);
   ASSERT_TRUE(ok);

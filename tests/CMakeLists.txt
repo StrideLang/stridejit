@@ -16,24 +16,36 @@ if (STRIDEJIT_BUILD_TESTS)
         set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(googletest)
     endif()
-    set(TEST_SOURCES main.cpp
-      basic.cpp
-      jit.cpp
-      expression_tests.cpp
-      compiler_tests.cpp
-      list_expression_tests.cpp
-      environment_tests.cpp
-      stridec_test.cpp
+    set(TEST_SOURCES
+      main.cpp
+
+      # Unit Tests
       ast_node_tests.cpp
-      nested_function_tests.cpp
-      statemachine_tests.cpp
-      logical_comparisons_tests.cpp
-      multi_instance_function_tests.cpp
-      function_test_runner_tests.cpp
-      string_tests.cpp
+      compiler_tests.cpp
+      environment_tests.cpp
+      expression_tests.cpp
+      generator_tests.cpp
+      list_expression_tests.cpp
       namemangler_tests.cpp
+      testing_framework_tests.cpp
+
+      # JIT Integration Tests
+      jit_array_tests.cpp
+      jit_control_flow_tests.cpp
+      jit_core_tests.cpp
+      jit_domain_tests.cpp
+      jit_function_tests.cpp
+      jit_multirate_tests.cpp
+      jit_nested_function_tests.cpp
+      jit_statemachine_tests.cpp
+      jit_stream_tests.cpp
+      jit_string_tests.cpp
+      jit_type_tests.cpp
+
+      # Tooling & Diagnostics
       debug_tests.cpp
-      # error_tests.cpp
+      error_tests.cpp
+      stridec_tests.cpp
     )
     add_executable(stridejit_tests ${TEST_SOURCES})
 

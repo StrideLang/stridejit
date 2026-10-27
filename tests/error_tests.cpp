@@ -1,19 +1,19 @@
-#include "stride/parser/langerror.h"
-#include "stride/stridejit/strideenvironment.hpp"
-#include "llvm/Support/Error.h"
 #include "gtest/gtest.h"
 #include <cstdio>
 #include <fstream>
 
+#include "stride/stridejit/strideenvironment.hpp"
+#include "llvm/Support/Error.h"
+
 namespace {
 
-TEST(JITError, InvalidFilePath) {
+TEST(JITErrorTest, InvalidFilePath) {
   strd::StrideEnvironment strenv;
   bool ret = strenv.generateIr("non_existent_file.stride");
   EXPECT_FALSE(ret);
 }
 
-TEST(JITError, NonExistentFunction) {
+TEST(JITErrorTest, NonExistentFunction) {
   strd::StrideEnvironment strenv;
   // We need some valid IR first to have a JIT instance
   bool ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
@@ -30,7 +30,7 @@ TEST(JITError, NonExistentFunction) {
   });
 }
 
-TEST(JITError, SyntaxError) {
+TEST(JITErrorTest, SyntaxError) {
   const char *syntax_error_file = "syntax_error.stride";
   std::ofstream out(syntax_error_file);
   out << "invalid stride code syntax %%%" << std::endl;
@@ -43,7 +43,7 @@ TEST(JITError, SyntaxError) {
   remove(syntax_error_file);
 }
 
-TEST(JITError, SemanticError) {
+TEST(JITErrorTest, SemanticError) {
   // This might involve something like double declaration or unknown variable
   // that the codegen catches if the parser doesn't.
   const char *semantic_error_file = "semantic_error.stride";
@@ -65,7 +65,7 @@ TEST(JITError, SemanticError) {
   remove(semantic_error_file);
 }
 
-TEST(JITError, EmptyFile) {
+TEST(JITErrorTest, EmptyFile) {
   // Create an empty file for testing
   const char *empty_file = "empty.stride";
   std::ofstream out(empty_file);

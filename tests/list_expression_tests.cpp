@@ -16,7 +16,7 @@ namespace {
 // ListExprAST Type Detection Tests
 // ============================================================================
 
-TEST(ListExprAST, EmptyList) {
+TEST(ListExprASTTest, EmptyList) {
   strd::StrideCompiler state;
 
   std::vector<strd::ASTNode> elements;
@@ -28,7 +28,7 @@ TEST(ListExprAST, EmptyList) {
               list.getType() == strd::ListExprAST::Type::UNSUPPORTED);
 }
 
-TEST(ListExprAST, ImmutableConsistentIntList) {
+TEST(ListExprASTTest, ImmutableConsistentIntList) {
   strd::StrideCompiler state;
 
   auto n1 = std::make_shared<strd::ValueNode>(static_cast<int64_t>(1),
@@ -47,7 +47,7 @@ TEST(ListExprAST, ImmutableConsistentIntList) {
   ASSERT_NE(v, nullptr);
 }
 
-TEST(ListExprAST, ImmutableConsistentDoubleList) {
+TEST(ListExprASTTest, ImmutableConsistentDoubleList) {
   strd::StrideCompiler state;
 
   auto n1 = std::make_shared<strd::ValueNode>(1.5, "test.stride", 1);
@@ -63,7 +63,7 @@ TEST(ListExprAST, ImmutableConsistentDoubleList) {
   EXPECT_TRUE(v->getType()->isArrayTy());
 }
 
-TEST(ListExprAST, SingleElementList) {
+TEST(ListExprASTTest, SingleElementList) {
   strd::StrideCompiler state;
 
   auto n1 = std::make_shared<strd::ValueNode>(42.0, "test.stride", 1);
@@ -77,7 +77,7 @@ TEST(ListExprAST, SingleElementList) {
   ASSERT_NE(v, nullptr);
 }
 
-TEST(ListExprAST, LargeImmutableList) {
+TEST(ListExprASTTest, LargeImmutableList) {
   strd::StrideCompiler state;
 
   std::vector<strd::ASTNode> elements;
@@ -102,7 +102,7 @@ TEST(ListExprAST, LargeImmutableList) {
 // ListExprAST Element Access Tests
 // ============================================================================
 
-TEST(ListExprAST, ElementsAccessor) {
+TEST(ListExprASTTest, ElementsAccessor) {
   strd::StrideCompiler state;
 
   auto n1 = std::make_shared<strd::ValueNode>(1.0, "test.stride", 1);
@@ -119,7 +119,7 @@ TEST(ListExprAST, ElementsAccessor) {
 // ListExprAST with Mixed Types Tests
 // ============================================================================
 
-TEST(ListExprAST, MixedIntDoubleList) {
+TEST(ListExprASTTest, MixedIntDoubleList) {
   strd::StrideCompiler state;
 
   auto n1 = std::make_shared<strd::ValueNode>(static_cast<int64_t>(1),
@@ -135,7 +135,7 @@ TEST(ListExprAST, MixedIntDoubleList) {
               type == strd::ListExprAST::Type::MUTABLE_CONSISTENT);
 }
 
-TEST(ListExprAST, MixedIntDoubleListWithTypecast) {
+TEST(ListExprASTTest, MixedIntDoubleListWithTypecast) {
   strd::StrideCompiler state;
 
   auto n1 = std::make_shared<strd::ValueNode>(static_cast<int64_t>(1),
@@ -160,7 +160,7 @@ TEST(ListExprAST, MixedIntDoubleListWithTypecast) {
 // ListExprAST Consistency Tests
 // ============================================================================
 
-TEST(ListExprAST, TypeConsistencyAllDoubles) {
+TEST(ListExprASTTest, TypeConsistencyAllDoubles) {
   strd::StrideCompiler state;
 
   std::vector<strd::ASTNode> elements;
@@ -174,7 +174,7 @@ TEST(ListExprAST, TypeConsistencyAllDoubles) {
   EXPECT_EQ(list.getType(), strd::ListExprAST::Type::IMMUTABLE_CONSISTENT);
 }
 
-TEST(ListExprAST, TypeConsistencyAllIntegers) {
+TEST(ListExprASTTest, TypeConsistencyAllIntegers) {
   strd::StrideCompiler state;
 
   std::vector<strd::ASTNode> elements;
@@ -191,7 +191,7 @@ TEST(ListExprAST, TypeConsistencyAllIntegers) {
 // ListExprAST Codegen Type Results
 // ============================================================================
 
-TEST(ListExprAST, CodegenReturnsArray) {
+TEST(ListExprASTTest, CodegenReturnsArray) {
   strd::StrideCompiler state;
 
   auto n1 = std::make_shared<strd::ValueNode>(1.0, "test.stride", 1);
@@ -212,7 +212,7 @@ TEST(ListExprAST, CodegenReturnsArray) {
 // ListExprAST Edge Cases
 // ============================================================================
 
-TEST(ListExprAST, DuplicateValues) {
+TEST(ListExprASTTest, DuplicateValues) {
   strd::StrideCompiler state;
 
   auto n1 = std::make_shared<strd::ValueNode>(5.0, "test.stride", 1);
@@ -228,7 +228,7 @@ TEST(ListExprAST, DuplicateValues) {
   ASSERT_NE(v, nullptr);
 }
 
-TEST(ListExprAST, VeryLargeValues) {
+TEST(ListExprASTTest, VeryLargeValues) {
   strd::StrideCompiler state;
 
   auto n1 = std::make_shared<strd::ValueNode>(1e100, "test.stride", 1);
@@ -241,7 +241,7 @@ TEST(ListExprAST, VeryLargeValues) {
   ASSERT_NE(v, nullptr);
 }
 
-TEST(ListExprAST, VerySmallValues) {
+TEST(ListExprASTTest, VerySmallValues) {
   strd::StrideCompiler state;
 
   auto n1 = std::make_shared<strd::ValueNode>(1e-100, "test.stride", 1);
@@ -254,7 +254,7 @@ TEST(ListExprAST, VerySmallValues) {
   ASSERT_NE(v, nullptr);
 }
 
-TEST(ListExprAST, NegativeValues) {
+TEST(ListExprASTTest, NegativeValues) {
   strd::StrideCompiler state;
 
   auto n1 = std::make_shared<strd::ValueNode>(-1.5, "test.stride", 1);
@@ -270,7 +270,7 @@ TEST(ListExprAST, NegativeValues) {
   ASSERT_NE(v, nullptr);
 }
 
-TEST(ListExprAST, ZeroValues) {
+TEST(ListExprASTTest, ZeroValues) {
   strd::StrideCompiler state;
 
   auto n1 = std::make_shared<strd::ValueNode>(0.0, "test.stride", 1);
@@ -283,7 +283,7 @@ TEST(ListExprAST, ZeroValues) {
   ASSERT_NE(v, nullptr);
 }
 
-TEST(GeneratorRangeNode, BasicConstruction) {
+TEST(GeneratorRangeNodeTest, BasicConstruction) {
   auto start = std::make_shared<strd::ValueNode>(static_cast<int64_t>(0), "test.stride", 1);
   auto end = std::make_shared<strd::ValueNode>(static_cast<int64_t>(8), "test.stride", 1);
   auto gen = std::make_shared<strd::GeneratorRangeNode>(start, end, "test.stride", 1);
@@ -294,7 +294,7 @@ TEST(GeneratorRangeNode, BasicConstruction) {
   EXPECT_EQ(gen->stepIndex(), nullptr);
 }
 
-TEST(GeneratorRangeNode, SteppedConstruction) {
+TEST(GeneratorRangeNodeTest, SteppedConstruction) {
   auto start = std::make_shared<strd::ValueNode>(static_cast<int64_t>(0), "test.stride", 1);
   auto step = std::make_shared<strd::ValueNode>(static_cast<int64_t>(2), "test.stride", 1);
   auto end = std::make_shared<strd::ValueNode>(static_cast<int64_t>(10), "test.stride", 1);

@@ -1,12 +1,10 @@
 #include "gtest/gtest.h"
 
 // stridejit
+#include "stride/stridegen/codeanalysis.hpp"
 #include "stride/stridegen/coderesolver.hpp"
 #include "stride/stridejit/strideenvironment.hpp"
 #include "stride/stridejit/stridegenerator.hpp"
-
-// stride
-#include "stride/stridegen/codeanalysis.hpp"
 #include "stride/utils/astfunctions.h"
 
 // llvm
@@ -16,8 +14,9 @@
 
 using namespace llvm;
 
-TEST(JIT, Create) {
+namespace {
 
+TEST(JITCoreTest, LLJITDirectExecution) {
   strd::ASTNode tree;
   tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "module.stride");
   EXPECT_NE(tree, nullptr);
@@ -40,23 +39,11 @@ TEST(JIT, Create) {
   }
   JTMB->setCodeModel(CodeModel::Small);
 
-  auto JIT =
-      orc::LLJITBuilder()
-          .setJITTargetMachineBuilder(std::move(*JTMB))
-          //          .setObjectLinkingLayerCreator(
-          //              [&](orc::ExecutionSession &ES, const Triple &TT) {
-          //                  // Create ObjectLinkingLayer.
-          //                  auto ObjLinkingLayer =
-          //                  std::make_unique<orc::ObjectLinkingLayer>(
-          //                      ES,
-          // jitlink::InProcessMemoryManager::Create());
-          //                  // Add an instance of our plugin.
-          //// ObjLinkingLayer->addPlugin(std::make_unique<MyPlugin>());
-          //                  return ObjLinkingLayer;
-          //              })
-          .create();
+  auto JIT = orc::LLJITBuilder()
+                 .setJITTargetMachineBuilder(std::move(*JTMB))
+                 .create();
   if (!JIT)
-    return; // JIT.takeError();
+    return;
 
   if (auto Err = (*JIT)->addIRModule(
           llvm::orc::ThreadSafeModule(std::move(strenv.mStrideEnv.TheModule),
@@ -79,8 +66,7 @@ TEST(JIT, Create) {
   EXPECT_EQ(out, 5);
 }
 
-TEST(JIT, CompileToDisk) {
-
+TEST(JITCoreTest, CompileObjectToDisk) {
   strd::StrideEnvironment strenv;
 
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
@@ -88,3 +74,5 @@ TEST(JIT, CompileToDisk) {
   ret = strenv.compileObjectToDisk("out");
   EXPECT_TRUE(ret);
 }
+
+} // namespace

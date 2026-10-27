@@ -30,7 +30,7 @@ const std::vector<strd::FunctionArgInfo> mockPassthruArgs = {
     {"Out", strd::FunctionArgInfo::Role::Output, strd::DataType::DOUBLE}
 };
 
-TEST(StrideTestSpec, SignalVectorMatching) {
+TEST(StrideTestSpecTest, SignalVectorMatching) {
   SignalStreamVector vec;
   vec.portName = "Out";
   vec.values = {1.0, 2.0, 3.0};
@@ -42,7 +42,7 @@ TEST(StrideTestSpec, SignalVectorMatching) {
   EXPECT_FALSE(vec.matches(1.0, 5)); // out of bounds
 }
 
-TEST(StrideTestSpec, AllAssertionKinds) {
+TEST(StrideTestSpecTest, AllAssertionKinds) {
   // ExpectNear
   SignalStreamVector nearVec;
   nearVec.kind = AssertionKind::Near;
@@ -95,7 +95,7 @@ TEST(StrideTestSpec, AllAssertionKinds) {
   EXPECT_FALSE(leVec.matches(5.1, 0));
 }
 
-TEST(StrideTestPerf, AnalyzerStats) {
+TEST(StrideTestPerfTest, AnalyzerStats) {
   auto stats = PerfAnalyzer::profile(10, 100, []() {
     volatile int x = 0;
     for (int i = 0; i < 50; ++i)
@@ -108,13 +108,13 @@ TEST(StrideTestPerf, AnalyzerStats) {
   stats.recordToGTest("BenchmarkTest");
 }
 
-TEST(StrideTestMemory, NoHeapAllocGuard) {
+TEST(StrideTestMemoryTest, NoHeapAllocGuard) {
   NoHeapAllocGuard guard;
   EXPECT_FALSE(guard.hasAllocated());
   EXPECT_EQ(guard.getDeltaAllocations(), 0);
 }
 
-TEST(StrideTestSpec, SpecExtractorSingle) {
+TEST(StrideTestSpecTest, SpecExtractorSingle) {
   auto testNode = std::make_shared<strd::DeclarationNode>(
       "ImpulseResponse", "functionTest", nullptr, __FILE__, __LINE__);
   auto funcVal =
@@ -126,7 +126,7 @@ TEST(StrideTestSpec, SpecExtractorSingle) {
   EXPECT_EQ(spec.functionName, "FirFilter");
 }
 
-TEST(StrideTestSpec, ExtractFromFile) {
+TEST(StrideTestSpecTest, ExtractFromFile) {
   auto specs = SpecExtractor::extractTestsFromFile(STRIDEJIT_TESTS_SOURCE_DIR
                                                    "PassthruTest.stride");
   ASSERT_EQ(specs.size(), 1);
@@ -142,7 +142,7 @@ TEST(StrideTestSpec, ExtractFromFile) {
   EXPECT_EQ(specs[0].validateStreams[0].kind, AssertionKind::Equal);
 }
 
-TEST(StrideTestSpec, ExtractAssertionsFixture) {
+TEST(StrideTestSpecTest, ExtractAssertionsFixture) {
   auto specs = SpecExtractor::extractTestsFromFile(STRIDEJIT_TESTS_SOURCE_DIR
                                                    "AssertionsTest.stride");
   ASSERT_EQ(specs.size(), 2);
@@ -161,7 +161,7 @@ TEST(StrideTestSpec, ExtractAssertionsFixture) {
   EXPECT_EQ(specs[1].validateStreams[1].kind, AssertionKind::LessThan);
 }
 
-TEST(StrideTestRunner, DirectFunctionExecutionSuccess) {
+TEST(StrideTestRunnerTest, DirectFunctionExecutionSuccess) {
   auto specs = SpecExtractor::extractTestsFromFile(STRIDEJIT_TESTS_SOURCE_DIR
                                                    "PassthruTest.stride");
   ASSERT_EQ(specs.size(), 1);
@@ -176,7 +176,7 @@ TEST(StrideTestRunner, DirectFunctionExecutionSuccess) {
   EXPECT_GT(result.perfMetrics.meanNs, 0.0);
 }
 
-TEST(StrideTestRunner, FailureDiagnostics) {
+TEST(StrideTestRunnerTest, FailureDiagnostics) {
   auto specs = SpecExtractor::extractTestsFromFile(STRIDEJIT_TESTS_SOURCE_DIR
                                                    "PassthruTest.stride");
   ASSERT_EQ(specs.size(), 1);
@@ -197,7 +197,7 @@ TEST(StrideTestRunner, FailureDiagnostics) {
       std::string::npos);
 }
 
-TEST(StrideTestRunner, JITCompiledPassthruExecution) {
+TEST(StrideTestRunnerTest, JITCompiledPassthruExecution) {
   strd::StrideEnvironment strenv;
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "passthru.stride");
   ASSERT_TRUE(ret);
@@ -240,7 +240,7 @@ TEST(StrideTestRunner, JITCompiledPassthruExecution) {
   EXPECT_GT(result.perfMetrics.meanNs, 0.0);
 }
 
-TEST(StrideTestRunner, AssertionKindsExecution) {
+TEST(StrideTestRunnerTest, AssertionKindsExecution) {
   auto specs = SpecExtractor::extractTestsFromFile(STRIDEJIT_TESTS_SOURCE_DIR
                                                    "AssertionsTest.stride");
   ASSERT_EQ(specs.size(), 2);
@@ -258,7 +258,7 @@ TEST(StrideTestRunner, AssertionKindsExecution) {
   EXPECT_EQ(resultGtLt.ticksExecuted, 2);
 }
 
-TEST(StrideTestRunner, ModuleTestExecution) {
+TEST(StrideTestRunnerTest, ModuleTestExecution) {
   strd::StrideEnvironment strenv;
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "ModuleTest.stride");
   ASSERT_TRUE(ret);
@@ -303,14 +303,14 @@ TEST(StrideTestRunner, ModuleTestExecution) {
   EXPECT_GT(result.perfMetrics.meanNs, 0.0);
 }
 
-TEST(StrideTestDynamicLoader, NonExistentLibrary) {
+TEST(StrideTestDynamicLoaderTest, NonExistentLibrary) {
   DynamicLoader loader("non_existent_library_12345.dll");
   EXPECT_FALSE(loader.isLoaded());
   EXPECT_FALSE(loader.getErrorMessage().empty());
   EXPECT_EQ(loader.getRawSymbol("any_symbol"), nullptr);
 }
 
-TEST(StrideTestReporter, ConsoleAndJUnitXmlOutput) {
+TEST(StrideTestReporterTest, ConsoleAndJUnitXmlOutput) {
   TestReporter reporter;
   FunctionTestSpec spec1;
   spec1.testName = "UnitTest1";
@@ -354,7 +354,7 @@ TEST(StrideTestReporter, ConsoleAndJUnitXmlOutput) {
             std::string::npos);
 }
 
-TEST(StrideTestRunner, RepeatedExecution) {
+TEST(StrideTestRunnerTest, RepeatedExecution) {
   auto specs = SpecExtractor::extractTestsFromFile(STRIDEJIT_TESTS_SOURCE_DIR "PassthruTest.stride");
   ASSERT_EQ(specs.size(), 1);
 
@@ -375,7 +375,7 @@ TEST(StrideTestRunner, RepeatedExecution) {
   EXPECT_EQ(reporter.failedTests(), 0);
 }
 
-TEST(StrideTestRunner, MissingArgInfosReturnsError) {
+TEST(StrideTestRunnerTest, MissingArgInfosReturnsError) {
   auto specs = SpecExtractor::extractTestsFromFile(STRIDEJIT_TESTS_SOURCE_DIR "PassthruTest.stride");
   ASSERT_EQ(specs.size(), 1);
 
