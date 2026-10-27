@@ -33,6 +33,8 @@
 #include "stride/stridejit/stridecompiler.hpp"
 #include "stride/utils/cachemanager.h"
 #include "stride/utils/logger.h"
+#include "llvm/Config/llvm-config.h"
+#include "llvm/ExecutionEngine/Orc/Shared/ExecutorAddress.h"
 
 // llvm forward declarations
 namespace llvm {
@@ -370,7 +372,11 @@ template <typename T> T *StrideEnvironment::getGlobal(std::string varName) {
   if (Symbol) {
     T *host_ptr = nullptr;
     try {
+#if LLVM_VERSION_MAJOR >= 15
       host_ptr = Symbol->toPtr<T *>();
+#else
+      host_ptr = reinterpret_cast<T *>(static_cast<uintptr_t>(Symbol->getAddress()));
+#endif
     } catch (...) {
       // std::cerr << "Can't cast variable to type" << std::endl;
     }

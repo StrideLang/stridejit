@@ -1571,9 +1571,15 @@ bool StrideEnvironment::compileInMemory() {
   llvm::orc::MangleAndInterner Mangle(JIT->getExecutionSession(),
                                       JIT->getDataLayout());
   auto regSym = [&](const char *name, auto *fnPtr) {
+#if LLVM_VERSION_MAJOR >= 15
     M[Mangle(name)] =
         llvm::orc::ExecutorSymbolDef(llvm::orc::ExecutorAddr::fromPtr(fnPtr),
                                      llvm::JITSymbolFlags::Exported);
+#else
+    M[Mangle(name)] = llvm::JITEvaluatedSymbol(
+        llvm::pointerToJITTargetAddress(fnPtr),
+        llvm::JITSymbolFlags::Exported);
+#endif
   };
   regSym("__stride_Greater_d_dd", &__stride_Greater_d_dd);
   regSym("__stride_string_substring", &__stride_string_substring);
@@ -1644,8 +1650,13 @@ bool StrideEnvironment::compileInMemory() {
         llvm::legacy::PassManager pass;
         llvm::SmallVector<char, 0> objBuf;
         llvm::raw_svector_ostream dest(objBuf);
+#if LLVM_VERSION_MAJOR >= 18
         if (!(*TM)->addPassesToEmitFile(pass, dest, nullptr,
                                         llvm::CodeGenFileType::ObjectFile)) {
+#else
+        if (!(*TM)->addPassesToEmitFile(pass, dest, nullptr,
+                                        llvm::CGFT_ObjectFile)) {
+#endif
           pass.run(*mStrideEnv.TheModule);
           CacheManager::instance().saveCachedBinary(
               m_primarySourcePath, objBuf.data(), objBuf.size(), deps, objTag,
@@ -1830,17 +1841,29 @@ bool StrideEnvironment::generateCompiledObject(std::string path,
     return false;
   }
   llvm::TargetOptions opt;
+#if LLVM_VERSION_MAJOR >= 16
   auto RM = std::optional<llvm::Reloc::Model>();
+  auto CM = std::nullopt;
+#else
+  auto RM = llvm::Optional<llvm::Reloc::Model>();
+  auto CM = llvm::Optional<llvm::CodeModel::Model>();
+#endif
 #if LLVM_VERSION_MAJOR >= 20
   auto TargetMachine =
-      Target->createTargetMachine(triple, CPU, Features, opt, RM, std::nullopt,
+      Target->createTargetMachine(triple, CPU, Features, opt, RM, CM,
                                   llvm::CodeGenOptLevel::Default);
   mStrideEnv.TheModule->setDataLayout(TargetMachine->createDataLayout());
   mStrideEnv.TheModule->setTargetTriple(triple);
+#elif LLVM_VERSION_MAJOR >= 18
+  auto TargetMachine =
+      Target->createTargetMachine(triple.str(), CPU, Features, opt, RM,
+                                  CM, llvm::CodeGenOptLevel::Default);
+  mStrideEnv.TheModule->setDataLayout(TargetMachine->createDataLayout());
+  mStrideEnv.TheModule->setTargetTriple(triple.str());
 #else
   auto TargetMachine =
       Target->createTargetMachine(triple.str(), CPU, Features, opt, RM,
-                                  std::nullopt, llvm::CodeGenOptLevel::Default);
+                                  CM, llvm::CodeGenOpt::Default);
   mStrideEnv.TheModule->setDataLayout(TargetMachine->createDataLayout());
   mStrideEnv.TheModule->setTargetTriple(triple.str());
 #endif
@@ -1858,7 +1881,11 @@ bool StrideEnvironment::generateCompiledObject(std::string path,
     return false;
   }
   llvm::legacy::PassManager pass;
+#if LLVM_VERSION_MAJOR >= 18
   auto FileType = llvm::CodeGenFileType::ObjectFile;
+#else
+  auto FileType = llvm::CGFT_ObjectFile;
+#endif
 
   if (TargetMachine->addPassesToEmitFile(pass, dest, nullptr, FileType)) {
     LOG_ERROR() << "TargetMachine can't emit a file of this type";
@@ -1911,7 +1938,6 @@ StrideEnvironment::getFunction(std::string functionName) {
   if (!JIT) {
     return llvm::make_error<llvm::StringError>("JIT not available",
                                                llvm::inconvertibleErrorCode());
-    ;
   }
   auto EntrySym = JIT->lookup(functionName.c_str());
   if (!EntrySym) {
@@ -1919,10 +1945,23 @@ StrideEnvironment::getFunction(std::string functionName) {
     // Stride name when only one variant exists.
     if (auto mangled = mStrideEnv.mangler.resolveUnique(functionName)) {
       llvm::consumeError(EntrySym.takeError());
-      return JIT->lookup(*mangled);
+      auto mangledSym = JIT->lookup(*mangled);
+      if (!mangledSym) {
+        return mangledSym.takeError();
+      }
+#if LLVM_VERSION_MAJOR >= 15
+      return *mangledSym;
+#else
+      return llvm::orc::ExecutorAddr(mangledSym->getAddress());
+#endif
     }
+    return EntrySym.takeError();
   }
-  return EntrySym;
+#if LLVM_VERSION_MAJOR >= 15
+  return *EntrySym;
+#else
+  return llvm::orc::ExecutorAddr(EntrySym->getAddress());
+#endif
 }
 
 template std::optional<int32_t>
@@ -2089,7 +2128,11 @@ bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
   std::string targetFeatures = features;
 
   llvm::TargetOptions opt;
+#if LLVM_VERSION_MAJOR >= 16
   std::optional<llvm::Reloc::Model> rm;
+#else
+  llvm::Optional<llvm::Reloc::Model> rm;
+#endif
   if (relocModel == "static") {
     rm = llvm::Reloc::Static;
   } else if (relocModel == "pic") {
@@ -2104,7 +2147,11 @@ bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
     rm = llvm::Reloc::ROPI_RWPI;
   }
 
+#if LLVM_VERSION_MAJOR >= 16
   std::optional<llvm::CodeModel::Model> cm;
+#else
+  llvm::Optional<llvm::CodeModel::Model> cm;
+#endif
   if (codeModel == "tiny") {
     cm = llvm::CodeModel::Tiny;
   } else if (codeModel == "small") {
@@ -2117,14 +2164,25 @@ bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
     cm = llvm::CodeModel::Large;
   }
 
+#if LLVM_VERSION_MAJOR >= 18
   llvm::CodeGenOptLevel codegenOpt = llvm::CodeGenOptLevel::Default;
   if (m_optimizationLevel == 0 || m_buildType == BuildType::Debug) {
     codegenOpt = llvm::CodeGenOptLevel::None;
   } else if (m_optimizationLevel == 1) {
-    codegenOpt = llvm::CodeGenOptLevel::Less;
+    codegenOpt = llvm::CodeGenOpt::Less;
   } else if (m_optimizationLevel == 3) {
-    codegenOpt = llvm::CodeGenOptLevel::Aggressive;
+    codegenOpt = llvm::CodeGenOpt::Aggressive;
   }
+#else
+  llvm::CodeGenOpt::Level codegenOpt = llvm::CodeGenOpt::Default;
+  if (m_optimizationLevel == 0 || m_buildType == BuildType::Debug) {
+    codegenOpt = llvm::CodeGenOpt::None;
+  } else if (m_optimizationLevel == 1) {
+    codegenOpt = llvm::CodeGenOpt::Less;
+  } else if (m_optimizationLevel == 3) {
+    codegenOpt = llvm::CodeGenOpt::Aggressive;
+  }
+#endif
 
 #if LLVM_VERSION_MAJOR >= 20
   auto targetMachine =
@@ -2163,7 +2221,11 @@ bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
   }
 
   llvm::legacy::PassManager pass;
+#if LLVM_VERSION_MAJOR >= 18
   auto fileType = llvm::CodeGenFileType::ObjectFile;
+#else
+  auto fileType = llvm::CGFT_ObjectFile;
+#endif
 
   if (targetMachine->addPassesToEmitFile(pass, dest, nullptr, fileType)) {
     LOG_ERROR() << "TargetMachine cannot emit an object file for " << tripleStr
