@@ -363,10 +363,21 @@ void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
   }
   fullName += globalDecl->getName();
   llvm::Type *Type = getLLVMType(globalDecl);
-  if (globalDecl->getNodeType() == AST::ArrayDeclaration) {
-    int size = ASTQuery::getEntityDeclaredSize(globalDecl, {}, nullptr);
+  if (globalDecl->getNodeType() == AST::ArrayDeclaration ||
+      globalDecl->getEntityType() == "buffer") {
+    int size = 0;
+    if (globalDecl->getEntityType() == "buffer") {
+      auto capProp = globalDecl->getPropertyValue("capacity");
+      if (capProp && capProp->getNodeType() == AST::Int) {
+        size = static_cast<int>(std::static_pointer_cast<ValueNode>(capProp)->getIntValue());
+      }
+    } else {
+      size = ASTQuery::getEntityDeclaredSize(globalDecl, {}, nullptr);
+    }
     if (size > 0) {
-      Type = llvm::ArrayType::get(Type, size);
+      if (!Type->isArrayTy()) {
+        Type = llvm::ArrayType::get(Type, size);
+      }
     } else {
       LOG_INFO() << " Error: Undefined size for global not possible"
                  << std::endl;
@@ -377,6 +388,9 @@ void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
   auto valProp = globalDecl->getPropertyValue("value");
   if (!valProp) {
     valProp = globalDecl->getPropertyValue("default");
+  }
+  if (!Initializer && Type->isArrayTy()) {
+    Initializer = llvm::ConstantAggregateZero::get(Type);
   }
   if (valProp) {
     if (valProp->getNodeType() == AST::Int) {
@@ -533,6 +547,21 @@ StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl) {
   }
   if (decl->getEntityType() == "reaction") {
     return typesMap[DataTypes::Switch];
+  }
+  if (decl->getEntityType() == "buffer") {
+    int capacity = 0;
+    auto capProp = decl->getPropertyValue("capacity");
+    if (capProp && capProp->getNodeType() == strd::AST::Int) {
+      capacity = static_cast<int>(std::static_pointer_cast<strd::ValueNode>(capProp)->getIntValue());
+    }
+    llvm::Type *elemTy = (!type.empty() && typesMap.find(type) != typesMap.end() &&
+                          !typesMap[type]->isVoidTy())
+                             ? typesMap[type]
+                             : typesMap[DataTypes::Real];
+    if (capacity > 0) {
+      return llvm::ArrayType::get(elemTy, capacity);
+    }
+    return elemTy;
   }
   if (!type.empty() && typesMap.find(type) != typesMap.end() &&
       !typesMap[type]->isVoidTy()) {

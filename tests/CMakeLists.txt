@@ -31,6 +31,7 @@ if (STRIDEJIT_BUILD_TESTS)
 
       # JIT Integration Tests
       jit_array_tests.cpp
+      jit_buffer_tests.cpp
       jit_control_flow_tests.cpp
       jit_core_tests.cpp
       jit_domain_tests.cpp
