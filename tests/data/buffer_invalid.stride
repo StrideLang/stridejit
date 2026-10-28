@@ -1,0 +1,19 @@
+# frameSize larger than capacity must be rejected
+_domainDefinition BufferDom {
+    framework: _JitFramework
+    rate: -1
+    inputs: [
+        signal AudioIn { domain: BufferDom type: Real }
+    ]
+    outputs: [ ]
+    domainFunctionCode: ''
+}
+
+buffer InBuffer {
+    type: Real
+    capacity: 4
+    frameSize: 8
+    mode: Buffer::ModeSliding
+}
+
+AudioIn >> InBuffer;

@@ -26,28 +26,39 @@
 #include <memory>
 #include <string>
 
+#include "bufferspec.hpp"
 #include "exprast.hpp"
 
 namespace strd {
 class DeclarationNode;
 
 /// BufferPushExprAST - Expression class for pushing a value into a buffer.
+/// Stores the sample, advances the ring and sets `<Buffer>_ready` for the
+/// tick in which a frame is ready.
 class BufferPushExprAST : public ExprAST {
-  std::shared_ptr<DeclarationNode> BufferDecl;
-  std::string BufferName;
-  int Capacity{0};
-  int Hop{0};
-  std::string TriggerMode{"TriggerFull"};
+  BufferSpec Spec;
   std::unique_ptr<ExprAST> ValueExpr;
 
 public:
-  BufferPushExprAST(std::shared_ptr<DeclarationNode> bufferDecl,
-                    std::unique_ptr<ExprAST> valueExpr);
+  BufferPushExprAST(BufferSpec spec, std::unique_ptr<ExprAST> valueExpr);
 
   std::pair<llvm::Value *, std::optional<llvm::Type *>>
   codegen(StrideCompiler &state) override;
 
   bool writesTo(const std::string &varName) const override;
+};
+
+/// BufferViewExprAST - Pointer to the oldest sample of the current frame.
+/// Passing a buffer as a reaction property hands over this pointer, so the
+/// reaction reads the frame in order without a copy.
+class BufferViewExprAST : public ExprAST {
+  BufferSpec Spec;
+
+public:
+  explicit BufferViewExprAST(BufferSpec spec);
+
+  std::pair<llvm::Value *, std::optional<llvm::Type *>>
+  codegen(StrideCompiler &state) override;
 };
 
 /// BinaryExprAST - Expression class for a binary operator.

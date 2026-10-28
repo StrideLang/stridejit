@@ -1,0 +1,43 @@
+# Sliding window N=4, H=2 over capacity 8: overlapping frames read in order across the wrap (mirrored storage)
+_domainDefinition BufferDom {
+    framework: _JitFramework
+    rate: -1
+    inputs: [
+
+        signal AudioIn { domain: BufferDom type: Real }
+    ]
+    outputs: [
+        signal Result { domain: BufferDom type: Real }
+
+    ]
+    domainFunctionCode: ''
+}
+
+constant FrameLength { value: 4 }
+
+buffer InBuffer {
+    type: Real
+    capacity: 8
+    frameSize: FrameLength
+    hop: FrameLength / 2
+    mode: Buffer::ModeSliding
+    triggerMode: Buffer::TriggerPeriodic
+}
+
+# Reads the frame in order: first sample * 100 + last sample
+reaction Edges {
+    ports: [
+        propertyInputPort InBufPort { name: "buffer" block: InBuf }
+        mainOutputPort OutPort { block: OutVal }
+    ]
+    blocks: [
+        signal InBuf[4] { type: Real }
+        signal OutVal { type: Real }
+    ]
+    streams: [
+        InBuf[0] * 100.0 + InBuf[3] >> OutVal;
+    ]
+}
+
+AudioIn >> InBuffer;
+InBuffer.ready >> Edges(buffer: InBuffer) >> Result;

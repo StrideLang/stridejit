@@ -320,6 +320,31 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
       }
     }
 
+    // Buffers restart empty. Stored samples are left in place: a frame view
+    // only covers samples pushed since the reset.
+    for (const auto &bufferDomain : state.bufferDomains) {
+      if (bufferDomain.second != domainName) {
+        continue;
+      }
+      auto bufferDecl =
+          ASTQuery::findDeclarationByName(bufferDomain.first, scope, tree);
+      auto spec = BufferSpec::fromDeclaration(bufferDecl, tree);
+      for (const auto &name :
+           {spec.indexName(), spec.countName(), spec.sinceName()}) {
+        resetBody.push_back(std::make_unique<BinaryExprAST>(
+            '=', std::make_unique<VariableExprAST>(name),
+            std::make_unique<IntExprAST>(0, 32)));
+      }
+      resetBody.push_back(std::make_unique<BinaryExprAST>(
+          '=', std::make_unique<VariableExprAST>(spec.readyName()),
+          std::make_unique<BoolExprAST>(false)));
+      if (spec.hasTriggerBlock()) {
+        resetBody.push_back(std::make_unique<BinaryExprAST>(
+            '=', std::make_unique<VariableExprAST>(spec.flushName()),
+            std::make_unique<BoolExprAST>(false)));
+      }
+    }
+
     if (const auto *dynFields = state.findDynamicDomainFields(domainDecl)) {
       for (const auto &field : *dynFields) {
         if (field.name.rfind("__rate_phase_", 0) == 0 && field.type) {
@@ -1252,32 +1277,44 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
           assert(0 == 1);
         }
       } else if (decl->getEntityType() == "buffer") {
+        // Storage plus the private state BufferPushExprAST and
+        // BufferViewExprAST work on. See BufferSpec for the names.
+        auto spec = BufferSpec::fromDeclaration(decl, tree);
         generatedIRCode.GlobalSignals.push_back(decl);
 
-        auto indexDecl = std::make_shared<DeclarationNode>(
-            decl->getName() + "_index", "signal", nullptr,
-            decl->getFilename().c_str(), decl->getLine(), decl->getColumn());
-        indexDecl->addProperty(std::make_shared<PropertyNode>(
-            "type", std::make_shared<EntityNode>("Int", decl->getFilename().c_str(), decl->getLine(), decl->getColumn())));
-        indexDecl->addProperty(std::make_shared<PropertyNode>(
-            "default", std::make_shared<ValueNode>(int64_t(0), decl->getFilename().c_str(), decl->getLine(), decl->getColumn())));
-        generatedIRCode.GlobalSignals.push_back(indexDecl);
-
-        auto countDecl = std::make_shared<DeclarationNode>(
-            decl->getName() + "_count", "signal", nullptr,
-            decl->getFilename().c_str(), decl->getLine(), decl->getColumn());
-        countDecl->addProperty(std::make_shared<PropertyNode>(
-            "type", std::make_shared<EntityNode>("Int", decl->getFilename().c_str(), decl->getLine(), decl->getColumn())));
-        countDecl->addProperty(std::make_shared<PropertyNode>(
-            "default", std::make_shared<ValueNode>(int64_t(0), decl->getFilename().c_str(), decl->getLine(), decl->getColumn())));
-        generatedIRCode.GlobalSignals.push_back(countDecl);
-
-        auto readyDecl = std::make_shared<DeclarationNode>(
-            decl->getName() + "_ready", "switch", nullptr,
-            decl->getFilename().c_str(), decl->getLine(), decl->getColumn());
-        readyDecl->addProperty(std::make_shared<PropertyNode>(
-            "default", std::make_shared<ValueNode>(false, decl->getFilename().c_str(), decl->getLine(), decl->getColumn())));
-        generatedIRCode.GlobalSignals.push_back(readyDecl);
+        const std::string file = decl->getFilename();
+        auto makeState = [&](const std::string &name,
+                             const std::string &entityType,
+                             ASTNode defaultValue) {
+          auto stateDecl = std::make_shared<DeclarationNode>(
+              name, entityType, nullptr, file.c_str(), decl->getLine(),
+              decl->getColumn());
+          if (entityType == "signal") {
+            stateDecl->setPropertyValue(
+                "type", std::make_shared<EntityNode>("Int", file.c_str(),
+                                                     decl->getLine(),
+                                                     decl->getColumn()));
+          }
+          stateDecl->setPropertyValue(
+              entityType == "constant" ? "value" : "default", defaultValue);
+          generatedIRCode.GlobalSignals.push_back(stateDecl);
+        };
+        auto intValue = [&](int64_t v) {
+          return std::make_shared<ValueNode>(v, file.c_str(), decl->getLine(),
+                                             decl->getColumn());
+        };
+        auto offValue = [&]() {
+          return std::make_shared<ValueNode>(false, file.c_str(),
+                                             decl->getLine(), decl->getColumn());
+        };
+        makeState(spec.indexName(), "signal", intValue(0));
+        makeState(spec.countName(), "signal", intValue(0));
+        makeState(spec.sinceName(), "signal", intValue(0));
+        makeState(spec.readyName(), "switch", offValue());
+        if (spec.hasTriggerBlock()) {
+          makeState(spec.flushName(), "switch", offValue());
+        }
+        makeState(spec.sizeName(), "constant", intValue(spec.frameSize));
       } else if (decl->getEntityType() == "switch" ||
                  decl->getEntityType() == "trigger") {
         bool inDynamicDomain = false;
@@ -1597,13 +1634,18 @@ void StrideGenerator::collectInputArgs(
         for (const auto &prevType : prevTypes) {
           auto typeName = ASTQuery::getNodeName(prevType);
           LOG_DEBUG() << "prevType name is: " << typeName << std::endl;
-          if (state.typesMap.find(typeName) != state.typesMap.end()) {
+          if (!typeName.empty() &&
+              state.typesMap.find(typeName) != state.typesMap.end() &&
+              !state.typesMap[typeName]->isVoidTy()) {
             args.MainIn.argTypes.push_back(state.typesMap[typeName]);
             LOG_DEBUG() << "added type to argTypes, size is now "
                         << args.MainIn.argTypes.size() << std::endl;
+          } else if (prevType && prevType->getNodeType() == AST::MemberAccess) {
+            args.MainIn.argTypes.push_back(state.typesMap[DataTypes::Real]);
           } else {
             LOG_DEBUG() << "typeName " << typeName << " not found in typesMap!"
                         << std::endl;
+            args.MainIn.argTypes.push_back(state.typesMap[DataTypes::Real]);
           }
         }
       } else {
@@ -1628,7 +1670,23 @@ void StrideGenerator::collectPropertyArgs(
   if (funcInstance) {
     auto props = funcInstance->getProperties();
     for (const auto &propNode : props) {
-      args.Properties.args.emplace_back(createExpr(propNode->getValue()));
+      auto value = propNode->getValue();
+      if (value && value->getNodeType() == AST::Entity) {
+        auto valueDecl = ASTQuery::findDeclarationByName(
+            ASTQuery::getNodeName(value), scope, tree);
+        if (valueDecl && valueDecl->getEntityType() == "buffer") {
+          // Zero-copy: the reaction reads the current frame in place
+          auto spec = BufferSpec::fromDeclaration(valueDecl, tree);
+          args.Properties.args.emplace_back(
+              std::make_unique<BufferViewExprAST>(spec));
+          args.Properties.argTypes.push_back(
+              state.getLLVMType(valueDecl)->isArrayTy()
+                  ? state.getLLVMType(valueDecl)->getArrayElementType()
+                  : state.getLLVMType(valueDecl));
+          continue;
+        }
+      }
+      args.Properties.args.emplace_back(createExpr(value));
       // FIXME set correct type
       args.Properties.argTypes.push_back(
           llvm::Type::getDoubleTy(*state.TheContext));
@@ -1652,8 +1710,10 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       isLeftSwitch = true;
     } else if (leftNode->getNodeType() == AST::MemberAccess) {
       auto pp = std::static_pointer_cast<MemberAccessNode>(leftNode);
-      if (pp->getProperty() == "ready" || pp->getProperty() == "halfReady" ||
-          pp->getProperty() == "full" || pp->getProperty() == "empty") {
+      auto entityDecl =
+          ASTQuery::findDeclarationByName(pp->getEntity(), scope, tree);
+      if (entityDecl && entityDecl->getEntityType() == "buffer" &&
+          pp->getPropertyName() == "ready") {
         isLeftSwitch = true;
       }
     } else {
@@ -1946,8 +2006,10 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         }
         // Connect to previous stream node
         if (decl && decl->getEntityType() == "buffer") {
+          state.bufferDomains[decl->getName()] = domainName;
           generated[domainName].expr.back() = std::make_unique<BufferPushExprAST>(
-              decl, std::move(generated[domainName].expr.back()));
+              BufferSpec::fromDeclaration(decl, tree),
+              std::move(generated[domainName].expr.back()));
         } else {
           generated[domainName].expr.back() = std::make_unique<BinaryExprAST>(
               '=', std::move(entityExpr),
@@ -2479,7 +2541,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         } else if (leftNode) {
           if (leftNode->getNodeType() == AST::MemberAccess) {
             auto pp = std::static_pointer_cast<MemberAccessNode>(leftNode);
-            condName = pp->getEntity() + "_" + pp->getProperty();
+            condName = pp->getEntity() + "_" + pp->getPropertyName();
           }
           condExpr = createExpr(leftNode);
         }

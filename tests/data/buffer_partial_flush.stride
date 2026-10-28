@@ -1,0 +1,46 @@
+# A switch registered as the buffer trigger flushes a partial frame
+_domainDefinition BufferDom {
+    framework: _JitFramework
+    rate: -1
+    inputs: [
+        switch FlushIn { domain: BufferDom default: off }
+        signal AudioIn { domain: BufferDom type: Real }
+    ]
+    outputs: [
+        signal Result { domain: BufferDom type: Real }
+        signal Count { domain: BufferDom type: Int }
+    ]
+    domainFunctionCode: ''
+}
+
+constant FrameLength { value: 4 }
+
+buffer InBuffer {
+    type: Real
+    capacity: FrameLength
+    triggerMode: Buffer::TriggerFull
+    trigger: Flush
+}
+
+switch Flush { default: off }
+
+# Reads the frame in order: first sample * 100 + third sample
+reaction Edges {
+    ports: [
+        propertyInputPort InBufPort { name: "buffer" block: InBuf }
+        mainOutputPort OutPort { block: OutVal }
+    ]
+    blocks: [
+        signal InBuf[4] { type: Real }
+        signal OutVal { type: Real }
+    ]
+    streams: [
+        InBuf[0] * 100.0 + InBuf[2] >> OutVal;
+    ]
+}
+
+# The trigger is sampled when the sample is pushed, so set it first
+FlushIn >> Flush;
+AudioIn >> InBuffer;
+InBuffer.count >> Count;
+InBuffer.ready >> Edges(buffer: InBuffer) >> Result;

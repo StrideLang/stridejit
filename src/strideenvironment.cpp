@@ -15,6 +15,7 @@
 #include "stride/utils/astquery.h"
 
 // stridejit
+#include "stride/stridejit/bufferspec.hpp"
 #include "stride/stridejit/statemachine.hpp"
 #include "stride/stridejit/strideenvironment.hpp"
 #include "stride/stridejit/stridegenerator.hpp"
@@ -153,14 +154,46 @@ static bool validateDataTypes(std::shared_ptr<DeclarationNode> decl,
   return valid;
 }
 
+// User code may only read the public buffer properties (BufferSpec).
+static bool validateBufferAccess(ASTNode node, ASTNode tree) {
+  bool valid = true;
+  if (node->getNodeType() == AST::MemberAccess) {
+    auto access = std::static_pointer_cast<MemberAccessNode>(node);
+    auto decl = ASTQuery::findDeclarationByName(access->getEntity(), {}, tree);
+    if (decl && decl->getEntityType() == "buffer" &&
+        !BufferSpec::isPublicProperty(access->getPropertyName())) {
+      LOG_ERROR() << node->getFilename() << ":" << node->getLine()
+                  << " buffer '" << access->getEntity() << "' has no property '"
+                  << access->getPropertyName()
+                  << "'. Use ready, size or count" << std::endl;
+      valid = false;
+    }
+  }
+  for (const auto &child : node->getChildren()) {
+    if (child) {
+      valid &= validateBufferAccess(child, tree);
+    }
+  }
+  return valid;
+}
+
 static bool validateDataTypes(ASTNode tree) {
   std::set<const void *> visited;
   bool valid = true;
   for (const auto &child : tree->getChildren()) {
     if (child->getNodeType() == AST::Declaration ||
         child->getNodeType() == AST::ArrayDeclaration) {
-      valid &= validateDataTypes(
-          std::static_pointer_cast<DeclarationNode>(child), tree, visited);
+      auto decl = std::static_pointer_cast<DeclarationNode>(child);
+      valid &= validateDataTypes(decl, tree, visited);
+      if (decl->getEntityType() == "buffer") {
+        auto spec = BufferSpec::fromDeclaration(decl, tree);
+        for (const auto &error : spec.errors) {
+          LOG_ERROR() << error << std::endl;
+        }
+        valid &= spec.valid();
+      }
+    } else if (child->getNodeType() == AST::Stream) {
+      valid &= validateBufferAccess(child, tree);
     }
   }
   return valid;

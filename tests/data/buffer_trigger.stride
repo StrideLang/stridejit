@@ -1,5 +1,6 @@
 # Test Buffer triggering a reaction on full capacity
 _domainDefinition BufferDom {
+    framework: _JitFramework
     rate: -1
     inputs: [
         signal AudioIn { domain: BufferDom type: Real }

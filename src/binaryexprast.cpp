@@ -1178,36 +1178,60 @@ bool UpsampleExprAST::writesTo(const std::string &varName) const {
   return false;
 }
 
-BufferPushExprAST::BufferPushExprAST(std::shared_ptr<DeclarationNode> bufferDecl,
-                                     std::unique_ptr<ExprAST> valueExpr)
-    : BufferDecl(bufferDecl), ValueExpr(std::move(valueExpr)) {
-  if (BufferDecl) {
-    BufferName = BufferDecl->getName();
-    auto capProp = BufferDecl->getPropertyValue("capacity");
-    if (capProp && capProp->getNodeType() == AST::Int) {
-      Capacity = static_cast<int>(std::static_pointer_cast<ValueNode>(capProp)->getIntValue());
+namespace {
+
+// Buffer state lives in globals (root buffers) or in the current function's
+// named values.
+llvm::Value *findBufferState(StrideCompiler &state, const std::string &name,
+                             llvm::Type **type = nullptr) {
+  auto it = state.NamedValues.find(name);
+  if (it != state.NamedValues.end()) {
+    if (type) {
+      *type = it->second.second.value_or(nullptr);
     }
-    auto hopProp = BufferDecl->getPropertyValue("hop");
-    if (hopProp && hopProp->getNodeType() == AST::Int) {
-      Hop = static_cast<int>(std::static_pointer_cast<ValueNode>(hopProp)->getIntValue());
-    } else {
-      Hop = Capacity;
-    }
-    auto trigProp = BufferDecl->getPropertyValue("triggerMode");
-    if (trigProp) {
-      TriggerMode = ASTQuery::getNodeName(trigProp);
-    }
+    return it->second.first;
   }
+  if (state.globalExists(name)) {
+    auto global = state.getGlobal(name);
+    if (type) {
+      *type = global.second.value_or(nullptr);
+    }
+    return global.first;
+  }
+  return nullptr;
 }
+
+bool reportBufferErrors(StrideCompiler &state, const BufferSpec &spec) {
+  for (const auto &error : spec.errors) {
+    state.LogError(error.c_str());
+  }
+  return spec.valid();
+}
+
+} // namespace
+
+BufferPushExprAST::BufferPushExprAST(BufferSpec spec,
+                                     std::unique_ptr<ExprAST> valueExpr)
+    : Spec(std::move(spec)), ValueExpr(std::move(valueExpr)) {}
 
 bool BufferPushExprAST::writesTo(const std::string &varName) const {
-  return varName == BufferName || varName == (BufferName + "_ready") ||
-         varName == (BufferName + "_index") || varName == (BufferName + "_count");
+  return varName == Spec.name || varName == Spec.readyName() ||
+         varName == Spec.indexName() || varName == Spec.countName() ||
+         varName == Spec.sinceName() ||
+         (Spec.hasTriggerBlock() && varName == Spec.flushName());
 }
 
+// Per pushed sample:
+//   if flush pending: index = count = since = 0      (trigger block only)
+//   store X at [index] (and at [index + capacity] when mirrored)
+//   index = (index + 1) wrapped, count = min(count + 1, capacity), since += 1
+//   ready = (count >= frameSize && since >= hop) || trigger
+//   since = ready ? 0 : since;  flush pending = trigger
+// The flush is deferred to the next push so the reaction that runs in this
+// tick still reads the partial frame.
 std::pair<llvm::Value *, std::optional<llvm::Type *>>
 BufferPushExprAST::codegen(StrideCompiler &state) {
-  if (!ValueExpr) {
+  if (!ValueExpr || !reportBufferErrors(state, Spec)) {
     return {nullptr, std::nullopt};
   }
   auto [val, valType] = ValueExpr->codegen(state);
@@ -1215,118 +1239,157 @@ BufferPushExprAST::codegen(StrideCompiler &state) {
     return {nullptr, std::nullopt};
   }
 
-  std::string dataName = BufferName;
-  std::string indexName = BufferName + "_index";
-  std::string countName = BufferName + "_count";
-  std::string readyName = BufferName + "_ready";
-
-  llvm::Value *bufPtr = nullptr;
-  llvm::Type *bufElemType = nullptr;
-  if (state.NamedValues.find(dataName) != state.NamedValues.end()) {
-    bufPtr = state.NamedValues[dataName].first;
-    bufElemType = state.NamedValues[dataName].second.value_or(nullptr);
-  } else if (state.globalExists(dataName)) {
-    auto global = state.getGlobal(dataName);
-    bufPtr = global.first;
-    bufElemType = global.second;
+  llvm::Type *bufType = nullptr;
+  llvm::Value *bufPtr = findBufferState(state, Spec.name, &bufType);
+  llvm::Value *indexPtr = findBufferState(state, Spec.indexName());
+  llvm::Value *countPtr = findBufferState(state, Spec.countName());
+  llvm::Value *sincePtr = findBufferState(state, Spec.sinceName());
+  llvm::Value *readyPtr = findBufferState(state, Spec.readyName());
+  if (!bufPtr || !bufType || !bufType->isArrayTy() || !indexPtr ||
+      !countPtr || !sincePtr || !readyPtr) {
+    return {state.LogErrorV(("Missing storage for buffer: " + Spec.name).c_str()),
+            std::nullopt};
   }
-  if (!bufPtr) {
-    return {state.LogErrorV(("Unknown buffer: " + BufferName).c_str()), std::nullopt};
-  }
-
-  llvm::Value *indexPtr = nullptr;
-  if (state.NamedValues.find(indexName) != state.NamedValues.end()) {
-    indexPtr = state.NamedValues[indexName].first;
-  } else if (state.globalExists(indexName)) {
-    indexPtr = state.getGlobal(indexName).first;
-  }
-
-  llvm::Value *countPtr = nullptr;
-  if (state.NamedValues.find(countName) != state.NamedValues.end()) {
-    countPtr = state.NamedValues[countName].first;
-  } else if (state.globalExists(countName)) {
-    countPtr = state.getGlobal(countName).first;
+  llvm::Value *flushPtr = nullptr;
+  llvm::Value *triggerPtr = nullptr;
+  llvm::Type *triggerType = nullptr;
+  if (Spec.hasTriggerBlock()) {
+    flushPtr = findBufferState(state, Spec.flushName());
+    triggerPtr = findBufferState(state, Spec.triggerBlock, &triggerType);
+    if (!flushPtr || !triggerPtr) {
+      return {state.LogErrorV(("Unknown trigger '" + Spec.triggerBlock +
+                               "' for buffer: " + Spec.name)
+                                  .c_str()),
+              std::nullopt};
+    }
   }
 
-  llvm::Value *readyPtr = nullptr;
-  if (state.NamedValues.find(readyName) != state.NamedValues.end()) {
-    readyPtr = state.NamedValues[readyName].first;
-  } else if (state.globalExists(readyName)) {
-    readyPtr = state.getGlobal(readyName).first;
-  }
-
+  auto &B = *state.Builder;
+  llvm::Type *i1Ty = llvm::Type::getInt1Ty(*state.TheContext);
   llvm::Type *i32Ty = llvm::Type::getInt32Ty(*state.TheContext);
+  auto i32 = [&](int v) { return llvm::ConstantInt::get(i32Ty, v); };
 
+  llvm::Type *elemTy = bufType->getArrayElementType();
   if (val->getType()->isPointerTy()) {
-    llvm::Type *elemTy = valType.has_value() ? valType.value() : llvm::Type::getDoubleTy(*state.TheContext);
-    val = state.Builder->CreateLoad(elemTy, val, "buf_val");
+    llvm::Type *loadTy = valType.has_value() && valType.value()
+                             ? valType.value()
+                             : elemTy;
+    val = B.CreateLoad(loadTy, val, "buf_val");
   }
-
-  llvm::Value *curIdx = nullptr;
-  if (indexPtr) {
-    curIdx = state.Builder->CreateLoad(i32Ty, indexPtr, "buf_idx");
-  } else {
-    curIdx = llvm::ConstantInt::get(i32Ty, 0);
-  }
-
-  llvm::Type *scalarElemTy = bufElemType;
-  if (scalarElemTy && scalarElemTy->isArrayTy()) {
-    scalarElemTy = scalarElemTy->getArrayElementType();
-  }
-  if (!scalarElemTy) {
-    scalarElemTy = val->getType();
-  }
-
-  if (val->getType() != scalarElemTy) {
-    if (scalarElemTy->isFloatingPointTy() && val->getType()->isIntegerTy()) {
-      val = state.Builder->CreateSIToFP(val, scalarElemTy, "val_fp");
-    } else if (scalarElemTy->isIntegerTy() && val->getType()->isFloatingPointTy()) {
-      val = state.Builder->CreateFPToSI(val, scalarElemTy, "val_int");
+  if (val->getType() != elemTy) {
+    if (elemTy->isFloatingPointTy() && val->getType()->isIntegerTy()) {
+      val = B.CreateSIToFP(val, elemTy, "val_fp");
+    } else if (elemTy->isIntegerTy() && val->getType()->isFloatingPointTy()) {
+      val = B.CreateFPToSI(val, elemTy, "val_int");
+    } else if (elemTy->isFloatingPointTy() &&
+               val->getType()->isFloatingPointTy()) {
+      val = B.CreateFPCast(val, elemTy, "val_fpcast");
+    } else if (elemTy->isIntegerTy() && val->getType()->isIntegerTy()) {
+      val = B.CreateIntCast(val, elemTy, true, "val_intcast");
     }
   }
 
-  llvm::Value *elemPtr = nullptr;
-  if (bufElemType && bufElemType->isArrayTy()) {
-    elemPtr = state.Builder->CreateInBoundsGEP(
-        bufElemType, bufPtr, {llvm::ConstantInt::get(i32Ty, 0), curIdx}, "buf_elem");
-  } else {
-    elemPtr = state.Builder->CreateInBoundsGEP(scalarElemTy, bufPtr, curIdx, "buf_elem");
-  }
-  state.Builder->CreateStore(val, elemPtr);
-
-  if (indexPtr && Capacity > 0) {
-    llvm::Value *nextIdx = state.Builder->CreateAdd(curIdx, llvm::ConstantInt::get(i32Ty, 1), "next_idx");
-    nextIdx = state.Builder->CreateURem(nextIdx, llvm::ConstantInt::get(i32Ty, Capacity), "wrapped_idx");
-    state.Builder->CreateStore(nextIdx, indexPtr);
+  llvm::Value *index = B.CreateLoad(i32Ty, indexPtr, "buf_idx");
+  llvm::Value *count = B.CreateLoad(i32Ty, countPtr, "buf_cnt");
+  llvm::Value *since = B.CreateLoad(i32Ty, sincePtr, "buf_since");
+  if (flushPtr) {
+    llvm::Value *flush = B.CreateLoad(i1Ty, flushPtr, "buf_flush");
+    index = B.CreateSelect(flush, i32(0), index, "buf_idx");
+    count = B.CreateSelect(flush, i32(0), count, "buf_cnt");
+    since = B.CreateSelect(flush, i32(0), since, "buf_since");
   }
 
-  if (countPtr && Capacity > 0) {
-    llvm::Value *curCount = state.Builder->CreateLoad(i32Ty, countPtr, "buf_cnt");
-    llvm::Value *newCount = state.Builder->CreateAdd(curCount, llvm::ConstantInt::get(i32Ty, 1), "inc_cnt");
-    llvm::Value *isAtCap = state.Builder->CreateICmpSGE(newCount, llvm::ConstantInt::get(i32Ty, Capacity), "is_at_cap");
-    newCount = state.Builder->CreateSelect(isAtCap, llvm::ConstantInt::get(i32Ty, Capacity), newCount, "capped_cnt");
-    state.Builder->CreateStore(newCount, countPtr);
+  auto storeAt = [&](llvm::Value *slot) {
+    llvm::Value *elemPtr =
+        B.CreateInBoundsGEP(bufType, bufPtr, {i32(0), slot}, "buf_elem");
+    B.CreateStore(val, elemPtr);
+  };
+  storeAt(index);
+  if (Spec.mirrored) {
+    storeAt(B.CreateAdd(index, i32(Spec.capacity), "buf_mirror_idx"));
   }
 
-  if (readyPtr && Capacity > 0) {
-    llvm::Value *readyCond = nullptr;
-    if (TriggerMode.find("Half") != std::string::npos) {
-      int halfCap = Capacity / 2;
-      llvm::Value *isHalf = state.Builder->CreateICmpEQ(curIdx, llvm::ConstantInt::get(i32Ty, halfCap - 1), "is_half");
-      llvm::Value *isFull = state.Builder->CreateICmpEQ(curIdx, llvm::ConstantInt::get(i32Ty, Capacity - 1), "is_full");
-      readyCond = state.Builder->CreateOr(isHalf, isFull, "half_or_full");
-    } else if (TriggerMode.find("Quarter") != std::string::npos) {
-      int qCap = std::max(1, Capacity / 4);
-      llvm::Value *rem = state.Builder->CreateURem(curIdx, llvm::ConstantInt::get(i32Ty, qCap), "q_rem");
-      readyCond = state.Builder->CreateICmpEQ(rem, llvm::ConstantInt::get(i32Ty, qCap - 1), "is_q");
-    } else if (TriggerMode.find("Periodic") != std::string::npos && Hop > 0) {
-      llvm::Value *rem = state.Builder->CreateURem(curIdx, llvm::ConstantInt::get(i32Ty, Hop), "hop_rem");
-      readyCond = state.Builder->CreateICmpEQ(rem, llvm::ConstantInt::get(i32Ty, Hop - 1), "is_hop");
-    } else {
-      readyCond = state.Builder->CreateICmpEQ(curIdx, llvm::ConstantInt::get(i32Ty, Capacity - 1), "is_full");
+  llvm::Value *nextIndex = B.CreateAdd(index, i32(1), "next_idx");
+  nextIndex = B.CreateSelect(B.CreateICmpEQ(nextIndex, i32(Spec.capacity)),
+                             i32(0), nextIndex, "wrapped_idx");
+  B.CreateStore(nextIndex, indexPtr);
+
+  count = B.CreateAdd(count, i32(1), "inc_cnt");
+  count = B.CreateSelect(B.CreateICmpUGT(count, i32(Spec.capacity)),
+                         i32(Spec.capacity), count, "capped_cnt");
+  B.CreateStore(count, countPtr);
+
+  since = B.CreateAdd(since, i32(1), "inc_since");
+  llvm::Value *ready = B.CreateAnd(
+      B.CreateICmpUGE(count, i32(Spec.frameSize), "has_frame"),
+      B.CreateICmpUGE(since, i32(Spec.hop), "hop_done"), "frame_ready");
+  if (triggerPtr) {
+    if (!triggerType || triggerType->isArrayTy()) {
+      triggerType = i1Ty;
     }
-    state.Builder->CreateStore(readyCond, readyPtr);
+    llvm::Value *trigger = B.CreateLoad(triggerType, triggerPtr, "buf_trig");
+    if (!trigger->getType()->isIntegerTy(1)) {
+      trigger = trigger->getType()->isFloatingPointTy()
+                    ? B.CreateFCmpONE(
+                          trigger, llvm::ConstantFP::get(trigger->getType(), 0.0))
+                    : B.CreateICmpNE(
+                          trigger, llvm::ConstantInt::get(trigger->getType(), 0));
+    }
+    ready = B.CreateOr(ready, trigger, "frame_ready");
+    B.CreateStore(trigger, flushPtr);
+  }
+  since = B.CreateSelect(ready, i32(0), since, "next_since");
+  B.CreateStore(since, sincePtr);
+  B.CreateStore(ready, readyPtr);
+
+  return {val, elemTy};
+}
+
+BufferViewExprAST::BufferViewExprAST(BufferSpec spec) : Spec(std::move(spec)) {}
+
+// The frame holds min(count, frameSize) valid samples starting at element 0.
+// Mirrored: the newest n samples are contiguous at [index + capacity - n].
+// Not mirrored (frameSize == hop, hop divides capacity): the frame is the
+// last completed hop-aligned block, which is also what a DMA ping-pong
+// consumer reads while the other half is being written.
+std::pair<llvm::Value *, std::optional<llvm::Type *>>
+BufferViewExprAST::codegen(StrideCompiler &state) {
+  if (!reportBufferErrors(state, Spec)) {
+    return {nullptr, std::nullopt};
+  }
+  llvm::Type *bufType = nullptr;
+  llvm::Value *bufPtr = findBufferState(state, Spec.name, &bufType);
+  llvm::Value *indexPtr = findBufferState(state, Spec.indexName());
+  llvm::Value *countPtr = findBufferState(state, Spec.countName());
+  if (!bufPtr || !bufType || !bufType->isArrayTy() || !indexPtr ||
+      !countPtr) {
+    return {state.LogErrorV(("Missing storage for buffer: " + Spec.name).c_str()),
+            std::nullopt};
   }
 
-  return {val, scalarElemTy};
+  auto &B = *state.Builder;
+  llvm::Type *i32Ty = llvm::Type::getInt32Ty(*state.TheContext);
+  auto i32 = [&](int v) { return llvm::ConstantInt::get(i32Ty, v); };
+
+  llvm::Value *index = B.CreateLoad(i32Ty, indexPtr, "view_idx");
+  llvm::Value *count = B.CreateLoad(i32Ty, countPtr, "view_cnt");
+  llvm::Value *partial = B.CreateICmpULT(count, i32(Spec.frameSize), "partial");
+  llvm::Value *start = nullptr;
+  if (Spec.mirrored) {
+    llvm::Value *n =
+        B.CreateSelect(partial, count, i32(Spec.frameSize), "view_len");
+    start = B.CreateSub(B.CreateAdd(index, i32(Spec.capacity)), n,
+                        "view_start");
+  } else {
+    llvm::Value *blockEnd = B.CreateMul(
+        B.CreateUDiv(index, i32(Spec.hop)), i32(Spec.hop), "block_end");
+    start = B.CreateAdd(blockEnd, i32(Spec.capacity - Spec.frameSize));
+    start = B.CreateSelect(B.CreateICmpUGE(start, i32(Spec.capacity)),
+                           B.CreateSub(start, i32(Spec.capacity)), start);
+    // A partial frame was written from 0 since the last flush.
+    start = B.CreateSelect(partial, i32(0), start, "view_start");
+  }
+  llvm::Value *viewPtr =
+      B.CreateInBoundsGEP(bufType, bufPtr, {i32(0), start}, "buf_view");
+  return {viewPtr, bufType->getArrayElementType()};
 }

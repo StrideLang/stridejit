@@ -1,0 +1,42 @@
+# Periodic trigger with a hop that does not divide the capacity (6 % 4 != 0)
+_domainDefinition BufferDom {
+    framework: _JitFramework
+    rate: -1
+    inputs: [
+
+        signal AudioIn { domain: BufferDom type: Real }
+    ]
+    outputs: [
+        signal Result { domain: BufferDom type: Real }
+
+    ]
+    domainFunctionCode: ''
+}
+
+constant FrameLength { value: 4 }
+
+buffer InBuffer {
+    type: Real
+    capacity: 6
+    frameSize: FrameLength
+    hop: FrameLength
+    triggerMode: Buffer::TriggerPeriodic
+}
+
+# Reads the frame in order: first sample * 100 + last sample
+reaction Edges {
+    ports: [
+        propertyInputPort InBufPort { name: "buffer" block: InBuf }
+        mainOutputPort OutPort { block: OutVal }
+    ]
+    blocks: [
+        signal InBuf[4] { type: Real }
+        signal OutVal { type: Real }
+    ]
+    streams: [
+        InBuf[0] * 100.0 + InBuf[3] >> OutVal;
+    ]
+}
+
+AudioIn >> InBuffer;
+InBuffer.ready >> Edges(buffer: InBuffer) >> Result;

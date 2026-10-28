@@ -297,6 +297,8 @@ public:
     llvm::Constant *defaultVal;
   };
   std::map<ASTNode, std::vector<DynamicDomainField>> dynamicDomainFields;
+  // Domain whose streams push into each buffer. Its _init resets the buffer.
+  std::map<std::string, std::string> bufferDomains;
   void addDynamicDomainField(ASTNode domainNode, const std::string &name,
                              llvm::Type *type, llvm::Constant *defaultVal);
 

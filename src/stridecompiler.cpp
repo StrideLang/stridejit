@@ -5,6 +5,7 @@
 #include "stride/parser/arraynode.h"
 #include "stride/parser/entitynode.h"
 #include "stride/parser/memberaccessnode.h"
+#include "stride/stridejit/bufferspec.hpp"
 #include "stride/stridejit/stridecompiler.hpp"
 #include "stride/utils/astquery.h"
 
@@ -370,10 +371,9 @@ void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
       globalDecl->getEntityType() == "buffer") {
     int size = 0;
     if (globalDecl->getEntityType() == "buffer") {
-      auto capProp = globalDecl->getPropertyValue("capacity");
-      if (capProp && capProp->getNodeType() == AST::Int) {
-        size = static_cast<int>(std::static_pointer_cast<ValueNode>(capProp)->getIntValue());
-      }
+      // getLLVMType already sized the storage
+      size = Type->isArrayTy() ? static_cast<int>(Type->getArrayNumElements())
+                               : 0;
     } else {
       size = ASTQuery::getEntityDeclaredSize(globalDecl, {}, nullptr);
     }
@@ -544,6 +544,8 @@ StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl) {
     if (typePropNode->getNodeType() == strd::AST::Entity) {
       type =
           std::static_pointer_cast<strd::EntityNode>(typePropNode)->getName();
+    } else if (typePropNode->getNodeType() == strd::AST::MemberAccess) {
+      type = DataTypes::Real;
     } else {
       LOG_INFO() << " : unsupported type" << std::endl;
     }
@@ -552,17 +554,13 @@ StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl) {
     return typesMap[DataTypes::Switch];
   }
   if (decl->getEntityType() == "buffer") {
-    int capacity = 0;
-    auto capProp = decl->getPropertyValue("capacity");
-    if (capProp && capProp->getNodeType() == strd::AST::Int) {
-      capacity = static_cast<int>(std::static_pointer_cast<strd::ValueNode>(capProp)->getIntValue());
-    }
+    auto spec = BufferSpec::fromDeclaration(decl, m_tree);
     llvm::Type *elemTy = (!type.empty() && typesMap.find(type) != typesMap.end() &&
                           !typesMap[type]->isVoidTy())
                              ? typesMap[type]
                              : typesMap[DataTypes::Real];
-    if (capacity > 0) {
-      return llvm::ArrayType::get(elemTy, capacity);
+    if (spec.valid()) {
+      return llvm::ArrayType::get(elemTy, spec.storageSize());
     }
     return elemTy;
   }
