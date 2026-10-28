@@ -41,7 +41,7 @@ struct BufferSpec {
 
   std::string name;
   int capacity{0};
-  // Readable window N
+  // Readable window N, public as `Buf.frameSize`
   int frameSize{0};
   // Samples between two built-in triggers (H)
   int hop{0};
@@ -68,9 +68,10 @@ struct BufferSpec {
   std::string sinceName() const { return name + "_since"; }
   std::string flushName() const { return name + "_flush"; }
   std::string readyName() const { return name + "_ready"; }
-  std::string sizeName() const { return name + "_size"; }
+  std::string frameSizeName() const { return name + "_frameSize"; }
 
-  // Properties user code may read (`Buf.ready`, `Buf.size`, `Buf.count`)
+  // Properties user code may read (`Buf.ready`, `Buf.count`,
+  // `Buf.frameSize`)
   static bool isPublicProperty(const std::string &property);
 };
 

@@ -165,7 +165,7 @@ static bool validateBufferAccess(ASTNode node, ASTNode tree) {
       LOG_ERROR() << node->getFilename() << ":" << node->getLine()
                   << " buffer '" << access->getEntity() << "' has no property '"
                   << access->getPropertyName()
-                  << "'. Use ready, size or count" << std::endl;
+                  << "'. Use ready, count or frameSize" << std::endl;
       valid = false;
     }
   }

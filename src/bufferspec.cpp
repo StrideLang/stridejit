@@ -43,15 +43,20 @@ BufferSpec BufferSpec::fromDeclaration(std::shared_ptr<DeclarationNode> decl,
   auto error = [&](const std::string &text) {
     spec.errors.push_back(where + text);
   };
-  auto evalInt = [&](const std::string &property, int &out) {
-    auto node = decl->getPropertyValue(property);
-    if (!node || node->getNodeType() == AST::None) {
+  // Schema defaults fill unset properties with `none`
+  auto property = [&](const std::string &name) -> ASTNode {
+    auto node = decl->getPropertyValue(name);
+    return node && node->getNodeType() != AST::None ? node : nullptr;
+  };
+  auto evalInt = [&](const std::string &name, int &out) {
+    auto node = property(name);
+    if (!node) {
       return false;
     }
     std::vector<LangError> errors;
     auto value = ASTFunctions::evaluateConstInteger(node, {}, tree, &errors);
     if (!errors.empty()) {
-      error("'" + property + "' must be a constant integer expression");
+      error("'" + name + "' must be a constant integer expression");
       return false;
     }
     out = static_cast<int>(value);
@@ -59,7 +64,7 @@ BufferSpec BufferSpec::fromDeclaration(std::shared_ptr<DeclarationNode> decl,
   };
 
   if (!evalInt("capacity", spec.capacity)) {
-    if (!decl->getPropertyValue("capacity")) {
+    if (!property("capacity")) {
       error("'capacity' is required");
     }
     return spec;
@@ -69,7 +74,7 @@ BufferSpec BufferSpec::fromDeclaration(std::shared_ptr<DeclarationNode> decl,
     return spec;
   }
 
-  if (auto modeNode = decl->getPropertyValue("mode")) {
+  if (auto modeNode = property("mode")) {
     int mode = resolveBufferConstant(
         modeNode,
         {"ModeSliding", "ModeFifo", "ModeOverlapAdd", "ModePingPong"});
@@ -88,7 +93,7 @@ BufferSpec BufferSpec::fromDeclaration(std::shared_ptr<DeclarationNode> decl,
 
   int hopProperty = 0;
   bool hasHop = evalInt("hop", hopProperty);
-  if (auto triggerNode = decl->getPropertyValue("triggerMode")) {
+  if (auto triggerNode = property("triggerMode")) {
     int trigger = resolveBufferConstant(
         triggerNode,
         {"TriggerFull", "TriggerHalf", "TriggerQuarter", "TriggerPeriodic"});
@@ -146,7 +151,7 @@ BufferSpec BufferSpec::fromDeclaration(std::shared_ptr<DeclarationNode> decl,
           "Buffer::TriggerHalf");
   }
 
-  if (auto triggerBlock = decl->getPropertyValue("trigger")) {
+  if (auto triggerBlock = property("trigger")) {
     if (triggerBlock->getNodeType() != AST::Entity) {
       error("'trigger' must name a switch");
     } else {
@@ -170,7 +175,8 @@ BufferSpec BufferSpec::fromDeclaration(std::shared_ptr<DeclarationNode> decl,
 }
 
 bool BufferSpec::isPublicProperty(const std::string &property) {
-  return property == "ready" || property == "size" || property == "count";
+  return property == "ready" || property == "count" ||
+         property == "frameSize";
 }
 
 } // namespace strd

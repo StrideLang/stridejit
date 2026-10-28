@@ -1225,7 +1225,8 @@ bool BufferPushExprAST::writesTo(const std::string &varName) const {
 //   if flush pending: index = count = since = 0      (trigger block only)
 //   store X at [index] (and at [index + capacity] when mirrored)
 //   index = (index + 1) wrapped, count = min(count + 1, capacity), since += 1
-//   ready = (count >= frameSize && since >= hop) || trigger
+//   ready |= (count >= frameSize && since >= hop) || trigger  (a trigger,
+//            turned off at the end of the domain tick)
 //   since = ready ? 0 : since;  flush pending = trigger
 // The flush is deferred to the next push so the reaction that runs in this
 // tick still reads the partial frame.
@@ -1340,7 +1341,10 @@ BufferPushExprAST::codegen(StrideCompiler &state) {
   }
   since = B.CreateSelect(ready, i32(0), since, "next_since");
   B.CreateStore(since, sincePtr);
-  B.CreateStore(ready, readyPtr);
+  // `ready` is a trigger: it turns off at the end of the domain tick, so
+  // further pushes in the same tick must not clear it.
+  B.CreateStore(B.CreateOr(B.CreateLoad(i1Ty, readyPtr, "was_ready"), ready),
+                readyPtr);
 
   return {val, elemTy};
 }

@@ -229,6 +229,38 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
       }
     }
 
+    // A trigger is a switch that turns off at the end of its domain's
+    // processing, so it is on for exactly the tick that set it. Switches
+    // written into triggers just pass their value.
+    std::vector<std::string> domainTriggers;
+    for (const auto &node : tree->getChildren()) {
+      if (node->getNodeType() != AST::Declaration) {
+        continue;
+      }
+      auto decl = std::static_pointer_cast<DeclarationNode>(node);
+      if (decl->getEntityType() != "trigger") {
+        continue;
+      }
+      auto domainProp = decl->getPropertyValue("domain");
+      if (!domainProp || (domainProp->getNodeType() == AST::Entity &&
+                          ASTQuery::getNodeName(domainProp) == domainName)) {
+        domainTriggers.push_back(decl->getName());
+      }
+    }
+    for (const auto &bufferDomain : state.bufferDomains) {
+      if (bufferDomain.second == domainName) {
+        auto bufferDecl =
+            ASTQuery::findDeclarationByName(bufferDomain.first, scope, tree);
+        domainTriggers.push_back(
+            BufferSpec::fromDeclaration(bufferDecl, tree).readyName());
+      }
+    }
+    for (const auto &triggerName : domainTriggers) {
+      it->second.push_back(std::make_unique<BinaryExprAST>(
+          '=', std::make_unique<VariableExprAST>(triggerName),
+          std::make_unique<BoolExprAST>(false)));
+    }
+
     bool domainNeedsState = state.doesDomainNeedState(domainDecl);
 
     std::vector<PrototypeArg> internalArgs;
@@ -1310,11 +1342,11 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
         makeState(spec.indexName(), "signal", intValue(0));
         makeState(spec.countName(), "signal", intValue(0));
         makeState(spec.sinceName(), "signal", intValue(0));
-        makeState(spec.readyName(), "switch", offValue());
+        makeState(spec.readyName(), "trigger", offValue());
         if (spec.hasTriggerBlock()) {
           makeState(spec.flushName(), "switch", offValue());
         }
-        makeState(spec.sizeName(), "constant", intValue(spec.frameSize));
+        makeState(spec.frameSizeName(), "constant", intValue(spec.frameSize));
       } else if (decl->getEntityType() == "switch" ||
                  decl->getEntityType() == "trigger") {
         bool inDynamicDomain = false;
