@@ -1,0 +1,14 @@
+# Stride Buffer Package Definitions
+package Buffer
+
+# Operational Modes
+constant ModeSliding    { }
+constant ModeFifo       { }
+constant ModeOverlapAdd { }
+constant ModePingPong   { }
+
+# Trigger Modes
+constant TriggerFull     { }
+constant TriggerHalf     { }
+constant TriggerQuarter  { }
+constant TriggerPeriodic { }

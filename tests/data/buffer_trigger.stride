@@ -1,0 +1,34 @@
+# Test Buffer triggering a reaction on full capacity
+_domainDefinition BufferDom {
+    rate: -1
+    inputs: [
+        signal AudioIn { domain: BufferDom type: Real }
+    ]
+    outputs: [
+        signal Result { domain: BufferDom type: Real }
+    ]
+    domainFunctionCode: ''
+}
+
+buffer InBuffer {
+    type: Real
+    capacity: 4
+    triggerMode: Buffer::TriggerFull
+}
+
+reaction IncrementReaction {
+    ports: [
+        propertyInputPort InBufPort { name: "buffer" block: InBuf }
+        mainOutputPort OutPort { block: OutVal }
+    ]
+    blocks: [
+        signal InBuf[4] { type: Real }
+        signal OutVal { type: Real }
+    ]
+    streams: [
+        InBuf[0] + 10.0 >> OutVal;
+    ]
+}
+
+AudioIn >> InBuffer;
+InBuffer.ready >> IncrementReaction(buffer: InBuffer) >> Result;

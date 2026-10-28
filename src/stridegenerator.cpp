@@ -1251,6 +1251,33 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
         } else {
           assert(0 == 1);
         }
+      } else if (decl->getEntityType() == "buffer") {
+        generatedIRCode.GlobalSignals.push_back(decl);
+
+        auto indexDecl = std::make_shared<DeclarationNode>(
+            decl->getName() + "_index", "signal", nullptr,
+            decl->getFilename().c_str(), decl->getLine(), decl->getColumn());
+        indexDecl->addProperty(std::make_shared<PropertyNode>(
+            "type", std::make_shared<EntityNode>("Int", decl->getFilename().c_str(), decl->getLine(), decl->getColumn())));
+        indexDecl->addProperty(std::make_shared<PropertyNode>(
+            "default", std::make_shared<ValueNode>(int64_t(0), decl->getFilename().c_str(), decl->getLine(), decl->getColumn())));
+        generatedIRCode.GlobalSignals.push_back(indexDecl);
+
+        auto countDecl = std::make_shared<DeclarationNode>(
+            decl->getName() + "_count", "signal", nullptr,
+            decl->getFilename().c_str(), decl->getLine(), decl->getColumn());
+        countDecl->addProperty(std::make_shared<PropertyNode>(
+            "type", std::make_shared<EntityNode>("Int", decl->getFilename().c_str(), decl->getLine(), decl->getColumn())));
+        countDecl->addProperty(std::make_shared<PropertyNode>(
+            "default", std::make_shared<ValueNode>(int64_t(0), decl->getFilename().c_str(), decl->getLine(), decl->getColumn())));
+        generatedIRCode.GlobalSignals.push_back(countDecl);
+
+        auto readyDecl = std::make_shared<DeclarationNode>(
+            decl->getName() + "_ready", "switch", nullptr,
+            decl->getFilename().c_str(), decl->getLine(), decl->getColumn());
+        readyDecl->addProperty(std::make_shared<PropertyNode>(
+            "default", std::make_shared<ValueNode>(false, decl->getFilename().c_str(), decl->getLine(), decl->getColumn())));
+        generatedIRCode.GlobalSignals.push_back(readyDecl);
       } else if (decl->getEntityType() == "switch" ||
                  decl->getEntityType() == "trigger") {
         bool inDynamicDomain = false;
@@ -1618,15 +1645,26 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
   bool isTriggeredReactionStream = false;
   auto leftNode = stream->getLeft();
   std::shared_ptr<DeclarationNode> leftDecl = nullptr;
+  bool isLeftSwitch = false;
   if (leftNode) {
-    if (leftNode->getNodeType() != AST::Switch) {
+    if (leftNode->getNodeType() == AST::Switch) {
+      isLeftSwitch = true;
+    } else if (leftNode->getNodeType() == AST::MemberAccess) {
+      auto pp = std::static_pointer_cast<MemberAccessNode>(leftNode);
+      if (pp->getProperty() == "ready" || pp->getProperty() == "halfReady" ||
+          pp->getProperty() == "full" || pp->getProperty() == "empty") {
+        isLeftSwitch = true;
+      }
+    } else {
       leftDecl = ASTQuery::findDeclarationByName(
           ASTQuery::getNodeName(leftNode), scope, tree);
+      if (leftDecl && (leftDecl->getEntityType() == "switch" ||
+                       leftDecl->getEntityType() == "trigger")) {
+        isLeftSwitch = true;
+      }
     }
   }
-  if ((leftNode && leftNode->getNodeType() == AST::Switch) ||
-      (leftDecl && (leftDecl->getEntityType() == "switch" ||
-                    leftDecl->getEntityType() == "trigger"))) {
+  if (isLeftSwitch) {
     StreamNodeIterator checkIt(stream);
     while (auto n = checkIt.next()) {
       if (n->getNodeType() == AST::Function) {
@@ -1906,9 +1944,14 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
           }
         }
         // Connect to previous stream node
-        generated[domainName].expr.back() = std::make_unique<BinaryExprAST>(
-            '=', std::move(entityExpr),
-            std::move(generated[domainName].expr.back()));
+        if (decl && decl->getEntityType() == "buffer") {
+          generated[domainName].expr.back() = std::make_unique<BufferPushExprAST>(
+              decl, std::move(generated[domainName].expr.back()));
+        } else {
+          generated[domainName].expr.back() = std::make_unique<BinaryExprAST>(
+              '=', std::move(entityExpr),
+              std::move(generated[domainName].expr.back()));
+        }
         if (stream) {
           generated[domainName].expr.back()->setLocationFrom(stream);
         }
@@ -2407,7 +2450,11 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         generated[domainName].expr.push_back(createExpr(current));
       }
     } else if (current->getNodeType() == AST::MemberAccess) {
-      generated[domainName].expr.push_back(createExpr(current));
+      if (current == stream->getLeft() && isTriggeredReactionStream) {
+        // Skip pushing trigger switch
+      } else {
+        generated[domainName].expr.push_back(createExpr(current));
+      }
     } else {
       LOG_ERROR() << "ERROR: Unsupported type" << std::endl;
     }
@@ -2428,6 +2475,10 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
           condName = leftDecl->getName();
           condExpr = std::make_unique<VariableExprAST>(condName);
         } else if (leftNode) {
+          if (leftNode->getNodeType() == AST::MemberAccess) {
+            auto pp = std::static_pointer_cast<MemberAccessNode>(leftNode);
+            condName = pp->getEntity() + "_" + pp->getProperty();
+          }
           condExpr = createExpr(leftNode);
         }
         if (condExpr) {

@@ -24,10 +24,32 @@
 #define BINARYEXPRAST_HPP
 
 #include <memory>
+#include <string>
 
 #include "exprast.hpp"
 
 namespace strd {
+class DeclarationNode;
+
+/// BufferPushExprAST - Expression class for pushing a value into a buffer.
+class BufferPushExprAST : public ExprAST {
+  std::shared_ptr<DeclarationNode> BufferDecl;
+  std::string BufferName;
+  int Capacity{0};
+  int Hop{0};
+  std::string TriggerMode{"TriggerFull"};
+  std::unique_ptr<ExprAST> ValueExpr;
+
+public:
+  BufferPushExprAST(std::shared_ptr<DeclarationNode> bufferDecl,
+                    std::unique_ptr<ExprAST> valueExpr);
+
+  std::pair<llvm::Value *, std::optional<llvm::Type *>>
+  codegen(StrideCompiler &state) override;
+
+  bool writesTo(const std::string &varName) const override;
+};
+
 /// BinaryExprAST - Expression class for a binary operator.
 class BinaryExprAST : public ExprAST {
   char Op;

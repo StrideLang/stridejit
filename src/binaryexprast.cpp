@@ -1,3 +1,6 @@
+#include "stride/parser/declarationnode.h"
+#include "stride/parser/valuenode.h"
+#include "stride/utils/astquery.h"
 #include <cmath>
 #include <iostream>
 #include <numeric>
@@ -715,6 +718,9 @@ MemberAccessAST::codegen(StrideCompiler &state) {
   if (state.NamedValues.find(portToken) == state.NamedValues.end()) {
     if (!Name.empty() && state.NamedValues.find(Property) != state.NamedValues.end()) {
       portToken = Property;
+    } else if (state.globalExists(portToken)) {
+      auto global = state.getGlobal(portToken);
+      state.NamedValues[portToken] = global;
     } else {
       bool found = false;
       for (const auto &kv : state.NamedValues) {
@@ -1170,4 +1176,157 @@ bool UpsampleExprAST::writesTo(const std::string &varName) const {
       return true;
   }
   return false;
+}
+
+BufferPushExprAST::BufferPushExprAST(std::shared_ptr<DeclarationNode> bufferDecl,
+                                     std::unique_ptr<ExprAST> valueExpr)
+    : BufferDecl(bufferDecl), ValueExpr(std::move(valueExpr)) {
+  if (BufferDecl) {
+    BufferName = BufferDecl->getName();
+    auto capProp = BufferDecl->getPropertyValue("capacity");
+    if (capProp && capProp->getNodeType() == AST::Int) {
+      Capacity = static_cast<int>(std::static_pointer_cast<ValueNode>(capProp)->getIntValue());
+    }
+    auto hopProp = BufferDecl->getPropertyValue("hop");
+    if (hopProp && hopProp->getNodeType() == AST::Int) {
+      Hop = static_cast<int>(std::static_pointer_cast<ValueNode>(hopProp)->getIntValue());
+    } else {
+      Hop = Capacity;
+    }
+    auto trigProp = BufferDecl->getPropertyValue("triggerMode");
+    if (trigProp) {
+      TriggerMode = ASTQuery::getNodeName(trigProp);
+    }
+  }
+}
+
+bool BufferPushExprAST::writesTo(const std::string &varName) const {
+  return varName == BufferName || varName == (BufferName + "_ready") ||
+         varName == (BufferName + "_index") || varName == (BufferName + "_count");
+}
+
+std::pair<llvm::Value *, std::optional<llvm::Type *>>
+BufferPushExprAST::codegen(StrideCompiler &state) {
+  if (!ValueExpr) {
+    return {nullptr, std::nullopt};
+  }
+  auto [val, valType] = ValueExpr->codegen(state);
+  if (!val) {
+    return {nullptr, std::nullopt};
+  }
+
+  std::string dataName = BufferName;
+  std::string indexName = BufferName + "_index";
+  std::string countName = BufferName + "_count";
+  std::string readyName = BufferName + "_ready";
+
+  llvm::Value *bufPtr = nullptr;
+  llvm::Type *bufElemType = nullptr;
+  if (state.NamedValues.find(dataName) != state.NamedValues.end()) {
+    bufPtr = state.NamedValues[dataName].first;
+    bufElemType = state.NamedValues[dataName].second.value_or(nullptr);
+  } else if (state.globalExists(dataName)) {
+    auto global = state.getGlobal(dataName);
+    bufPtr = global.first;
+    bufElemType = global.second;
+  }
+  if (!bufPtr) {
+    return {state.LogErrorV(("Unknown buffer: " + BufferName).c_str()), std::nullopt};
+  }
+
+  llvm::Value *indexPtr = nullptr;
+  if (state.NamedValues.find(indexName) != state.NamedValues.end()) {
+    indexPtr = state.NamedValues[indexName].first;
+  } else if (state.globalExists(indexName)) {
+    indexPtr = state.getGlobal(indexName).first;
+  }
+
+  llvm::Value *countPtr = nullptr;
+  if (state.NamedValues.find(countName) != state.NamedValues.end()) {
+    countPtr = state.NamedValues[countName].first;
+  } else if (state.globalExists(countName)) {
+    countPtr = state.getGlobal(countName).first;
+  }
+
+  llvm::Value *readyPtr = nullptr;
+  if (state.NamedValues.find(readyName) != state.NamedValues.end()) {
+    readyPtr = state.NamedValues[readyName].first;
+  } else if (state.globalExists(readyName)) {
+    readyPtr = state.getGlobal(readyName).first;
+  }
+
+  llvm::Type *i32Ty = llvm::Type::getInt32Ty(*state.TheContext);
+
+  if (val->getType()->isPointerTy()) {
+    llvm::Type *elemTy = valType.has_value() ? valType.value() : llvm::Type::getDoubleTy(*state.TheContext);
+    val = state.Builder->CreateLoad(elemTy, val, "buf_val");
+  }
+
+  llvm::Value *curIdx = nullptr;
+  if (indexPtr) {
+    curIdx = state.Builder->CreateLoad(i32Ty, indexPtr, "buf_idx");
+  } else {
+    curIdx = llvm::ConstantInt::get(i32Ty, 0);
+  }
+
+  llvm::Type *scalarElemTy = bufElemType;
+  if (scalarElemTy && scalarElemTy->isArrayTy()) {
+    scalarElemTy = scalarElemTy->getArrayElementType();
+  }
+  if (!scalarElemTy) {
+    scalarElemTy = val->getType();
+  }
+
+  if (val->getType() != scalarElemTy) {
+    if (scalarElemTy->isFloatingPointTy() && val->getType()->isIntegerTy()) {
+      val = state.Builder->CreateSIToFP(val, scalarElemTy, "val_fp");
+    } else if (scalarElemTy->isIntegerTy() && val->getType()->isFloatingPointTy()) {
+      val = state.Builder->CreateFPToSI(val, scalarElemTy, "val_int");
+    }
+  }
+
+  llvm::Value *elemPtr = nullptr;
+  if (bufElemType && bufElemType->isArrayTy()) {
+    elemPtr = state.Builder->CreateInBoundsGEP(
+        bufElemType, bufPtr, {llvm::ConstantInt::get(i32Ty, 0), curIdx}, "buf_elem");
+  } else {
+    elemPtr = state.Builder->CreateInBoundsGEP(scalarElemTy, bufPtr, curIdx, "buf_elem");
+  }
+  state.Builder->CreateStore(val, elemPtr);
+
+  if (indexPtr && Capacity > 0) {
+    llvm::Value *nextIdx = state.Builder->CreateAdd(curIdx, llvm::ConstantInt::get(i32Ty, 1), "next_idx");
+    nextIdx = state.Builder->CreateURem(nextIdx, llvm::ConstantInt::get(i32Ty, Capacity), "wrapped_idx");
+    state.Builder->CreateStore(nextIdx, indexPtr);
+  }
+
+  if (countPtr && Capacity > 0) {
+    llvm::Value *curCount = state.Builder->CreateLoad(i32Ty, countPtr, "buf_cnt");
+    llvm::Value *newCount = state.Builder->CreateAdd(curCount, llvm::ConstantInt::get(i32Ty, 1), "inc_cnt");
+    llvm::Value *isAtCap = state.Builder->CreateICmpSGE(newCount, llvm::ConstantInt::get(i32Ty, Capacity), "is_at_cap");
+    newCount = state.Builder->CreateSelect(isAtCap, llvm::ConstantInt::get(i32Ty, Capacity), newCount, "capped_cnt");
+    state.Builder->CreateStore(newCount, countPtr);
+  }
+
+  if (readyPtr && Capacity > 0) {
+    llvm::Value *readyCond = nullptr;
+    if (TriggerMode.find("Half") != std::string::npos) {
+      int halfCap = Capacity / 2;
+      llvm::Value *isHalf = state.Builder->CreateICmpEQ(curIdx, llvm::ConstantInt::get(i32Ty, halfCap - 1), "is_half");
+      llvm::Value *isFull = state.Builder->CreateICmpEQ(curIdx, llvm::ConstantInt::get(i32Ty, Capacity - 1), "is_full");
+      readyCond = state.Builder->CreateOr(isHalf, isFull, "half_or_full");
+    } else if (TriggerMode.find("Quarter") != std::string::npos) {
+      int qCap = std::max(1, Capacity / 4);
+      llvm::Value *rem = state.Builder->CreateURem(curIdx, llvm::ConstantInt::get(i32Ty, qCap), "q_rem");
+      readyCond = state.Builder->CreateICmpEQ(rem, llvm::ConstantInt::get(i32Ty, qCap - 1), "is_q");
+    } else if (TriggerMode.find("Periodic") != std::string::npos && Hop > 0) {
+      llvm::Value *rem = state.Builder->CreateURem(curIdx, llvm::ConstantInt::get(i32Ty, Hop), "hop_rem");
+      readyCond = state.Builder->CreateICmpEQ(rem, llvm::ConstantInt::get(i32Ty, Hop - 1), "is_hop");
+    } else {
+      readyCond = state.Builder->CreateICmpEQ(curIdx, llvm::ConstantInt::get(i32Ty, Capacity - 1), "is_full");
+    }
+    state.Builder->CreateStore(readyCond, readyPtr);
+  }
+
+  return {val, scalarElemTy};
 }
