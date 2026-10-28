@@ -243,7 +243,7 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
 
                 const SignalStreamVector* prepStream = nullptr;
                 for (const auto& st : spec.prepareStreams) {
-                    if (st.portName == info.name) {
+                    if (st.portName == info.name || st.portName == info.name + "Port") {
                         prepStream = &st;
                         break;
                     }
@@ -251,7 +251,7 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
 
                 const SignalStreamVector* valStream = nullptr;
                 for (const auto& st : spec.validateStreams) {
-                    if (st.portName == info.name) {
+                    if (st.portName == info.name || st.portName == info.name + "Port") {
                         valStream = &st;
                         break;
                     }
@@ -360,7 +360,7 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
             for (const auto& prepStream : spec.prepareStreams) {
                 bool isArg = false;
                 for (const auto& info : m_argInfos) {
-                    if (info.name == prepStream.portName) {
+                    if (info.name == prepStream.portName || info.name + "Port" == prepStream.portName) {
                         isArg = true;
                         break;
                     }
@@ -403,7 +403,7 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
 
         auto readPortScalarVal = [&](const std::string& name) -> SignalScalarValue {
             for (size_t a = 0; a < m_argInfos.size(); ++a) {
-                if (m_argInfos[a].name == name) {
+                if (m_argInfos[a].name == name || m_argInfos[a].name + "Port" == name) {
                     if (m_argInfos[a].type == DataType::INT32) {
                         return argBuffers[a].scalarInt32;
                     } else if (m_argInfos[a].type == DataType::BOOL) {
@@ -431,7 +431,7 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                     const auto& valStream = spec.validateStreams[v];
                     size_t argIdx = m_argInfos.size();
                     for (size_t a = 0; a < m_argInfos.size(); ++a) {
-                        if (m_argInfos[a].name == valStream.portName) {
+                        if (m_argInfos[a].name == valStream.portName || m_argInfos[a].name + "Port" == valStream.portName) {
                             argIdx = a;
                             break;
                         }
@@ -578,6 +578,12 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                                         ss << (argBuffers[inIdx].boolVec[0] ? "true" : "false");
                                     } else if (!argBuffers[inIdx].doubleVec.empty()) {
                                         ss << argBuffers[inIdx].doubleVec[0];
+                                    } else if (m_argInfos[inIdx].type == DataType::INT32) {
+                                        ss << argBuffers[inIdx].scalarInt32;
+                                    } else if (m_argInfos[inIdx].type == DataType::BOOL) {
+                                        ss << (argBuffers[inIdx].scalarBool ? "true" : "false");
+                                    } else {
+                                        ss << argBuffers[inIdx].scalarDouble;
                                     }
                                 }
                                 ss << "\n";

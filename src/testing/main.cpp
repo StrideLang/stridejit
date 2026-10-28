@@ -185,6 +185,7 @@ int main(int argc, char *argv[]) {
           }
 
           if (!entrySym) {
+            llvm::consumeError(entrySym.takeError());
             TestRunResult res;
             res.passed = false;
             res.errorMessage = "Could not find entry function: " + procName +
@@ -204,6 +205,8 @@ int main(int argc, char *argv[]) {
           if (invokerSym) {
             runner.setInvokerFunction(
                 reinterpret_cast<void *>(invokerSym->getValue()));
+          } else {
+            llvm::consumeError(invokerSym.takeError());
           }
 
           auto argInfos = strenv.getFunctionArgs(targetFuncName);

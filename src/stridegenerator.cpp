@@ -1463,12 +1463,13 @@ void StrideGenerator::collectInputArgs(
             ASTQuery::getNodeName(intermediateNode);
         args.MainIn.args.emplace_back(
             std::make_unique<VariableExprAST>(intermediateSymbol));
-        auto prevDecls =
-            ASTQuery::findAllDeclarations(prevFunc->getName(), scope, tree);
+        auto prevDecls = ASTQuery::findAllDeclarations(
+            ASTQuery::getNodeName(prevFunc), scope, tree);
         auto prevDecl = CodeAnalysis::matchDefinitionToTypes(
             prevDecls, prevFunc, scope, tree);
         if (prevDecl) {
-          auto protoIt = state.FunctionProtos.find(prevDecl->getName());
+          auto protoIt =
+              state.FunctionProtos.find(ASTQuery::getNodeName(prevDecl));
           if (protoIt != state.FunctionProtos.end() &&
               !protoIt->second->getOutArgs().empty()) {
             args.MainIn.argTypes.push_back(
@@ -1669,8 +1670,8 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
     while (auto n = checkIt.next()) {
       if (n->getNodeType() == AST::Function) {
         auto funcNode = std::static_pointer_cast<FunctionNode>(n);
-        auto funcDecls =
-            ASTQuery::findAllDeclarations(funcNode->getName(), scope, tree);
+        auto funcDecls = ASTQuery::findAllDeclarations(
+            ASTQuery::getNodeName(funcNode), scope, tree);
         decltype(funcDecls) callableDecls;
         for (const auto &d : funcDecls) {
           if (!d)
@@ -1979,7 +1980,8 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         segState.activeRate = currentRate;
       }
       auto func = std::static_pointer_cast<FunctionNode>(current);
-      auto decls = ASTQuery::findAllDeclarations(func->getName(), scope, tree);
+      auto decls =
+          ASTQuery::findAllDeclarations(ASTQuery::getNodeName(func), scope, tree);
       {
         // A function call can only resolve to a callable declaration. Other
         // declarations may share the name (e.g. a named generator transition
@@ -2659,7 +2661,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
     std::shared_ptr<FunctionNode> funcInstance, ASTNode tree, ScopeStack *scope,
     StrideCompiler &state, std::string *symbolName) {
 
-  std::string funcName = funcDecl->getName();
+  std::string funcName = ASTQuery::getNodeName(funcDecl);
   if (symbolName) {
     *symbolName = funcName;
   }
@@ -2830,7 +2832,8 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
         signature.push_back(param.llvmType);
       }
     }
-    funcName = state.mangler.mangle(funcDecl->getName(), {}, signature);
+    funcName =
+        state.mangler.mangle(ASTQuery::getNodeName(funcDecl), {}, signature);
     if (symbolName) {
       *symbolName = funcName;
     }

@@ -173,7 +173,11 @@ TEST(JITArrayTest, ConstantArray) {
 
   llvm::GlobalVariable *table = nullptr;
   for (auto &global : strenv.mStrideEnv.TheModule->globals()) {
+#if LLVM_VERSION_MAJOR >= 18
+    if (global.getName().ends_with("Table")) {
+#else
     if (global.getName().endswith("Table")) {
+#endif
       table = &global;
     }
   }

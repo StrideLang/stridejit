@@ -71,6 +71,9 @@ void FunctionAST::allocateInternalVariables(StrideCompiler &state,
       continue;
     }
     auto defaultNode = decl->getPropertyValue("default");
+    if (!defaultNode) {
+      defaultNode = decl->getPropertyValue("value");
+    }
     if (defaultNode) {
       if (decl->getNodeType() == AST::Declaration) {
         llvm::Type *type = state.getLLVMType(decl);

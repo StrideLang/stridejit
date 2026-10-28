@@ -208,7 +208,7 @@ bool StrideEnvironment::generateAllRootFunctions(ASTNode root) {
           continue;
         }
 
-        std::string funcName = decl->getName();
+        std::string funcName = ASTQuery::getNodeName(decl);
         if (mStrideEnv.FunctionProtos.find(funcName) ==
             mStrideEnv.FunctionProtos.end()) {
           StrideGenerator::generateStandaloneFunction(decl, root, scope,
@@ -1555,13 +1555,15 @@ bool StrideEnvironment::compileInMemory() {
   JIT->getMainJITDylib().addGenerator(std::move(*librarySearch));
   // TODO only load required libraries
   std::string err;
+#ifndef _WIN32
   if (!loadLibrary("m", err)) {
     LOG_ERROR() << "Failed to load m: " << err << std::endl;
   }
+#endif
   // if (!loadLibrary("StrideLib", err)) {
   //   LOG_ERROR() << "Failed to load StrideLib: " << err << std::endl;
   // }
-  if (!llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr, &err)) {
+  if (llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr, &err)) {
     LOG_ERROR() << "Failed to load current symbols: " << err << std::endl;
   }
   JIT->getMainJITDylib().addGenerator(llvm::cantFail(
@@ -1589,6 +1591,9 @@ bool StrideEnvironment::compileInMemory() {
                                  llvm::JITSymbolFlags::Exported);
   };
 #endif
+  regSym("sin", static_cast<double (*)(double)>(&std::sin));
+  regSym("cos", static_cast<double (*)(double)>(&std::cos));
+  regSym("tan", static_cast<double (*)(double)>(&std::tan));
   regSym("__stride_Greater_d_dd", &__stride_Greater_d_dd);
   regSym("__stride_string_substring", &__stride_string_substring);
   regSym("__stride_string_trim", &__stride_string_trim);
@@ -2177,9 +2182,9 @@ bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
   if (m_optimizationLevel == 0 || m_buildType == BuildType::Debug) {
     codegenOpt = llvm::CodeGenOptLevel::None;
   } else if (m_optimizationLevel == 1) {
-    codegenOpt = llvm::CodeGenOpt::Less;
+    codegenOpt = llvm::CodeGenOptLevel::Less;
   } else if (m_optimizationLevel == 3) {
-    codegenOpt = llvm::CodeGenOpt::Aggressive;
+    codegenOpt = llvm::CodeGenOptLevel::Aggressive;
   }
 #else
   llvm::CodeGenOpt::Level codegenOpt = llvm::CodeGenOpt::Default;
