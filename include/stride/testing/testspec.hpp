@@ -40,19 +40,25 @@ enum class AssertionKind {
     GreaterThan,
     GreaterThanOrEqual,
     LessThan,
-    LessThanOrEqual
+    LessThanOrEqual,
+    MaxError,
+    Snr
 };
 
 struct SignalStreamVector {
     std::string portName;
+    std::string baselinePort;
     std::vector<SignalScalarValue> values;
     std::vector<std::vector<SignalScalarValue>> tickValues;
     bool isArrayPort{false};
     double epsilon{1e-6};
+    double maxError{0.0005};
+    double minSnr{80.0};
     AssertionKind kind{AssertionKind::Equal};
 
     size_t size() const;
     bool matches(const SignalScalarValue& actual, size_t tick) const;
+    bool matches(const SignalScalarValue& actual, const SignalScalarValue& expected, size_t tick) const;
     bool matches(const std::vector<SignalScalarValue>& actual, size_t tick) const;
     std::string formatValue(size_t tick) const;
     std::string formatCondition(size_t tick) const;

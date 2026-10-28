@@ -389,4 +389,89 @@ TEST(StrideTestRunnerTest, MissingArgInfosReturnsError) {
       std::string::npos);
 }
 
+
+void mock_diff_process(double *in, double *candidate, double *baseline) {
+  if (in && candidate && baseline) {
+    *baseline = *in;
+    *candidate = *in + 0.0001;
+  }
+}
+
+const std::vector<strd::FunctionArgInfo> mockDiffArgs = {
+    {"In", strd::FunctionArgInfo::Role::Input, strd::DataType::DOUBLE},
+    {"CandidateOut", strd::FunctionArgInfo::Role::Output, strd::DataType::DOUBLE},
+    {"BaselineOut", strd::FunctionArgInfo::Role::Output, strd::DataType::DOUBLE}
+};
+
+TEST(StrideTestSpecTest, StatisticalAssertionsSpec) {
+  SignalStreamVector maxErrVec;
+  maxErrVec.kind = AssertionKind::MaxError;
+  maxErrVec.maxError = 0.0005;
+  maxErrVec.values = {1.0};
+
+  EXPECT_TRUE(maxErrVec.matches(1.0004, 0));
+  EXPECT_FALSE(maxErrVec.matches(1.0006, 0));
+
+  // Two-value comparison (Candidate vs Baseline)
+  EXPECT_TRUE(maxErrVec.matches(1.0004, 1.0, 0));
+  EXPECT_FALSE(maxErrVec.matches(1.0006, 1.0, 0));
+
+  SignalStreamVector snrVec;
+  snrVec.kind = AssertionKind::Snr;
+  snrVec.minSnr = 80.0;
+  // Per-tick matches returns true; SNR is validated over whole stream
+  EXPECT_TRUE(snrVec.matches(1.0001, 1.0, 0));
+}
+
+TEST(StrideTestRunnerTest, StatisticalMaxErrorAndSnrDifferentialExecution) {
+  FunctionTestSpec spec;
+  spec.testName = "DifferentialPrecisionTest";
+  spec.functionName = "mock_diff_process";
+  spec.tickCount = 100;
+
+  SignalStreamVector prep;
+  prep.portName = "In";
+  for (size_t i = 0; i < 100; ++i) {
+    prep.values.push_back(std::sin(static_cast<double>(i) * 0.1));
+  }
+  spec.prepareStreams.push_back(prep);
+
+  SignalStreamVector valMaxErr;
+  valMaxErr.portName = "CandidateOut";
+  valMaxErr.baselinePort = "BaselineOut";
+  valMaxErr.kind = AssertionKind::MaxError;
+  valMaxErr.maxError = 0.0002;
+  spec.validateStreams.push_back(valMaxErr);
+
+  SignalStreamVector valSnr;
+  valSnr.portName = "CandidateOut";
+  valSnr.baselinePort = "BaselineOut";
+  valSnr.kind = AssertionKind::Snr;
+  valSnr.minSnr = 60.0;
+  spec.validateStreams.push_back(valSnr);
+
+  FunctionTestRunner runner(reinterpret_cast<void *>(&mock_diff_process), mockDiffArgs);
+  auto result = runner.runTest(spec);
+
+  EXPECT_TRUE(result.passed) << result.errorMessage;
+  EXPECT_EQ(result.ticksExecuted, 100);
+  EXPECT_TRUE(result.statisticalMetrics.hasMetrics);
+  EXPECT_NEAR(result.statisticalMetrics.peakAbsoluteError, 0.0001, 1e-6);
+  EXPECT_GT(result.statisticalMetrics.snrDb, 60.0);
+  EXPECT_GT(result.statisticalMetrics.rmsError, 0.0);
+
+  // Stricter MaxError threshold fails
+  spec.validateStreams[0].maxError = 0.00005;
+  auto failResultMaxErr = runner.runTest(spec);
+  EXPECT_FALSE(failResultMaxErr.passed);
+  EXPECT_NE(failResultMaxErr.errorMessage.find("Assertion failed on port 'CandidateOut'"), std::string::npos);
+
+  // Stricter SNR threshold fails
+  spec.validateStreams[0].maxError = 0.0002; // Restore passing
+  spec.validateStreams[1].minSnr = 120.0;     // Exceeds achievable SNR
+  auto failResultSnr = runner.runTest(spec);
+  EXPECT_FALSE(failResultSnr.passed);
+  EXPECT_NE(failResultSnr.errorMessage.find("SNR assertion failed"), std::string::npos);
+}
+
 } // namespace

@@ -173,7 +173,7 @@ TEST(JITArrayTest, ConstantArray) {
 
   llvm::GlobalVariable *table = nullptr;
   for (auto &global : strenv.mStrideEnv.TheModule->globals()) {
-    if (global.getName().ends_with("Table")) {
+    if (global.getName().endswith("Table")) {
       table = &global;
     }
   }

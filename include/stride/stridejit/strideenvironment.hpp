@@ -375,7 +375,7 @@ template <typename T> T *StrideEnvironment::getGlobal(std::string varName) {
 #if LLVM_VERSION_MAJOR >= 15
       host_ptr = Symbol->toPtr<T *>();
 #else
-      host_ptr = reinterpret_cast<T *>(static_cast<uintptr_t>(Symbol->getAddress()));
+      host_ptr = llvm::orc::ExecutorAddr(Symbol->getAddress()).toPtr<T *>();
 #endif
     } catch (...) {
       // std::cerr << "Can't cast variable to type" << std::endl;

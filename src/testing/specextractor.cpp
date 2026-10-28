@@ -51,6 +51,10 @@ parseAssertionKind(const std::string &name) {
     return AssertionKind::LessThan;
   if (name == "ExpectLe")
     return AssertionKind::LessThanOrEqual;
+  if (name == "ExpectMaxError")
+    return AssertionKind::MaxError;
+  if (name == "ExpectSnr")
+    return AssertionKind::Snr;
   return std::nullopt;
 }
 
@@ -223,26 +227,48 @@ void extractNodeInfo(const ASTNode &elem, SignalStreamVector &streamVec) {
             }
             if (kindOpt.has_value()) {
               streamVec.kind = kindOpt.value();
-              auto epsProp = declSub->getPropertyValue("epsilon");
-              auto epsVal = findValueNode(epsProp);
-              if (epsVal) {
-                streamVec.epsilon = epsVal->getRealValue();
+              if (auto epsProp = declSub->getPropertyValue("epsilon")) {
+                if (auto epsVal = findValueNode(epsProp)) streamVec.epsilon = epsVal->getRealValue();
+              }
+              if (auto maxErrProp = declSub->getPropertyValue("maxError")) {
+                if (auto val = findValueNode(maxErrProp)) {
+                  streamVec.maxError = val->getRealValue();
+                  streamVec.epsilon = streamVec.maxError;
+                }
+              }
+              if (auto minSnrProp = declSub->getPropertyValue("minSnr")) {
+                if (auto val = findValueNode(minSnrProp)) streamVec.minSnr = val->getRealValue();
               }
             } else {
-              streamVec.portName = declSub->getName();
+              if (streamVec.portName.empty()) {
+                streamVec.portName = declSub->getName();
+              } else {
+                streamVec.baselinePort = declSub->getName();
+              }
             }
           } else if (item->getNodeType() == AST::Function) {
             auto funcNode = std::static_pointer_cast<FunctionNode>(item);
             auto kindOpt = parseAssertionKind(funcNode->getName());
             if (kindOpt.has_value()) {
               streamVec.kind = kindOpt.value();
-              auto epsProp = funcNode->getPropertyValue("epsilon");
-              auto epsVal = findValueNode(epsProp);
-              if (epsVal) {
-                streamVec.epsilon = epsVal->getRealValue();
+              if (auto epsProp = funcNode->getPropertyValue("epsilon")) {
+                if (auto epsVal = findValueNode(epsProp)) streamVec.epsilon = epsVal->getRealValue();
+              }
+              if (auto maxErrProp = funcNode->getPropertyValue("maxError")) {
+                if (auto val = findValueNode(maxErrProp)) {
+                  streamVec.maxError = val->getRealValue();
+                  streamVec.epsilon = streamVec.maxError;
+                }
+              }
+              if (auto minSnrProp = funcNode->getPropertyValue("minSnr")) {
+                if (auto val = findValueNode(minSnrProp)) streamVec.minSnr = val->getRealValue();
               }
             } else {
-              streamVec.portName = funcNode->getName();
+              if (streamVec.portName.empty()) {
+                streamVec.portName = funcNode->getName();
+              } else {
+                streamVec.baselinePort = funcNode->getName();
+              }
             }
           } else {
             std::string nodeName = ASTQuery::getNodeName(item);
@@ -250,7 +276,11 @@ void extractNodeInfo(const ASTNode &elem, SignalStreamVector &streamVec) {
             if (kindOpt.has_value()) {
               streamVec.kind = kindOpt.value();
             } else if (!nodeName.empty()) {
-              streamVec.portName = nodeName;
+              if (streamVec.portName.empty()) {
+                streamVec.portName = nodeName;
+              } else {
+                streamVec.baselinePort = nodeName;
+              }
             }
           }
         }
@@ -265,26 +295,48 @@ void extractNodeInfo(const ASTNode &elem, SignalStreamVector &streamVec) {
 
     if (kindOpt.has_value()) {
       streamVec.kind = kindOpt.value();
-      auto epsProp = declSub->getPropertyValue("epsilon");
-      auto epsVal = findValueNode(epsProp);
-      if (epsVal) {
-        streamVec.epsilon = epsVal->getRealValue();
+      if (auto epsProp = declSub->getPropertyValue("epsilon")) {
+        if (auto epsVal = findValueNode(epsProp)) streamVec.epsilon = epsVal->getRealValue();
+      }
+      if (auto maxErrProp = declSub->getPropertyValue("maxError")) {
+        if (auto val = findValueNode(maxErrProp)) {
+          streamVec.maxError = val->getRealValue();
+          streamVec.epsilon = streamVec.maxError;
+        }
+      }
+      if (auto minSnrProp = declSub->getPropertyValue("minSnr")) {
+        if (auto val = findValueNode(minSnrProp)) streamVec.minSnr = val->getRealValue();
       }
     } else {
-      streamVec.portName = declSub->getName();
+      if (streamVec.portName.empty()) {
+        streamVec.portName = declSub->getName();
+      } else {
+        streamVec.baselinePort = declSub->getName();
+      }
     }
   } else if (elem->getNodeType() == AST::Function) {
     auto funcNode = std::static_pointer_cast<FunctionNode>(elem);
     auto kindOpt = parseAssertionKind(funcNode->getName());
     if (kindOpt.has_value()) {
       streamVec.kind = kindOpt.value();
-      auto epsProp = funcNode->getPropertyValue("epsilon");
-      auto epsVal = findValueNode(epsProp);
-      if (epsVal) {
-        streamVec.epsilon = epsVal->getRealValue();
+      if (auto epsProp = funcNode->getPropertyValue("epsilon")) {
+        if (auto epsVal = findValueNode(epsProp)) streamVec.epsilon = epsVal->getRealValue();
+      }
+      if (auto maxErrProp = funcNode->getPropertyValue("maxError")) {
+        if (auto val = findValueNode(maxErrProp)) {
+          streamVec.maxError = val->getRealValue();
+          streamVec.epsilon = streamVec.maxError;
+        }
+      }
+      if (auto minSnrProp = funcNode->getPropertyValue("minSnr")) {
+        if (auto val = findValueNode(minSnrProp)) streamVec.minSnr = val->getRealValue();
       }
     } else {
-      streamVec.portName = funcNode->getName();
+      if (streamVec.portName.empty()) {
+        streamVec.portName = funcNode->getName();
+      } else {
+        streamVec.baselinePort = funcNode->getName();
+      }
     }
   } else {
     std::vector<SignalScalarValue> itemVals;

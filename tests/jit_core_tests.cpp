@@ -57,7 +57,11 @@ TEST(JITCoreTest, LLJITDirectExecution) {
   ASSERT_TRUE(static_cast<bool>(EntrySym))
       << llvm::toString(EntrySym.takeError());
 
+#if LLVM_VERSION_MAJOR >= 15
   auto *Entry = EntrySym->toPtr<void (*)(...)>();
+#else
+  auto *Entry = reinterpret_cast<void (*)(double*, double*)>(static_cast<uintptr_t>(EntrySym->getAddress()));
+#endif
 
   double out = 0;
   double in = 3;

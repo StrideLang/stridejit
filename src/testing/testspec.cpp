@@ -85,6 +85,58 @@ bool SignalStreamVector::matches(const SignalScalarValue& actual, size_t tick) c
         case AssertionKind::LessThanOrEqual:
             return toDouble(actual) <= (toDouble(expected) + epsilon);
 
+        case AssertionKind::MaxError:
+            return std::abs(toDouble(actual) - toDouble(expected)) <= maxError;
+
+        case AssertionKind::Snr:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+bool SignalStreamVector::matches(const SignalScalarValue& actual, const SignalScalarValue& expected, size_t tick) const {
+    if (kind == AssertionKind::True) {
+        return toBool(actual) == true;
+    }
+    if (kind == AssertionKind::False) {
+        return toBool(actual) == false;
+    }
+    switch (kind) {
+        case AssertionKind::Equal:
+            if (std::holds_alternative<bool>(expected) || std::holds_alternative<bool>(actual)) {
+                return toBool(actual) == toBool(expected);
+            }
+            if ((std::holds_alternative<int32_t>(expected) || std::holds_alternative<int64_t>(expected)) &&
+                (std::holds_alternative<int32_t>(actual) || std::holds_alternative<int64_t>(actual))) {
+                int64_t a = std::holds_alternative<int32_t>(actual) ? std::get<int32_t>(actual) : std::get<int64_t>(actual);
+                int64_t e = std::holds_alternative<int32_t>(expected) ? std::get<int32_t>(expected) : std::get<int64_t>(expected);
+                return a == e;
+            }
+            return std::abs(toDouble(actual) - toDouble(expected)) <= epsilon;
+
+        case AssertionKind::Near:
+            return std::abs(toDouble(actual) - toDouble(expected)) <= epsilon;
+
+        case AssertionKind::GreaterThan:
+            return toDouble(actual) > toDouble(expected);
+
+        case AssertionKind::GreaterThanOrEqual:
+            return toDouble(actual) >= (toDouble(expected) - epsilon);
+
+        case AssertionKind::LessThan:
+            return toDouble(actual) < toDouble(expected);
+
+        case AssertionKind::LessThanOrEqual:
+            return toDouble(actual) <= (toDouble(expected) + epsilon);
+
+        case AssertionKind::MaxError:
+            return std::abs(toDouble(actual) - toDouble(expected)) <= maxError;
+
+        case AssertionKind::Snr:
+            return true;
+
         default:
             return false;
     }
@@ -160,6 +212,12 @@ std::string SignalStreamVector::formatCondition(size_t tick) const {
             break;
         case AssertionKind::LessThanOrEqual:
             ss << "<= " << formatValue(tick);
+            break;
+        case AssertionKind::MaxError:
+            ss << "maxError <= " << maxError;
+            break;
+        case AssertionKind::Snr:
+            ss << "SNR >= " << minSnr << " dB";
             break;
     }
     return ss.str();

@@ -393,6 +393,32 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
             }
         };
 
+        struct StreamStats {
+            double maxAbsError{0.0};
+            double sumErrorSq{0.0};
+            double sumRefSq{0.0};
+            size_t sampleCount{0};
+        };
+        std::vector<StreamStats> streamStats(spec.validateStreams.size());
+
+        auto readPortScalarVal = [&](const std::string& name) -> SignalScalarValue {
+            for (size_t a = 0; a < m_argInfos.size(); ++a) {
+                if (m_argInfos[a].name == name) {
+                    if (m_argInfos[a].type == DataType::INT32) {
+                        return argBuffers[a].scalarInt32;
+                    } else if (m_argInfos[a].type == DataType::BOOL) {
+                        return (argBuffers[a].scalarBool != 0);
+                    } else {
+                        return argBuffers[a].scalarDouble;
+                    }
+                }
+            }
+            if (m_stateAccessor.has_value() && m_statePtr && m_stateAccessor->getVar) {
+                return m_stateAccessor->getVar(m_statePtr, name);
+            }
+            return 0.0;
+        };
+
         {
             NoHeapAllocGuard allocGuard;
 
@@ -440,11 +466,69 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                                 m_stateAccessor->hasVar(m_statePtr, valStream.portName)) {
                                 actualScalar = m_stateAccessor->getVar(m_statePtr, valStream.portName);
                             }
-                            matched = valStream.matches(actualScalar, t);
+                            if (!valStream.baselinePort.empty()) {
+                                SignalScalarValue baselineScalar = readPortScalarVal(valStream.baselinePort);
+                                matched = valStream.matches(actualScalar, baselineScalar, t);
+                                double act = toDoubleVal(actualScalar);
+                                double exp = toDoubleVal(baselineScalar);
+                                double err = std::abs(act - exp);
+                                if (err > streamStats[v].maxAbsError || streamStats[v].sampleCount == 0) {
+                                    streamStats[v].maxAbsError = err;
+                                }
+                                streamStats[v].sumErrorSq += (act - exp) * (act - exp);
+                                streamStats[v].sumRefSq += exp * exp;
+                                streamStats[v].sampleCount++;
+                            } else {
+                                matched = valStream.matches(actualScalar, t);
+                                SignalScalarValue expectedScalar = 0.0;
+                                if (!valStream.isArrayPort && t < valStream.values.size()) {
+                                    expectedScalar = valStream.values[t];
+                                } else if (t < valStream.tickValues.size() && !valStream.tickValues[t].empty()) {
+                                    expectedScalar = valStream.tickValues[t][0];
+                                }
+                                double act = toDoubleVal(actualScalar);
+                                double exp = toDoubleVal(expectedScalar);
+                                double err = std::abs(act - exp);
+                                if (err > streamStats[v].maxAbsError || streamStats[v].sampleCount == 0) {
+                                    streamStats[v].maxAbsError = err;
+                                }
+                                streamStats[v].sumErrorSq += (act - exp) * (act - exp);
+                                streamStats[v].sumRefSq += exp * exp;
+                                streamStats[v].sampleCount++;
+                            }
                         }
                     } else if (m_stateAccessor.has_value() && m_statePtr) {
                         actualScalar = m_stateAccessor->getVar(m_statePtr, valStream.portName);
-                        matched = valStream.matches(actualScalar, t);
+                        if (!valStream.baselinePort.empty()) {
+                            SignalScalarValue baselineScalar = readPortScalarVal(valStream.baselinePort);
+                            matched = valStream.matches(actualScalar, baselineScalar, t);
+                            double act = toDoubleVal(actualScalar);
+                            double exp = toDoubleVal(baselineScalar);
+                            double err = std::abs(act - exp);
+                            if (err > streamStats[v].maxAbsError || streamStats[v].sampleCount == 0) {
+                                streamStats[v].maxAbsError = err;
+                            }
+                            streamStats[v].sumErrorSq += (act - exp) * (act - exp);
+                            streamStats[v].sumRefSq += exp * exp;
+                            streamStats[v].sampleCount++;
+                        } else {
+                            matched = valStream.matches(actualScalar, t);
+                            SignalScalarValue expectedScalar = 0.0;
+                            if (!valStream.isArrayPort && t < valStream.values.size()) {
+                                expectedScalar = valStream.values[t];
+                            } else if (t < valStream.tickValues.size() && !valStream.tickValues[t].empty()) {
+                                expectedScalar = valStream.tickValues[t][0];
+                            }
+                            double act = toDoubleVal(actualScalar);
+                            double exp = toDoubleVal(expectedScalar);
+                            double err = std::abs(act - exp);
+                            if (err > streamStats[v].maxAbsError || streamStats[v].sampleCount == 0) {
+                                streamStats[v].maxAbsError = err;
+                            }
+                            streamStats[v].sumErrorSq += (act - exp) * (act - exp);
+                            streamStats[v].sumRefSq += exp * exp;
+                            streamStats[v].sampleCount++;
+                        }
                     }
 
                     if (!matched) {
@@ -507,6 +591,40 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
             }
 
             result.heapAllocations = allocGuard.getDeltaAllocations();
+        }
+
+        // Post-execution stream evaluation (SNR and statistical error aggregation)
+        for (size_t v = 0; v < spec.validateStreams.size(); ++v) {
+            const auto& valStream = spec.validateStreams[v];
+            const auto& st = streamStats[v];
+            if (valStream.kind == AssertionKind::Snr || valStream.kind == AssertionKind::MaxError) {
+                result.statisticalMetrics.hasMetrics = true;
+                result.statisticalMetrics.peakAbsoluteError = st.maxAbsError;
+                result.statisticalMetrics.rmsError = std::sqrt(st.sumErrorSq / std::max<size_t>(1, st.sampleCount));
+                if (st.sumErrorSq == 0.0) {
+                    result.statisticalMetrics.snrDb = 999.0;
+                } else if (st.sumRefSq == 0.0) {
+                    result.statisticalMetrics.snrDb = -999.0;
+                } else {
+                    result.statisticalMetrics.snrDb = 10.0 * std::log10(st.sumRefSq / st.sumErrorSq);
+                }
+                result.statisticalMetrics.sampleCount = st.sampleCount;
+            }
+
+            if (valStream.kind == AssertionKind::Snr) {
+                double snr = result.statisticalMetrics.snrDb;
+                if (snr < valStream.minSnr) {
+                    result.passed = false;
+                    std::ostringstream ss;
+                    ss << "SNR assertion failed on port '" << valStream.portName << "':\n";
+                    ss << "  Expected: SNR >= " << valStream.minSnr << " dB\n";
+                    ss << "  Actual:   SNR = " << snr << " dB\n";
+                    ss << "  Peak Absolute Error: " << st.maxAbsError << "\n";
+                    ss << "  RMS Error: " << result.statisticalMetrics.rmsError << "\n";
+                    result.errorMessage = ss.str();
+                    return result;
+                }
+            }
         }
 
         result.ticksExecuted = spec.tickCount;

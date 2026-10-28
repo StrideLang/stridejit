@@ -1570,6 +1570,7 @@ bool StrideEnvironment::compileInMemory() {
   llvm::orc::SymbolMap M;
   llvm::orc::MangleAndInterner Mangle(JIT->getExecutionSession(),
                                       JIT->getDataLayout());
+#if LLVM_VERSION_MAJOR >= 15
   auto regSym = [&](const char *name, auto *fnPtr) {
 #if LLVM_VERSION_MAJOR >= 15
     M[Mangle(name)] =
@@ -1581,6 +1582,13 @@ bool StrideEnvironment::compileInMemory() {
         llvm::JITSymbolFlags::Exported);
 #endif
   };
+#else
+  auto regSym = [&](const char *name, auto *fnPtr) {
+    M[Mangle(name)] =
+        llvm::JITEvaluatedSymbol(llvm::pointerToJITTargetAddress(fnPtr),
+                                 llvm::JITSymbolFlags::Exported);
+  };
+#endif
   regSym("__stride_Greater_d_dd", &__stride_Greater_d_dd);
   regSym("__stride_string_substring", &__stride_string_substring);
   regSym("__stride_string_trim", &__stride_string_trim);

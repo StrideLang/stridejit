@@ -30,6 +30,9 @@ using namespace strd;
 
 StrideCompiler::StrideCompiler() {
   TheContext = std::make_unique<llvm::LLVMContext>();
+#if LLVM_VERSION_MAJOR < 15
+  TheContext->enableOpaquePointers();
+#endif
   TheModule = std::make_unique<llvm::Module>("StrideJit", *this->TheContext);
   Builder = std::make_unique<llvm::IRBuilder<>>(*this->TheContext);
 

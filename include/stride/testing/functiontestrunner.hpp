@@ -36,12 +36,21 @@
 
 namespace strd::test {
 
+struct StatisticalMetrics {
+    bool hasMetrics{false};
+    double peakAbsoluteError{0.0};
+    double rmsError{0.0};
+    double snrDb{0.0};
+    size_t sampleCount{0};
+};
+
 struct TestRunResult {
     bool passed{true};
     std::string errorMessage;
     size_t ticksExecuted{0};
     size_t heapAllocations{0};
     PerfMetrics perfMetrics;
+    StatisticalMetrics statisticalMetrics;
 };
 
 struct StateAccessor {
