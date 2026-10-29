@@ -1346,7 +1346,10 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
         if (spec.hasTriggerBlock()) {
           makeState(spec.flushName(), "switch", offValue());
         }
-        makeState(spec.frameSizeName(), "constant", intValue(spec.frameSize));
+        for (const auto &constant : spec.constantProperties()) {
+          makeState(spec.name + "_" + constant.first, "constant",
+                    intValue(constant.second));
+        }
       } else if (decl->getEntityType() == "switch" ||
                  decl->getEntityType() == "trigger") {
         bool inDynamicDomain = false;

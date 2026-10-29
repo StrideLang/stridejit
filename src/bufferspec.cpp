@@ -1,6 +1,7 @@
 #include "stride/stridejit/bufferspec.hpp"
 
 #include "stride/parser/declarationnode.h"
+#include "stride/parser/valuenode.h"
 #include "stride/utils/astfunctions.h"
 #include "stride/utils/astquery.h"
 
@@ -25,6 +26,33 @@ int resolveBufferConstant(ASTNode node, const std::vector<std::string> &names) {
     }
   }
   return -1;
+}
+
+// typeProperty declarations of the `buffer` schema type, inherited included
+std::vector<std::shared_ptr<DeclarationNode>> schemaProperties(ASTNode tree) {
+  std::vector<std::shared_ptr<DeclarationNode>> properties;
+  for (const auto &port : ASTQuery::getPortsForType("buffer", {}, tree)) {
+    if (port && port->getNodeType() == AST::Declaration) {
+      properties.push_back(std::static_pointer_cast<DeclarationNode>(port));
+    }
+  }
+  return properties;
+}
+
+std::string schemaPropertyName(const std::shared_ptr<DeclarationNode> &port) {
+  auto nameNode = port->getPropertyValue("name");
+  return nameNode && nameNode->getNodeType() == AST::String
+             ? std::static_pointer_cast<ValueNode>(nameNode)->getStringValue()
+             : std::string();
+}
+
+bool schemaSwitch(const std::shared_ptr<DeclarationNode> &port,
+                  const std::string &flag) {
+  auto node = port->getPropertyValue(flag);
+  if (node && node->getNodeType() == AST::Switch) {
+    return std::static_pointer_cast<ValueNode>(node)->getSwitchValue();
+  }
+  return true; // `public` and `writeable` default to on
 }
 
 } // namespace
@@ -62,6 +90,16 @@ BufferSpec BufferSpec::fromDeclaration(std::shared_ptr<DeclarationNode> decl,
     out = static_cast<int>(value);
     return true;
   };
+
+  // Read-only properties (ready, count) belong to the buffer, not to its
+  // declaration
+  for (const auto &port : schemaProperties(tree)) {
+    auto propertyName = schemaPropertyName(port);
+    if (!propertyName.empty() && !schemaSwitch(port, "writeable") &&
+        property(propertyName)) {
+      error("'" + propertyName + "' is read-only and can't be declared");
+    }
+  }
 
   if (!evalInt("capacity", spec.capacity)) {
     if (!property("capacity")) {
@@ -174,9 +212,41 @@ BufferSpec BufferSpec::fromDeclaration(std::shared_ptr<DeclarationNode> decl,
   return spec;
 }
 
-bool BufferSpec::isPublicProperty(const std::string &property) {
-  return property == "ready" || property == "count" ||
-         property == "frameSize";
+bool BufferSpec::isReadableByJit(const std::string &property) const {
+  if (property == "ready" || property == "count") {
+    return true;
+  }
+  for (const auto &constant : constantProperties()) {
+    if (constant.first == property) {
+      return true;
+    }
+  }
+  return false;
+}
+
+BufferSpec::PropertyAccess
+BufferSpec::propertyAccess(const std::string &property, ASTNode tree) {
+  PropertyAccess access;
+  for (const auto &port : schemaProperties(tree)) {
+    if (schemaPropertyName(port) == property) {
+      access.declared = true;
+      access.isPublic = schemaSwitch(port, "public");
+      access.writeable = schemaSwitch(port, "writeable");
+      break;
+    }
+  }
+  return access;
+}
+
+std::vector<std::string> BufferSpec::publicProperties(ASTNode tree) {
+  std::vector<std::string> names;
+  for (const auto &port : schemaProperties(tree)) {
+    auto propertyName = schemaPropertyName(port);
+    if (!propertyName.empty() && schemaSwitch(port, "public")) {
+      names.push_back(propertyName);
+    }
+  }
+  return names;
 }
 
 } // namespace strd

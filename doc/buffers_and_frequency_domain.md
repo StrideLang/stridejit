@@ -85,16 +85,20 @@ buffer AnalysisBuffer {
 
 They must satisfy `capacity ≥ frameSize ≥ hop > 0`. There is no `size` property: `capacity` is the history length and `frameSize` the window, and the old schema `size` was removed in favour of them. Giving `hop` without a `triggerMode` selects `TriggerPeriodic`. Giving a `hop` that disagrees with a non-periodic trigger mode is an error.
 
-Public, read-only properties (the only ones user code may reference; anything else is a compile error):
+**Visibility comes from the schema.** `_Buffer` in strideroot's `CoreTypes.stride` declares every property as a `typeProperty`. `Buf.<property>` is allowed only when that `typeProperty` (or one inherited from `_DomainMember`, `_Resetable`, …) is `public` (the default). Properties with `writeable: off` belong to the buffer and can't be set in a declaration. The configuration properties `mode`, `triggerMode`, `trigger` and `_internalType` are `public: off`. The member-access substitution in strideutils (`ASTQuery::isPublicProperty`) also leaves private properties unresolved, so a private read is reported instead of silently replaced by the declared value.
 
-| Property | Kind | Meaning |
-| :--- | :--- | :--- |
-| `Buf.ready` | trigger | A frame is ready this tick |
-| `Buf.frameSize` | compile-time Int | Window length N |
-| `Buf.count` | Int | Samples held since the last reset or flush, capped at `capacity` |
-| `Buf.firstHalf` / `Buf.secondHalf` | bundle views | Ping-pong halves (DMA HT/TC). **Not implemented yet** |
+Readable properties the JIT implements:
 
-Everything else (write index, hop counter, pending flush, mirror region, DMA descriptors) is private.
+| Property | Schema | Kind | Meaning |
+| :--- | :--- | :--- | :--- |
+| `Buf.ready` | `writeable: off` | trigger | A frame is ready this tick |
+| `Buf.count` | `writeable: off` | Int | Samples held since the last reset or flush, capped at `capacity` |
+| `Buf.capacity` | declared | compile-time Int | Ring length |
+| `Buf.frameSize` | declared | compile-time Int | Window length N (resolved default) |
+| `Buf.hop` | declared | compile-time Int | Samples between built-in triggers (resolved from the trigger mode) |
+| `Buf.firstHalf` / `Buf.secondHalf` | not in the schema yet | bundle views | Ping-pong halves (DMA HT/TC). **Not implemented yet** |
+
+Other public properties (`type`, `rate`, `domain`, …) pass the schema check but are reported as "not supported by the JIT yet". The JIT's internal state (write index, hop counter, pending flush, mirror region, DMA descriptors) is not in the schema at all.
 
 **Triggers vs switches.** `Buf.ready` is a `trigger`: a switch that turns off automatically at the end of its domain's processing, so it is on only in the tick that set it. Every domain-level `trigger` behaves this way. Switches convert to triggers by passing their value (a switch written into a trigger sets it for that tick). Because a trigger is cleared at the end of the tick, streams that read `Buf.ready` must come after the push stream. Later conversions may be added, such as edge detection (off → on) when a switch drives a trigger.
 
@@ -235,7 +239,7 @@ Self-hosting sketch: a buffer could eventually be a library `module` with a pers
 | [binaryexprast.hpp](../include/stride/stridejit/binaryexprast.hpp) / [binaryexprast.cpp](../src/binaryexprast.cpp) | `BufferPushExprAST` rewritten on `BufferSpec` (count/hop accounting, mirror write, trigger block). New `BufferViewExprAST` returns the frame pointer. |
 | [stridecompiler.cpp](../src/stridecompiler.cpp) | Buffer storage sized from `BufferSpec::storageSize()` |
 | [stridegenerator.cpp](../src/stridegenerator.cpp) | Synthesizes `<B>_index`, `_count`, `_since`, `_ready`, `_flush` (only with a trigger block) and the constant `_frameSize`. `Buf.ready` is a trigger only for buffers. Buffer property arguments become `BufferViewExprAST`. `<Domain>_init` resets the buffers its streams push into. |
-| [strideenvironment.cpp](../src/strideenvironment.cpp) | `generateIr` fails on invalid buffers and on access to private buffer properties |
+| [strideenvironment.cpp](../src/strideenvironment.cpp) | `generateIr` fails on invalid buffers and on reads of buffer properties the schema doesn't make public |
 | [tests/jit_buffer_tests.cpp](../tests/jit_buffer_tests.cpp) | See section 5, Phase 5 |
 
 ### 3.2 Generated behaviour of `X >> B`
@@ -275,7 +279,7 @@ The view is in bounds and in order on every tick, not only when `ready` is on.
 
 5. **State lives in LLVM globals.** This matches how root-level signals are handled today, but it conflicts with AGENTS.md §11 (state must be stack-allocated in state structs, not stored in globals). Buffers inside modules/reactions aren't supported at all.
 6. **`buffer` is not declared in the framework schema/type library.** Validation is done in C++ by `BufferSpec`, not by the schema, and `CodeAnalysis::determineNodeRole` has no specific knowledge of buffers.
-7. **The `MemberAccessAST` global fallback is still generic.** Validation now rejects private buffer properties, but codegen still resolves any `X.y` to a global `X_y`.
+7. **The `MemberAccessAST` global fallback is still generic.** Validation checks buffer reads against the schema, but codegen still resolves any `X.y` to a global `X_y`.
 8. **Synthesized declarations** (`_index`, etc.) are built in C++. This is exactly the hidden, language-invisible logic the design wants to avoid.
 9. `Buffer::` constants are matched by name and namespace, not resolved through an import of `package Buffer`.
 
@@ -298,7 +302,7 @@ The view is in bounds and in order on every tick, not only when `ready` is on.
 - [ ] Declare the `buffer` type and its property schema in the framework library, with an explicit public/private split.
 - [x] Resolve `mode` and `triggerMode` to `Buffer::` constants (error on unknown values) instead of substring matching.
 - [x] Evaluate `capacity`, `frameSize` and `hop` from constants and expressions; validate `capacity ≥ frameSize ≥ hop > 0`.
-- [~] Buffer-aware property resolution: private properties are rejected by validation; codegen still uses the generic fallback.
+- [~] Buffer-aware property resolution: reads are validated against the schema's `public` flags and declarations against `writeable`; codegen still uses the generic fallback.
 - [ ] Move buffer state into domain/module **state structs** (AGENTS.md §11), including `defaultConstant` initialization; support buffers inside modules.
 
 ### Phase 2: Transfer semantics
@@ -335,7 +339,9 @@ The view is in bounds and in order on every tick, not only when `ready` is on.
 | `buffer_dma_pingpong.stride` | `TriggerHalf` alternation, no mirroring | written |
 | `buffer_partial_flush.stride` | trigger block, partial frame, `Buf.count`, deferred reset | written |
 | `buffer_invalid.stride` | `frameSize > capacity` rejected | written |
-| `buffer_port_size.stride` | `Port.size` of a buffer-fed port is `frameSize` | written |
+| `buffer_port_size.stride` | `Port.size` of a buffer-fed port is `frameSize`; `Buf.capacity` | written |
+| `buffer_private_property.stride` | reading a `public: off` property (`mode`) is rejected | written |
+| `buffer_readonly_property.stride` | declaring a `writeable: off` property (`count`) is rejected | written |
 | `buffer_fifo_scalar.stride` | push/pull across domains | todo |
 | `buffer_resizing_accumulate.stride` | 128 → 1024 accumulation | todo |
 | `buffer_overlap_add.stride` | reconstruction | todo |

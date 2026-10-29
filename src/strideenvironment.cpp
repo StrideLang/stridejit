@@ -154,19 +154,34 @@ static bool validateDataTypes(std::shared_ptr<DeclarationNode> decl,
   return valid;
 }
 
-// User code may only read the public buffer properties (BufferSpec).
+// Buffer members follow the `buffer` schema type: only public properties
+// may be read. (Read-only properties can't be declared; BufferSpec checks
+// that.)
 static bool validateBufferAccess(ASTNode node, ASTNode tree) {
   bool valid = true;
   if (node->getNodeType() == AST::MemberAccess) {
     auto access = std::static_pointer_cast<MemberAccessNode>(node);
     auto decl = ASTQuery::findDeclarationByName(access->getEntity(), {}, tree);
-    if (decl && decl->getEntityType() == "buffer" &&
-        !BufferSpec::isPublicProperty(access->getPropertyName())) {
-      LOG_ERROR() << node->getFilename() << ":" << node->getLine()
-                  << " buffer '" << access->getEntity() << "' has no property '"
-                  << access->getPropertyName()
-                  << "'. Use ready, count or frameSize" << std::endl;
-      valid = false;
+    if (decl && decl->getEntityType() == "buffer") {
+      const auto &property = access->getPropertyName();
+      auto schema = BufferSpec::propertyAccess(property, tree);
+      std::string where = node->getFilename() + ":" +
+                          std::to_string(node->getLine()) + " buffer '" +
+                          access->getEntity() + "'";
+      if (!schema.declared || !schema.isPublic) {
+        std::string publicList;
+        for (const auto &name : BufferSpec::publicProperties(tree)) {
+          publicList += (publicList.empty() ? "" : ", ") + name;
+        }
+        LOG_ERROR() << where << " has no public property '" << property
+                    << "'. Public properties: " << publicList << std::endl;
+        valid = false;
+      } else if (!BufferSpec::fromDeclaration(decl, tree)
+                      .isReadableByJit(property)) {
+        LOG_ERROR() << where << ": reading '" << property
+                    << "' is not supported by the JIT yet" << std::endl;
+        valid = false;
+      }
     }
   }
   for (const auto &child : node->getChildren()) {

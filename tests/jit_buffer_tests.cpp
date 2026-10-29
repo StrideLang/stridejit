@@ -157,12 +157,25 @@ TEST(JITBufferTest, PortSizeIsFrameSize) {
   // Frames of 4 out of a capacity of 8, every 2 samples: first * 100 + 4
   pushAndExpect(domain, 1, 10,
                 {{4, 104.0}, {6, 304.0}, {8, 504.0}, {10, 704.0}});
+  EXPECT_EQ(domain.get<int32_t>("Capacity"), 8);
 }
 
 TEST(JITBufferTest, InvalidSizesAreRejected) {
   strd::StrideEnvironment strenv;
   EXPECT_FALSE(
       strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "buffer_invalid.stride"));
+}
+
+TEST(JITBufferTest, PrivatePropertyIsRejected) {
+  strd::StrideEnvironment strenv;
+  EXPECT_FALSE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                 "buffer_private_property.stride"));
+}
+
+TEST(JITBufferTest, ReadOnlyPropertyIsRejected) {
+  strd::StrideEnvironment strenv;
+  EXPECT_FALSE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                 "buffer_readonly_property.stride"));
 }
 
 } // namespace

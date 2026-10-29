@@ -8,6 +8,7 @@ _domainDefinition BufferDom {
     ]
     outputs: [
         signal Result { domain: BufferDom type: Real }
+        signal Capacity { domain: BufferDom type: Int }
     ]
     domainFunctionCode: ''
 }
@@ -36,3 +37,4 @@ reaction FrameLength {
 
 AudioIn >> InBuffer;
 InBuffer.ready >> FrameLength(buffer: InBuffer) >> Result;
+InBuffer.capacity >> Capacity;

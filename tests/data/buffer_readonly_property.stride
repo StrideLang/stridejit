@@ -1,0 +1,21 @@
+# count is public but not writeable, so a declaration can't set it
+_domainDefinition BufferDom {
+    framework: _JitFramework
+    rate: -1
+    inputs: [
+        signal AudioIn { domain: BufferDom type: Real }
+    ]
+    outputs: [
+        signal Out { domain: BufferDom type: Real }
+    ]
+    domainFunctionCode: ''
+}
+
+buffer InBuffer {
+    type: Real
+    capacity: 4
+    mode: Buffer::ModeSliding
+    count: 3
+}
+
+AudioIn >> InBuffer;

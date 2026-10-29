@@ -25,6 +25,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "stride/parser/ast.h"
@@ -68,11 +69,26 @@ struct BufferSpec {
   std::string sinceName() const { return name + "_since"; }
   std::string flushName() const { return name + "_flush"; }
   std::string readyName() const { return name + "_ready"; }
-  std::string frameSizeName() const { return name + "_frameSize"; }
 
-  // Properties user code may read (`Buf.ready`, `Buf.count`,
-  // `Buf.frameSize`)
-  static bool isPublicProperty(const std::string &property);
+  // Resolved sizes, readable as `Buf.<property>` through constants named
+  // `<Buffer>_<property>`
+  std::vector<std::pair<std::string, int>> constantProperties() const {
+    return {{"capacity", capacity}, {"frameSize", frameSize}, {"hop", hop}};
+  }
+  // Whether the JIT implements reading `Buf.<property>`. Which properties
+  // user code may read at all is decided by the schema (propertyAccess).
+  bool isReadableByJit(const std::string &property) const;
+
+  // A property as the `buffer` type's schema declares it (typeProperty,
+  // inherited types included). `public` and `writeable` default to on.
+  struct PropertyAccess {
+    bool declared{false};
+    bool isPublic{true};
+    bool writeable{true};
+  };
+  static PropertyAccess propertyAccess(const std::string &property,
+                                       ASTNode tree);
+  static std::vector<std::string> publicProperties(ASTNode tree);
 };
 
 } // namespace strd
