@@ -16,7 +16,9 @@ Status: **prototype, in progress**. This document records the design agreed for 
 | Trigger block (`trigger: <switch>`, partial flush) | Implemented |
 | `Buf.ready >> Reaction(buffer: Buf)` | Implemented, zero-copy ordered frame view |
 | `ModeSliding` (compiler-decided mirroring) | Implemented |
-| `ModePingPong` | Implemented (frames only; `firstHalf`/`secondHalf` views not yet) |
+| Ping-pong (`frameSize: capacity / 2`, `TriggerHalf`) | Implemented as plain configuration; `ModePingPong` was removed |
+| Peek (`Buf.frame`) | Implemented: zero-copy into reactions and loops, copy into blocks |
+| Buffers into loops | Implemented (main input and through triggered reactions) |
 | `ModeFifo`, `ModeOverlapAdd` | **Not implemented** (rejected with a compile error) |
 | `Domain_init` reset | Implemented |
 | Buffer → buffer, buffer → sink draining | **Not implemented** |
@@ -49,7 +51,6 @@ package Buffer
 constant ModeSliding    { }
 constant ModeFifo       { }
 constant ModeOverlapAdd { }
-constant ModePingPong   { }
 
 constant TriggerFull     { }
 constant TriggerHalf     { }
@@ -79,7 +80,7 @@ buffer AnalysisBuffer {
 | Size | Set by | Meaning |
 | :--- | :--- | :--- |
 | `capacity` | user | Ring length: how much history the buffer keeps |
-| `frameSize` (N) | user, default `capacity` (`capacity / 2` for `ModePingPong`) | Window a reaction reads. Public as `Buf.frameSize` |
+| `frameSize` (N) | user, default `capacity` | Window a reaction reads. Public as `Buf.frameSize` |
 | hop (H) | `triggerMode` (Full = capacity, Half = capacity/2, Quarter = capacity/4) or `hop` for `TriggerPeriodic` | Samples between two built-in triggers |
 | storage | compiler | `capacity`, or `2 × capacity` when mirrored (2.8) |
 
@@ -96,7 +97,7 @@ Readable properties the JIT implements:
 | `Buf.capacity` | declared | compile-time Int | Ring length |
 | `Buf.frameSize` | declared | compile-time Int | Window length N (resolved default) |
 | `Buf.hop` | declared | compile-time Int | Samples between built-in triggers (resolved from the trigger mode) |
-| `Buf.firstHalf` / `Buf.secondHalf` | not in the schema yet | bundle views | Ping-pong halves (DMA HT/TC). **Not implemented yet** |
+| `Buf.frame` | `writeable: off` | frame (`frameSize` elements) | Peek at the current frame, oldest first (2.6) |
 
 Other public properties (`type`, `rate`, `domain`, …) pass the schema check but are reported as "not supported by the JIT yet". The JIT's internal state (write index, hop counter, pending flush, mirror region, DMA descriptors) is not in the schema at all.
 
@@ -111,7 +112,7 @@ Other public properties (`type`, `rate`, `domain`, …) pass the schema check bu
 | Mode | Fires | Hardware analogue |
 | :--- | :--- | :--- |
 | `TriggerFull` | every `capacity` samples | DMA transfer-complete |
-| `TriggerHalf` | every `capacity / 2` samples | DMA half-transfer + complete (ping-pong) |
+| `TriggerHalf` | every `capacity / 2` samples | DMA half-transfer + complete (ping-pong, with `frameSize: capacity / 2`) |
 | `TriggerQuarter` | every `capacity / 4` samples | quad buffering / 75 % overlap |
 | `TriggerPeriodic` | every `hop` samples | STFT hop |
 
@@ -152,7 +153,7 @@ Reactions have no main input ports; their input is the trigger switch (AGENTS.md
 AnalysisBuffer.ready >> FFT(buffer: AnalysisBuffer) >> [Magnitude, Phase];
 ```
 
-The property argument is a pointer to the **oldest sample of the current frame**, so `InBuf[0]` is the oldest sample and `InBuf[N - 1]` the newest. Inside, the reaction sizes its blocks from the port, the same way modules already use `InputPort.size`. For a port fed by a buffer, **`Port.size` is the buffer's `frameSize`** (not its capacity): it is the number of elements the frame view holds. It is a compile-time constant, resolved by stridegen's `getTypeNumOutputs` (`frameSize`, or `capacity`, or `capacity / 2` for `ModePingPong`):
+The property argument is a pointer to the **oldest sample of the current frame**, so `InBuf[0]` is the oldest sample and `InBuf[N - 1]` the newest. Inside, the reaction sizes its blocks from the port, the same way modules already use `InputPort.size`. For a port fed by a buffer, **`Port.size` is the buffer's `frameSize`** (not its capacity): it is the number of elements the frame view holds. It is a compile-time constant, resolved by stridegen's `getTypeNumOutputs` (`frameSize`, or `capacity`):
 
 ```stride
 reaction FFT {
@@ -172,12 +173,18 @@ reaction FFT {
 `buffer_port_size.stride` covers this with a capacity of 8 and a frame of 4. Expressions in block sizes (`(BufferPort.size / 2) + 1`) are not tested yet.
 
 ### 2.6 Transfer semantics (resolutions of the "sink size" discussion)
-1. **Sink size = window length N.** `Buf >> Sink[N]` reads N elements. The compiler checks `N == Buf.frameSize` and reports an error if they differ.
+0. **Reading a buffer is explicit.** A buffer named on its own is only a push target (`X >> Buf`). Reads go through members: `Buf.frame` (the current frame), `Buf.ready`, `Buf.count`, `Buf.capacity`, `Buf.frameSize`, `Buf.hop`. A buffer that is never read through `Buf.frame` pays nothing for it.
+1. **Sink size = window length N.** `Buf.frame >> Sink[N]` copies N elements. The compiler checks `N == Buf.frameSize` and reports an error if they differ.
 2. **`hop` controls the advance**, not the sink. This is what makes overlapping STFT windows possible.
 3. **Scalar sink** (`Buf >> AudioOut`) drains one sample per tick of the consumer domain. There is no `.sample` property; the sink's declaration decides.
 4. **Different sizes need an explicit bridging buffer**: `DmaRx >> Accumulator >> ...`. Buffer → buffer is a **consuming pop + accumulate**.
-5. **Peek vs pop.** Reading a frame into a reaction or analysis block is a **non-destructive peek**. Chained buffer transfers and FIFO reads **pop**. A fan-out from one buffer must not shift data for its siblings. (A trigger-block flush is the one exception: it empties the buffer for everyone after the tick.)
-6. **Prefer zero-copy property passing** (`ready >> R(buffer: B)`) over `B >> Frame[N] >> R()`. The second form allocates a stack copy and adds a `memcpy`.
+5. **Peek vs pop.** Reading `Buf.frame` is a **non-destructive peek** of the current frame, `frameSize` elements, oldest first:
+   * into a reaction or loop (`Buf.frame >> Loop()`, or `R(buffer: Buf)` on a property port) it is a **zero-copy pointer**, a few integer ops per call;
+   * into a declared block (`Buf.frame >> Frame`) it is a **copy**, a snapshot that later pushes in the tick don't change.
+
+   Peeking leaves `Buf.count` and the trigger accounting alone. Chained buffer transfers and FIFO reads will **pop** (not implemented). A fan-out from one buffer must not shift data for its siblings. (A trigger-block flush is the one exception: it empties the buffer for everyone after the tick.) `Buf.frame[i]` is not supported yet because the grammar has no indexed member access; index the copied block, or index inside the reaction or loop.
+6. **Prefer zero-copy** (`Buf.frame >> Loop()`, `ready >> R(buffer: B)`) over copying into a block when you don't need a snapshot.
+7. **Buffers into loops.** A loop takes the frame through its main input like any array: `Buf.frame >> FrameSum() >> Total;`, with `Input[InputPort.size]` sized to `frameSize`. Called directly, the loop runs every tick on whatever the buffer holds. To run it once per frame, call it from a reaction triggered by `Buf.ready` (`Buf.ready >> Analyse(buffer: Buf)`). A loop over a partial frame (after a flush) should stop at the runtime `Port.available`, which isn't implemented yet; until then it reads `frameSize` elements.
 
 ### 2.7 Windowing and vectorization
 Windowing is just elementwise multiplication by a constant table:
@@ -194,7 +201,6 @@ Vectorization is a **general** codegen property of array/bundle arithmetic (`+ -
 ### 2.8 Storage strategy by mode
 | Mode | Backing store | Notes |
 | :--- | :--- | :--- |
-| `ModePingPong` / `TriggerHalf` | 1 × capacity | DMA writes in place; halves exposed as views. **Never mirrored.** |
 | `ModeFifo` | 1 × capacity | head/tail ring |
 | `ModeSliding` | decided by the compiler (below) | Contiguous windows across the wrap for SIMD/FFT |
 | `ModeOverlapAdd` | ≥ frameSize + hop | accumulate frames, drain samples |
@@ -204,7 +210,7 @@ Vectorization is a **general** codegen property of array/bundle arithmetic (`+ -
 | Example | Mirrored |
 | :--- | :--- |
 | `capacity 1024, frameSize 1024, TriggerFull` | no |
-| `capacity 8, ModePingPong` (N = H = 4) | no |
+| `capacity 8, frameSize 4, TriggerHalf` (ping-pong, N = H = 4) | no |
 | `capacity 1024, frameSize 1024, hop 256` | yes (overlap) |
 | `capacity 6, frameSize 4, hop 4` | yes (hop doesn't divide capacity) |
 
@@ -271,7 +277,7 @@ The view is in bounds and in order on every tick, not only when `ready` is on.
 
 **Correctness / semantics**
 1. `ModeFifo` and `ModeOverlapAdd` are rejected. Scalar drain and buffer → buffer transfers don't exist yet.
-2. `firstHalf` / `secondHalf` views for ping-pong are not implemented. Ping-pong reactions receive the ready half as the frame.
+2. `Buf.frame[i]` (indexed member access) needs a grammar change.
 3. Elements of a partial frame beyond `min(count, frameSize)` are unspecified (no zero-padding).
 4. A runtime count of valid samples in a partial frame is not passed through the port yet; reactions read `Buf.count` from the root.
 
@@ -311,8 +317,10 @@ The view is in bounds and in order on every tick, not only when `ready` is on.
 - [x] Trigger block with partial flush.
 - [ ] `frameSize == sink.size` compile-time check with a clear diagnostic.
 - [ ] Scalar drain (`B >> Scalar`) and buffer → buffer accumulate (pop semantics).
-- [ ] Peek vs pop rules for fan-out.
-- [~] `ModePingPong`: frames done; `firstHalf` / `secondHalf` views missing.
+- [x] Peek: `Buf.frame` (zero-copy into callables, copy into blocks, size check).
+- [ ] Pop for buffer → buffer transfers and FIFO reads.
+- [x] Ping-pong as configuration; `ModePingPong` removed.
+- [x] Buffers into loops (main input; gated through reactions).
 - [x] `ModeSliding` mirrored storage (opt-out comes with the system binding).
 - [ ] `ModeOverlapAdd` accumulate/drain.
 - [ ] `ModeFifo` with overrun/underrun behaviour defined.
@@ -336,7 +344,11 @@ The view is in bounds and in order on every tick, not only when `ready` is on.
 | `buffer_trigger.stride` | `TriggerFull` on capacity | written |
 | `buffer_sliding_window_hop.stride` | N=4, H=2 over capacity 8: overlapping frames in order across the wrap; `_init` restart | written |
 | `buffer_periodic_wrap.stride` | hop that doesn't divide the capacity (mirrored) | written |
-| `buffer_dma_pingpong.stride` | `TriggerHalf` alternation, no mirroring | written |
+| `buffer_dma_pingpong.stride` | ping-pong as configuration: `TriggerHalf` alternation, no mirroring | written |
+| `buffer_frame_copy.stride` | `Buf.frame >> Block`: oldest first across the wrap, `count` unchanged | written |
+| `buffer_loop.stride` | frame into a loop every tick, and once per frame through a reaction | written |
+| `buffer_frame_size_mismatch.stride` | frame copied into a block of the wrong size is rejected | written |
+| `buffer_bare_read.stride` | reading a buffer by name is rejected | written |
 | `buffer_partial_flush.stride` | trigger block, partial frame, `Buf.count`, deferred reset | written |
 | `buffer_invalid.stride` | `frameSize > capacity` rejected | written |
 | `buffer_port_size.stride` | `Port.size` of a buffer-fed port is `frameSize`; `Buf.capacity` | written |
@@ -384,5 +396,6 @@ Trigger block:
 
 Storage and views:
 * `mirror: off` in the system binding, with mask/modulo indexing for memory-constrained targets.
-* `firstHalf` / `secondHalf` views for ping-pong.
+* `Buf.frame[i]`: indexed member access in the grammar (`portPropertyDef` in strideparser).
+* Double/triple buffering between domains, decided when cross-domain buffering is designed.
 * Zero-filled storage on `_init` (today stale samples remain but are never part of a valid frame).

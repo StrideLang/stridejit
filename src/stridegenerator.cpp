@@ -818,6 +818,18 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
   state.registerDataTypes(tree);
   state.m_intanceTree = CodeAnalysis::getStateStructInformation({}, tree);
 
+  // Buffers may be read (`Buf.frame`) by streams that come before their
+  // declaration
+  for (const auto &node : tree->getChildren()) {
+    if (node->getNodeType() == AST::Declaration &&
+        std::static_pointer_cast<DeclarationNode>(node)->getEntityType() ==
+            "buffer") {
+      auto spec = BufferSpec::fromDeclaration(
+          std::static_pointer_cast<DeclarationNode>(node), tree);
+      state.bufferSpecs[spec.name] = spec;
+    }
+  }
+
   // PRE-PASS: Find all domain variables, signals, switches, and state machine
   // variables, and inject them into dynamic fields for each domain.
   for (const auto &node : tree->getChildren()) {
@@ -2040,11 +2052,22 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
           }
         }
         // Connect to previous stream node
+        std::shared_ptr<MemberAccessNode> prevMember =
+            prev && prev->getNodeType() == AST::MemberAccess
+                ? std::static_pointer_cast<MemberAccessNode>(prev)
+                : nullptr;
         if (decl && decl->getEntityType() == "buffer") {
           state.bufferDomains[decl->getName()] = domainName;
           generated[domainName].expr.back() = std::make_unique<BufferPushExprAST>(
               BufferSpec::fromDeclaration(decl, tree),
               std::move(generated[domainName].expr.back()));
+        } else if (prevMember && prevMember->getPropertyName() == "frame" &&
+                   state.bufferSpecs.count(prevMember->getEntity())) {
+          // `Buf.frame >> Block` copies the current frame
+          generated[domainName].expr.back() =
+              std::make_unique<BufferFrameCopyExprAST>(
+                  state.bufferSpecs[prevMember->getEntity()],
+                  decl->getName());
         } else {
           generated[domainName].expr.back() = std::make_unique<BinaryExprAST>(
               '=', std::move(entityExpr),

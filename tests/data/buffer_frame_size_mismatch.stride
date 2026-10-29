@@ -1,0 +1,24 @@
+# A block that doesn't hold exactly one frame is rejected
+_domainDefinition BufferDom {
+    framework: _JitFramework
+    rate: -1
+    inputs: [
+        signal AudioIn { domain: BufferDom type: Real }
+    ]
+    outputs: [
+        signal Snapshot[3] { domain: BufferDom type: Real }
+        signal Count { domain: BufferDom type: Int }
+    ]
+    domainFunctionCode: ''
+}
+
+buffer InBuffer {
+    type: Real
+    capacity: 8
+    frameSize: 4
+    hop: 2
+}
+
+AudioIn >> InBuffer;
+InBuffer.frame >> Snapshot;
+InBuffer.count >> Count;

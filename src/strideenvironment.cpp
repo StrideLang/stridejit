@@ -9,6 +9,7 @@
 #include <unordered_set>
 
 // stride
+#include "stride/parser/streamnode.h"
 #include "stride/stridegen/coderesolver.hpp"
 #include "stride/stridegen/codevalidator.hpp"
 #include "stride/utils/astfunctions.h"
@@ -181,6 +182,61 @@ static bool validateBufferAccess(ASTNode node, ASTNode tree) {
         LOG_ERROR() << where << ": reading '" << property
                     << "' is not supported by the JIT yet" << std::endl;
         valid = false;
+      }
+    }
+  }
+  if (node->getNodeType() == AST::Stream) {
+    std::vector<ASTNode> members;
+    ASTNode current = node;
+    while (current && current->getNodeType() == AST::Stream) {
+      auto stream = std::static_pointer_cast<StreamNode>(current);
+      members.push_back(stream->getLeft());
+      current = stream->getRight();
+    }
+    members.push_back(current);
+    auto bufferNamed = [&](const std::string &name) {
+      auto decl = ASTQuery::findDeclarationByName(name, {}, tree);
+      return decl && decl->getEntityType() == "buffer" ? decl : nullptr;
+    };
+    for (size_t i = 0; i + 1 < members.size(); i++) {
+      const auto &member = members[i];
+      if (!member) {
+        continue;
+      }
+      std::string where = member->getFilename() + ":" +
+                          std::to_string(member->getLine()) + " ";
+      // A buffer named on its own is only a push target
+      if (member->getNodeType() == AST::Entity &&
+          bufferNamed(ASTQuery::getNodeName(member))) {
+        LOG_ERROR() << where << "buffer '" << ASTQuery::getNodeName(member)
+                    << "' can't be read directly. Read '"
+                    << ASTQuery::getNodeName(member)
+                    << ".frame' to peek at the current frame" << std::endl;
+        valid = false;
+      }
+      // `Buf.frame >> Block` copies frameSize elements
+      if (member->getNodeType() == AST::MemberAccess) {
+        auto access = std::static_pointer_cast<MemberAccessNode>(member);
+        auto bufferDecl = bufferNamed(access->getEntity());
+        const auto &next = members[i + 1];
+        if (bufferDecl && access->getPropertyName() == "frame" && next &&
+            next->getNodeType() == AST::Entity) {
+          auto blockDecl = ASTQuery::findDeclarationByName(
+              ASTQuery::getNodeName(next), {}, tree);
+          if (blockDecl && blockDecl->getNodeType() == AST::ArrayDeclaration) {
+            std::vector<LangError> errors;
+            int blockSize =
+                ASTQuery::getEntityDeclaredSize(blockDecl, {}, tree, &errors);
+            auto spec = BufferSpec::fromDeclaration(bufferDecl, tree);
+            if (spec.valid() && blockSize != spec.frameSize) {
+              LOG_ERROR() << where << "'" << blockDecl->getName() << "' has "
+                          << blockSize << " elements but the frame of buffer '"
+                          << spec.name << "' has " << spec.frameSize
+                          << std::endl;
+              valid = false;
+            }
+          }
+        }
       }
     }
   }

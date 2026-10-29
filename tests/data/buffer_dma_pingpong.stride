@@ -1,4 +1,5 @@
-# Ping-pong: TriggerHalf alternates between the two halves, no mirroring
+# Ping-pong as plain configuration: frames of half the capacity on
+# TriggerHalf alternate between the two halves, without mirroring
 _domainDefinition BufferDom {
     framework: _JitFramework
     rate: -1
@@ -18,7 +19,7 @@ constant FrameLength { value: 4 }
 buffer InBuffer {
     type: Real
     capacity: 8
-    mode: Buffer::ModePingPong
+    frameSize: 4
     triggerMode: Buffer::TriggerHalf
 }
 

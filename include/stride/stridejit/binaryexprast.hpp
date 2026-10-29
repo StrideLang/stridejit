@@ -61,6 +61,21 @@ public:
   codegen(StrideCompiler &state) override;
 };
 
+/// BufferFrameCopyExprAST - `Buf.frame >> Block`: copies the current frame
+/// (frameSize elements, oldest first) into a block, as a snapshot.
+class BufferFrameCopyExprAST : public ExprAST {
+  BufferSpec Spec;
+  std::string Destination;
+
+public:
+  BufferFrameCopyExprAST(BufferSpec spec, std::string destination);
+
+  std::pair<llvm::Value *, std::optional<llvm::Type *>>
+  codegen(StrideCompiler &state) override;
+
+  bool writesTo(const std::string &varName) const override;
+};
+
 /// BinaryExprAST - Expression class for a binary operator.
 class BinaryExprAST : public ExprAST {
   char Op;

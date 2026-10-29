@@ -33,6 +33,7 @@
 
 #include "stride/stridegen/codeanalysis.hpp"
 #include "stride/parser/declarationnode.h"
+#include "stride/stridejit/bufferspec.hpp"
 #include "stride/parser/functionnode.h"
 #include "stride/parser/memberaccessnode.h"
 #include "stride/stridejit/functionast.hpp"
@@ -299,6 +300,8 @@ public:
   std::map<ASTNode, std::vector<DynamicDomainField>> dynamicDomainFields;
   // Domain whose streams push into each buffer. Its _init resets the buffer.
   std::map<std::string, std::string> bufferDomains;
+  // Resolved buffer declarations, for reads such as `Buf.frame`
+  std::map<std::string, BufferSpec> bufferSpecs;
   void addDynamicDomainField(ASTNode domainNode, const std::string &name,
                              llvm::Type *type, llvm::Constant *defaultVal);
 

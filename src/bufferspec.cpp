@@ -114,11 +114,15 @@ BufferSpec BufferSpec::fromDeclaration(std::shared_ptr<DeclarationNode> decl,
 
   if (auto modeNode = property("mode")) {
     int mode = resolveBufferConstant(
-        modeNode,
-        {"ModeSliding", "ModeFifo", "ModeOverlapAdd", "ModePingPong"});
+        modeNode, {"ModeSliding", "ModeFifo", "ModeOverlapAdd"});
     if (mode < 0) {
-      error("unknown mode '" + AST::toText(modeNode) +
-            "'. Use one of the Buffer::Mode* constants");
+      if (ASTQuery::getNodeName(modeNode) == "ModePingPong") {
+        error("Buffer::ModePingPong was removed. Use frameSize: capacity / 2 "
+              "with Buffer::TriggerHalf; the compiler picks the layout");
+      } else {
+        error("unknown mode '" + AST::toText(modeNode) +
+              "'. Use one of the Buffer::Mode* constants");
+      }
       return spec;
     }
     spec.mode = static_cast<Mode>(mode);
@@ -141,14 +145,11 @@ BufferSpec BufferSpec::fromDeclaration(std::shared_ptr<DeclarationNode> decl,
       return spec;
     }
     spec.trigger = static_cast<Trigger>(trigger);
-  } else if (spec.mode == Mode::PingPong) {
-    spec.trigger = Trigger::Half;
   } else if (hasHop) {
     spec.trigger = Trigger::Periodic;
   }
 
-  spec.frameSize =
-      spec.mode == Mode::PingPong ? spec.capacity / 2 : spec.capacity;
+  spec.frameSize = spec.capacity;
   evalInt("frameSize", spec.frameSize);
 
   switch (spec.trigger) {
@@ -183,11 +184,6 @@ BufferSpec BufferSpec::fromDeclaration(std::shared_ptr<DeclarationNode> decl,
           std::to_string(spec.frameSize) + ", hop " +
           std::to_string(spec.hop) + ")");
   }
-  if (spec.mode == Mode::PingPong &&
-      (spec.trigger != Trigger::Half || spec.frameSize * 2 != spec.capacity)) {
-    error("Buffer::ModePingPong reads half the capacity on "
-          "Buffer::TriggerHalf");
-  }
 
   if (auto triggerBlock = property("trigger")) {
     if (triggerBlock->getNodeType() != AST::Entity) {
@@ -213,7 +209,7 @@ BufferSpec BufferSpec::fromDeclaration(std::shared_ptr<DeclarationNode> decl,
 }
 
 bool BufferSpec::isReadableByJit(const std::string &property) const {
-  if (property == "ready" || property == "count") {
+  if (property == "ready" || property == "count" || property == "frame") {
     return true;
   }
   for (const auto &constant : constantProperties()) {

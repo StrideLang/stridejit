@@ -1,11 +1,14 @@
 #include "gtest/gtest.h"
+#include <algorithm>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "stride/stridejit/strideenvironment.hpp"
+#include "llvm/IR/Module.h"
 
 namespace {
 
@@ -17,6 +20,13 @@ public:
     if (!env.generateIr(std::string(STRIDEJIT_TESTS_SOURCE_DIR) + fixture)) {
       ADD_FAILURE() << "generateIr failed for " << fixture;
       return false;
+    }
+    // The module is handed to the JIT on compile
+    for (const auto &global : env.mStrideEnv.TheModule->globals()) {
+      if (global.getValueType()->isArrayTy()) {
+        arraySizes[global.getName().str()] =
+            global.getValueType()->getArrayNumElements();
+      }
     }
     if (!env.compileInMemory()) {
       ADD_FAILURE() << "compileInMemory failed for " << fixture;
@@ -36,15 +46,21 @@ public:
                                    "BufferDom"))
         << "No state variable " << name;
   }
-  template <typename T> T get(const std::string &name) {
-    auto value = env.getStateVar<T>(state.get(), name, std::nullopt,
-                                    "BufferDom");
+  template <typename T>
+  T get(const std::string &name, std::optional<int> index = std::nullopt) {
+    auto value = env.getStateVar<T>(state.get(), name, index, "BufferDom");
     EXPECT_TRUE(value.has_value()) << "No state variable " << name;
     return value.value_or(T{});
   }
 
   void process() { invoke("BufferDom_process"); }
   void init() { invoke("BufferDom_init"); }
+
+  // Element count of a global array, e.g. a buffer's storage
+  uint64_t arraySize(const std::string &global) const {
+    auto it = arraySizes.find(global);
+    return it != arraySizes.end() ? it->second : 0;
+  }
 
 private:
   void invoke(const std::string &function) {
@@ -54,6 +70,7 @@ private:
 
   strd::StrideEnvironment env;
   std::shared_ptr<void> state;
+  std::map<std::string, uint64_t> arraySizes;
 };
 
 // Pushes `first..last` and checks Result after each sample. `expected` maps
@@ -114,6 +131,8 @@ TEST(JITBufferTest, PeriodicHopNotDividingCapacity) {
 TEST(JITBufferTest, PingPongAlternatesHalves) {
   BufferDomain domain;
   ASSERT_TRUE(domain.compile("buffer_dma_pingpong.stride"));
+  // Frames of half the capacity never cross the end of the ring
+  EXPECT_EQ(domain.arraySize("InBuffer"), 8u);
   pushAndExpect(domain, 1, 12, {{4, 104.0}, {8, 508.0}, {12, 912.0}});
 }
 
@@ -158,6 +177,55 @@ TEST(JITBufferTest, PortSizeIsFrameSize) {
   pushAndExpect(domain, 1, 10,
                 {{4, 104.0}, {6, 304.0}, {8, 504.0}, {10, 704.0}});
   EXPECT_EQ(domain.get<int32_t>("Capacity"), 8);
+}
+
+TEST(JITBufferTest, FrameCopyIsOldestFirstPeek) {
+  BufferDomain domain;
+  ASSERT_TRUE(domain.compile("buffer_frame_copy.stride"));
+  for (int k = 1; k <= 10; ++k) {
+    domain.set<double>("AudioIn", static_cast<double>(k));
+    domain.process();
+    // Peeking doesn't consume
+    EXPECT_EQ(domain.get<int32_t>("Count"), std::min(k, 8)) << "At sample " << k;
+    if (k >= 4) {
+      // The last 4 samples, oldest first, also across the end of the ring
+      for (int i = 0; i < 4; ++i) {
+        EXPECT_DOUBLE_EQ(domain.get<double>("Snapshot", i),
+                         static_cast<double>(k - 3 + i))
+            << "At sample " << k << ", element " << i;
+      }
+    }
+  }
+}
+
+TEST(JITBufferTest, FrameIntoLoop) {
+  BufferDomain domain;
+  ASSERT_TRUE(domain.compile("buffer_loop.stride"));
+  double held = 0.0;
+  for (int k = 1; k <= 10; ++k) {
+    domain.set<double>("AudioIn", static_cast<double>(k));
+    domain.process();
+    // Every tick: sum of the samples in the frame so far (up to 4)
+    double expected = k < 4 ? k * (k + 1) / 2.0 : 4.0 * k - 6.0;
+    EXPECT_DOUBLE_EQ(domain.get<double>("Total"), expected) << "At sample " << k;
+    // Only on ready (every 2 samples once the frame is full)
+    if (k >= 4 && k % 2 == 0) {
+      held = 4.0 * k - 6.0;
+    }
+    EXPECT_DOUBLE_EQ(domain.get<double>("Result"), held) << "At sample " << k;
+  }
+}
+
+TEST(JITBufferTest, FrameCopySizeMismatchIsRejected) {
+  strd::StrideEnvironment strenv;
+  EXPECT_FALSE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                 "buffer_frame_size_mismatch.stride"));
+}
+
+TEST(JITBufferTest, BareBufferReadIsRejected) {
+  strd::StrideEnvironment strenv;
+  EXPECT_FALSE(
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "buffer_bare_read.stride"));
 }
 
 TEST(JITBufferTest, InvalidSizesAreRejected) {

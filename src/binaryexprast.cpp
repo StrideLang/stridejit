@@ -713,6 +713,12 @@ BoolExprAST::codegen(StrideCompiler &state) {
 
 std::pair<llvm::Value *, std::optional<llvm::Type *>>
 MemberAccessAST::codegen(StrideCompiler &state) {
+  // `Buf.frame` is a zero-copy peek at the current frame
+  auto bufferIt = state.bufferSpecs.find(Name);
+  if (bufferIt != state.bufferSpecs.end() && Property == "frame" &&
+      state.NamedValues.find(Name) == state.NamedValues.end()) {
+    return BufferViewExprAST(bufferIt->second).codegen(state);
+  }
   // TODO mangle port property names to avoid clashes
   std::string portToken = Name.empty() ? Property : (Name + "_" + Property);
   if (state.NamedValues.find(portToken) == state.NamedValues.end()) {
@@ -1396,4 +1402,37 @@ BufferViewExprAST::codegen(StrideCompiler &state) {
   llvm::Value *viewPtr =
       B.CreateInBoundsGEP(bufType, bufPtr, {i32(0), start}, "buf_view");
   return {viewPtr, bufType->getArrayElementType()};
+}
+
+BufferFrameCopyExprAST::BufferFrameCopyExprAST(BufferSpec spec,
+                                               std::string destination)
+    : Spec(std::move(spec)), Destination(std::move(destination)) {}
+
+bool BufferFrameCopyExprAST::writesTo(const std::string &varName) const {
+  return varName == Destination;
+}
+
+std::pair<llvm::Value *, std::optional<llvm::Type *>>
+BufferFrameCopyExprAST::codegen(StrideCompiler &state) {
+  auto [framePtr, elemType] = BufferViewExprAST(Spec).codegen(state);
+  if (!framePtr || !elemType.has_value()) {
+    return {nullptr, std::nullopt};
+  }
+  llvm::Type *destType = nullptr;
+  llvm::Value *destPtr = findBufferState(state, Destination, &destType);
+  if (!destPtr || !destType || !destType->isArrayTy() ||
+      destType->getArrayElementType() != elemType.value() ||
+      destType->getArrayNumElements() !=
+          static_cast<uint64_t>(Spec.frameSize)) {
+    return {state.LogErrorV(("'" + Destination + "' must be an array of " +
+                             std::to_string(Spec.frameSize) +
+                             " elements of the type of buffer '" + Spec.name +
+                             "'")
+                                .c_str()),
+            std::nullopt};
+  }
+  state.Builder->CreateMemCpy(destPtr, llvm::MaybeAlign(), framePtr,
+                              llvm::MaybeAlign(),
+                              llvm::ConstantExpr::getSizeOf(destType));
+  return {nullptr, std::nullopt};
 }

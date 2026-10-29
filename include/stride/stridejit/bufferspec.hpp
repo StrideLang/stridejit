@@ -37,7 +37,7 @@ class DeclarationNode;
 /// Everything the compiler needs is computed here once, so validation,
 /// storage allocation, push codegen and the reaction frame view agree.
 struct BufferSpec {
-  enum class Mode { Sliding, Fifo, OverlapAdd, PingPong };
+  enum class Mode { Sliding, Fifo, OverlapAdd };
   enum class Trigger { Full, Half, Quarter, Periodic };
 
   std::string name;

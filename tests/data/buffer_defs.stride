@@ -5,7 +5,6 @@ package Buffer
 constant ModeSliding    { }
 constant ModeFifo       { }
 constant ModeOverlapAdd { }
-constant ModePingPong   { }
 
 # Trigger Modes
 constant TriggerFull     { }

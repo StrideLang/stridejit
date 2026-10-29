@@ -1,0 +1,81 @@
+# A buffer's frame goes into a loop through its main input (every tick)
+# or through a reaction triggered by Buf.ready. InputPort.size is the
+# frame size (4), not the capacity (8).
+_domainDefinition BufferDom {
+    framework: _JitFramework
+    rate: -1
+    inputs: [
+        signal AudioIn { domain: BufferDom type: Real }
+    ]
+    outputs: [
+        signal Total { domain: BufferDom type: Real }
+        signal Result { domain: BufferDom type: Real }
+    ]
+    domainFunctionCode: ''
+}
+
+buffer InBuffer {
+    type: Real
+    capacity: 8
+    frameSize: 4
+    hop: 2
+}
+
+module Equal {
+    ports: [
+        mainOutputPort OutputPort { block: Output },
+        mainInputPort InputPort { block: Input }
+    ]
+    blocks: [
+        signal Input[2] { domain: OutputPort.domain type: Int }
+        switch Output { domain: OutputPort.domain }
+    ]
+    streams: [
+        [Input[0], Input[1]] >> __Equal() >> Output;
+    ]
+}
+
+platformModule __Equal@Int_Bool {
+    inputs: [Int, Int]
+    outputs: [Switch]
+    processing: "%%outtokens:0%% = llvm::icmp eq %%intokens:0%%, %%intokens:1%%"
+    inherits: [_Signal]
+}
+
+# Sum of the frame
+loop FrameSum {
+    ports: [
+        mainInputPort InputPort { block: Input }
+        mainOutputPort OutputPort { block: Output }
+    ]
+    blocks: [
+        signal Input[InputPort.size] { type: Real }
+        signal Output { default: 0.0 type: Real }
+        signal Index { default: 0 type: Int }
+        switch Done { default: off }
+    ]
+    terminateWhen: Done
+    streams: [
+        Input[Index] + Output >> Output;
+        Index + 1 >> Index;
+        [Index, InputPort.size] >> Equal() >> Done;
+    ]
+}
+
+reaction Analyse {
+    ports: [
+        propertyInputPort InBufPort { name: "buffer" block: InBuf }
+        mainOutputPort OutPort { block: OutVal }
+    ]
+    blocks: [
+        signal InBuf[InBufPort.size] { type: Real }
+        signal OutVal { type: Real }
+    ]
+    streams: [
+        InBuf >> FrameSum() >> OutVal;
+    ]
+}
+
+AudioIn >> InBuffer;
+InBuffer.frame >> FrameSum() >> Total;
+InBuffer.ready >> Analyse(buffer: InBuffer) >> Result;
