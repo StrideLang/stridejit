@@ -3,6 +3,8 @@
 #include "stride/stridejit/stridecompiler.hpp"
 #include "stride/stridejit/numberexprast.hpp"
 
+#include <algorithm>
+
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/GlobalVariable.h>

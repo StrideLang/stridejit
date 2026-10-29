@@ -1,5 +1,7 @@
 #include "gtest/gtest.h"
 
+#include <cmath>
+
 #include "stride/parser/ast.h"
 #include "stride/parser/declarationnode.h"
 #include "stride/parser/valuenode.h"

@@ -1,4 +1,5 @@
 #include "stride/utils/logger.h"
+#include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
