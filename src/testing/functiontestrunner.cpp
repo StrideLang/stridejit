@@ -1,5 +1,7 @@
 #include "stride/testing/functiontestrunner.hpp"
 #include "stride/testing/memorytracker.hpp"
+#include <algorithm>
+#include <cmath>
 #include <sstream>
 #include <iostream>
 
