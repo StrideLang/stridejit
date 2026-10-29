@@ -959,6 +959,7 @@ llvm::Function *PrototypeAST::codegen(StrideCompiler &state) {
                       .name);
     } else {
       Arg.setName(UsedPortProperties[Idx - (OutArgs.size() + InArgs.size() +
+                                            PropertyArgs.size() +
                                             InternalPersistentArgs.size() +
                                             ExternalArgs.size())]
                       .name);

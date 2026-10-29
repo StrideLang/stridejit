@@ -79,22 +79,24 @@ buffer AnalysisBuffer {
 | Size | Set by | Meaning |
 | :--- | :--- | :--- |
 | `capacity` | user | Ring length: how much history the buffer keeps |
-| `frameSize` (N) | user, default `capacity` (`capacity / 2` for `ModePingPong`) | Window a reaction reads. Public as `Buf.size` |
+| `frameSize` (N) | user, default `capacity` (`capacity / 2` for `ModePingPong`) | Window a reaction reads. Public as `Buf.frameSize` |
 | hop (H) | `triggerMode` (Full = capacity, Half = capacity/2, Quarter = capacity/4) or `hop` for `TriggerPeriodic` | Samples between two built-in triggers |
 | storage | compiler | `capacity`, or `2 × capacity` when mirrored (2.8) |
 
-They must satisfy `capacity ≥ frameSize ≥ hop > 0`. Giving `hop` without a `triggerMode` selects `TriggerPeriodic`. Giving a `hop` that disagrees with a non-periodic trigger mode is an error.
+They must satisfy `capacity ≥ frameSize ≥ hop > 0`. There is no `size` property: `capacity` is the history length and `frameSize` the window, and the old schema `size` was removed in favour of them. Giving `hop` without a `triggerMode` selects `TriggerPeriodic`. Giving a `hop` that disagrees with a non-periodic trigger mode is an error.
 
 Public, read-only properties (the only ones user code may reference; anything else is a compile error):
 
 | Property | Kind | Meaning |
 | :--- | :--- | :--- |
-| `Buf.ready` | switch | A frame is ready this tick |
-| `Buf.size` | compile-time Int | `frameSize` |
+| `Buf.ready` | trigger | A frame is ready this tick |
+| `Buf.frameSize` | compile-time Int | Window length N |
 | `Buf.count` | Int | Samples held since the last reset or flush, capped at `capacity` |
 | `Buf.firstHalf` / `Buf.secondHalf` | bundle views | Ping-pong halves (DMA HT/TC). **Not implemented yet** |
 
 Everything else (write index, hop counter, pending flush, mirror region, DMA descriptors) is private.
+
+**Triggers vs switches.** `Buf.ready` is a `trigger`: a switch that turns off automatically at the end of its domain's processing, so it is on only in the tick that set it. Every domain-level `trigger` behaves this way. Switches convert to triggers by passing their value (a switch written into a trigger sets it for that tick). Because a trigger is cleared at the end of the tick, streams that read `Buf.ready` must come after the push stream. Later conversions may be added, such as edge detection (off → on) when a switch drives a trigger.
 
 > [!IMPORTANT]
 > Goal: keep schemas small, constrained and explicit, with a clear split between public and private properties. Port/entity property computation (like `size` on ports today) currently happens in C++ and can't be seen from the language. In the long run, buffer logic should be expressible in Stride itself (see the self-hosting sketch in 2.10).
@@ -146,7 +148,7 @@ Reactions have no main input ports; their input is the trigger switch (AGENTS.md
 AnalysisBuffer.ready >> FFT(buffer: AnalysisBuffer) >> [Magnitude, Phase];
 ```
 
-The property argument is a pointer to the **oldest sample of the current frame**, so `InBuf[0]` is the oldest sample and `InBuf[N - 1]` the newest. Inside, the reaction sizes its outputs from the buffer, the same way modules already use `InputPort.size`:
+The property argument is a pointer to the **oldest sample of the current frame**, so `InBuf[0]` is the oldest sample and `InBuf[N - 1]` the newest. Inside, the reaction sizes its blocks from the port, the same way modules already use `InputPort.size`. For a port fed by a buffer, **`Port.size` is the buffer's `frameSize`** (not its capacity): it is the number of elements the frame view holds. It is a compile-time constant, resolved by stridegen's `getTypeNumOutputs` (`frameSize`, or `capacity`, or `capacity / 2` for `ModePingPong`):
 
 ```stride
 reaction FFT {
@@ -156,13 +158,14 @@ reaction FFT {
         mainOutputPort PhasePort { block: Phase }
     ]
     blocks: [
-        signal Mag[(InBuffer.size / 2) + 1]   { type: Real }
-        signal Phase[(InBuffer.size / 2) + 1] { type: Real }
+        signal InBuffer[BufferPort.size] { type: Real }
+        signal Mag[(BufferPort.size / 2) + 1]   { type: Real }
+        signal Phase[(BufferPort.size / 2) + 1] { type: Real }
     ]
 }
 ```
 
-(Sizing reaction blocks from `InBuffer.size` inside the reaction is not implemented yet. Fixtures declare the size explicitly.)
+`buffer_port_size.stride` covers this with a capacity of 8 and a frame of 4. Expressions in block sizes (`(BufferPort.size / 2) + 1`) are not tested yet.
 
 ### 2.6 Transfer semantics (resolutions of the "sink size" discussion)
 1. **Sink size = window length N.** `Buf >> Sink[N]` reads N elements. The compiler checks `N == Buf.frameSize` and reports an error if they differ.
@@ -182,7 +185,7 @@ InBuffer * HannCoeffs >> Windowed;
 
 Vectorization is a **general** codegen property of array/bundle arithmetic (`+ - * /`), lowered to SIMD (AVX/NEON/MVE) or CMSIS-DSP. It is not specific to windows.
 
-**Window tables (decided).** Window shapes are written as **compile-time generator functions** (`Hann(N)`, `Hamming(N)`, `Blackman(N)`), which the compiler evaluates into **precomputed read-only constant arrays**. Source stays short and size-generic (`Hann(InBuffer.size)`). The emitted code is the same as a hand-written constant table: no runtime computation, foldable lookups, and placement in flash/ROM on embedded targets. Explicit constant arrays stay supported for custom windows.
+**Window tables (decided).** Window shapes are written as **compile-time generator functions** (`Hann(N)`, `Hamming(N)`, `Blackman(N)`), which the compiler evaluates into **precomputed read-only constant arrays**. Source stays short and size-generic (`Hann(InBuffer.frameSize)`). The emitted code is the same as a hand-written constant table: no runtime computation, foldable lookups, and placement in flash/ROM on embedded targets. Explicit constant arrays stay supported for custom windows.
 
 ### 2.8 Storage strategy by mode
 | Mode | Backing store | Notes |
@@ -231,7 +234,7 @@ Self-hosting sketch: a buffer could eventually be a library `module` with a pers
 | [bufferspec.hpp](../include/stride/stridejit/bufferspec.hpp) / [bufferspec.cpp](../src/bufferspec.cpp) | New `BufferSpec`: resolves `capacity`/`frameSize`/`hop` (constant expressions), `mode`/`triggerMode` (`Buffer::` constants), the `trigger` block, defaults, validation and the mirroring decision. Single source for every other part. |
 | [binaryexprast.hpp](../include/stride/stridejit/binaryexprast.hpp) / [binaryexprast.cpp](../src/binaryexprast.cpp) | `BufferPushExprAST` rewritten on `BufferSpec` (count/hop accounting, mirror write, trigger block). New `BufferViewExprAST` returns the frame pointer. |
 | [stridecompiler.cpp](../src/stridecompiler.cpp) | Buffer storage sized from `BufferSpec::storageSize()` |
-| [stridegenerator.cpp](../src/stridegenerator.cpp) | Synthesizes `<B>_index`, `_count`, `_since`, `_ready`, `_flush` (only with a trigger block) and the constant `_size`. `Buf.ready` is a trigger only for buffers. Buffer property arguments become `BufferViewExprAST`. `<Domain>_init` resets the buffers its streams push into. |
+| [stridegenerator.cpp](../src/stridegenerator.cpp) | Synthesizes `<B>_index`, `_count`, `_since`, `_ready`, `_flush` (only with a trigger block) and the constant `_frameSize`. `Buf.ready` is a trigger only for buffers. Buffer property arguments become `BufferViewExprAST`. `<Domain>_init` resets the buffers its streams push into. |
 | [strideenvironment.cpp](../src/strideenvironment.cpp) | `generateIr` fails on invalid buffers and on access to private buffer properties |
 | [tests/jit_buffer_tests.cpp](../tests/jit_buffer_tests.cpp) | See section 5, Phase 5 |
 
@@ -242,11 +245,11 @@ store X → B[index]   (and B[index + capacity] when mirrored)
 index = index + 1 == capacity ? 0 : index + 1
 count = min(count + 1, capacity)
 since = since + 1
-ready = (count >= frameSize && since >= hop) || trigger   # "|| trigger" only with a trigger block
+ready |= (count >= frameSize && since >= hop) || trigger  # "|| trigger" only with a trigger block
 since = ready ? 0 : since
 flush pending = trigger                                   # trigger block only
 ```
-`ready` is overwritten on every push, so it holds for exactly one tick. A triggered reaction stream (`B.ready >> R(...)`) is wrapped in the existing conditional (`ResetExprAST`) on the global `B_ready`.
+`ready` is a `trigger`, so it turns off at the end of the domain's `_process` (see 2.4) and holds for exactly one tick. Pushes OR into it, so a later write in the same tick can't clear a ready frame. A triggered reaction stream (`B.ready >> R(...)`) is wrapped in the existing conditional (`ResetExprAST`) on the global `B_ready`.
 
 ### 3.3 Frame view passed to reactions
 ```
@@ -266,7 +269,7 @@ The view is in bounds and in order on every tick, not only when `ready` is on.
 1. `ModeFifo` and `ModeOverlapAdd` are rejected. Scalar drain and buffer → buffer transfers don't exist yet.
 2. `firstHalf` / `secondHalf` views for ping-pong are not implemented. Ping-pong reactions receive the ready half as the frame.
 3. Elements of a partial frame beyond `min(count, frameSize)` are unspecified (no zero-padding).
-4. Reaction blocks can't be sized from the buffer property (`InBuf[InBuffer.size]`) yet.
+4. A runtime count of valid samples in a partial frame is not passed through the port yet; reactions read `Buf.count` from the root.
 
 **Architecture**
 
@@ -309,7 +312,8 @@ The view is in bounds and in order on every tick, not only when `ready` is on.
 - [x] `ModeSliding` mirrored storage (opt-out comes with the system binding).
 - [ ] `ModeOverlapAdd` accumulate/drain.
 - [ ] `ModeFifo` with overrun/underrun behaviour defined.
-- [ ] Size reaction blocks from the buffer property (`InBuf[InBuffer.size]`).
+- [x] `Port.size` of a port fed by a buffer is its `frameSize` (`InBuf[InBufPort.size]`).
+- [ ] Runtime `Port.available` (valid samples in a partial frame) for buffer-fed ports.
 
 ### Phase 3: Spectral processing
 - [ ] Generic vectorized array arithmetic in codegen (verify LLVM vectorizes, or emit vector IR explicitly).
@@ -331,6 +335,7 @@ The view is in bounds and in order on every tick, not only when `ready` is on.
 | `buffer_dma_pingpong.stride` | `TriggerHalf` alternation, no mirroring | written |
 | `buffer_partial_flush.stride` | trigger block, partial frame, `Buf.count`, deferred reset | written |
 | `buffer_invalid.stride` | `frameSize > capacity` rejected | written |
+| `buffer_port_size.stride` | `Port.size` of a buffer-fed port is `frameSize` | written |
 | `buffer_fifo_scalar.stride` | push/pull across domains | todo |
 | `buffer_resizing_accumulate.stride` | 128 → 1024 accumulation | todo |
 | `buffer_overlap_add.stride` | reconstruction | todo |

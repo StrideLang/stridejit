@@ -1,0 +1,38 @@
+# InputPort.size of a port fed by a buffer is the buffer's frameSize (4),
+# not its capacity (8)
+_domainDefinition BufferDom {
+    framework: _JitFramework
+    rate: -1
+    inputs: [
+        signal AudioIn { domain: BufferDom type: Real }
+    ]
+    outputs: [
+        signal Result { domain: BufferDom type: Real }
+    ]
+    domainFunctionCode: ''
+}
+
+buffer InBuffer {
+    type: Real
+    capacity: 8
+    frameSize: 4
+    hop: 2
+}
+
+# First sample of the frame * 100 + the frame length
+reaction FrameLength {
+    ports: [
+        propertyInputPort InBufPort { name: "buffer" block: InBuf }
+        mainOutputPort OutPort { block: OutVal }
+    ]
+    blocks: [
+        signal InBuf[InBufPort.size] { type: Real }
+        signal OutVal { type: Real }
+    ]
+    streams: [
+        InBuf[0] * 100.0 + InBufPort.size >> OutVal;
+    ]
+}
+
+AudioIn >> InBuffer;
+InBuffer.ready >> FrameLength(buffer: InBuffer) >> Result;

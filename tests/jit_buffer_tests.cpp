@@ -151,6 +151,14 @@ TEST(JITBufferTest, TriggerBlockFlushesPartialFrame) {
   EXPECT_EQ(count(), 4);
 }
 
+TEST(JITBufferTest, PortSizeIsFrameSize) {
+  BufferDomain domain;
+  ASSERT_TRUE(domain.compile("buffer_port_size.stride"));
+  // Frames of 4 out of a capacity of 8, every 2 samples: first * 100 + 4
+  pushAndExpect(domain, 1, 10,
+                {{4, 104.0}, {6, 304.0}, {8, 504.0}, {10, 704.0}});
+}
+
 TEST(JITBufferTest, InvalidSizesAreRejected) {
   strd::StrideEnvironment strenv;
   EXPECT_FALSE(
