@@ -13,7 +13,7 @@ module AddTwo {
     streams: [ Input + 2.0 >> Output; ]
 }
 reaction TestReaction {
-    ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
+    ports: [ propertyInputPort InputPort { name: "input" block: Input }, mainOutputPort OutputPort { block: Output } ]
     blocks: [
         signal Input { type: Real domain: OutputPort.domain }
         signal Output { type: Real domain: OutputPort.domain }
@@ -22,4 +22,5 @@ reaction TestReaction {
         Input >> AddTwo() >> Output;
     ]
 }
-In >> TestReaction() >> Out;
+# A reaction takes values through property ports; on runs it every time
+on >> TestReaction(input: In) >> Out;

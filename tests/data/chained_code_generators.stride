@@ -1,6 +1,9 @@
-# Test chaining code generators (reactions) directly in a stream
+# Test code generators (reactions) run by one trigger, one after the other.
+# A reaction takes values through property ports, so StepOne's result reaches
+# StepTwo through a signal.
 
 signal Result { type: Int }
+signal Intermediate { type: Int }
 switch Trigger { default: off }
 
 reaction StepOne {
@@ -10,21 +13,22 @@ reaction StepOne {
             block: Factor
         }
         mainOutputPort OutPort {
-            block: Intermediate
+            block: Doubled
         }
     ]
     blocks: [
         signal Factor { type: Int }
-        signal Intermediate { type: Int }
+        signal Doubled { type: Int }
     ]
     streams: [
-        Factor * 2 >> Intermediate;
+        Factor * 2 >> Doubled;
     ]
 }
 
 reaction StepTwo {
     ports: [
-        mainInputPort InPort {
+        propertyInputPort InPort {
+            name: "input"
             block: Input
         }
         propertyInputPort OffsetPort {
@@ -45,5 +49,6 @@ reaction StepTwo {
     ]
 }
 
-Trigger >> StepOne(factor: 5) >> StepTwo(offset: 10) >> Result;
+Trigger >> StepOne(factor: 5) >> Intermediate;
+Trigger >> StepTwo(input: Intermediate offset: 10) >> Result;
 

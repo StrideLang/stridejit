@@ -1715,7 +1715,39 @@ void StrideGenerator::collectPropertyArgs(
           ? std::static_pointer_cast<FunctionNode>(typeTree->instance)
           : func;
   if (funcInstance) {
+    // The callee takes its properties in the order its property ports are
+    // declared (resolveIOParamsFromDefinition), so pass them in that order,
+    // matched by name, whatever order the call writes them in. A port is
+    // named by its name property, or by the port itself.
     auto props = funcInstance->getProperties();
+    std::vector<std::string> portOrder;
+    auto portsNode = funcDecl ? funcDecl->getPropertyValue("ports") : nullptr;
+    if (portsNode) {
+      for (const auto &port : portsNode->getChildren()) {
+        if (port->getNodeType() != AST::Declaration) {
+          continue;
+        }
+        auto portDecl = std::static_pointer_cast<DeclarationNode>(port);
+        if (portDecl->getEntityType() != "propertyInputPort" &&
+            portDecl->getEntityType() != "propertyOutputPort") {
+          continue;
+        }
+        auto nameNode = portDecl->getPropertyValue("name");
+        portOrder.push_back(
+            nameNode && nameNode->getNodeType() == AST::String
+                ? std::static_pointer_cast<ValueNode>(nameNode)->getStringValue()
+                : portDecl->getName());
+      }
+    }
+    auto portIndex = [&](const std::shared_ptr<PropertyNode> &prop) {
+      auto it = std::find(portOrder.begin(), portOrder.end(), prop->getName());
+      return static_cast<size_t>(it - portOrder.begin());
+    };
+    std::stable_sort(props.begin(), props.end(),
+                     [&](const std::shared_ptr<PropertyNode> &a,
+                         const std::shared_ptr<PropertyNode> &b) {
+                       return portIndex(a) < portIndex(b);
+                     });
     for (const auto &propNode : props) {
       auto value = propNode->getValue();
       if (value && value->getNodeType() == AST::Entity) {
@@ -1893,6 +1925,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
     }
   };
 
+  std::string streamDomain;
   while (next) {
     prev = current;
     current = next;
@@ -1934,6 +1967,16 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       if (domainName.empty()) {
         domainName = "RootDomain";
       }
+    }
+    // A stream inside a module, loop or reaction runs in its caller's
+    // context, so all of it goes into one domain: that of its first member.
+    // Split, the value written to a block of another domain would be looked
+    // up in that domain's code, not found, and the write dropped.
+    if (!isTopLevelDomainStream) {
+      if (streamDomain.empty()) {
+        streamDomain = domainName;
+      }
+      domainName = streamDomain;
     }
     auto &segState = resolveDomainRateInfo(domainName);
     double currentRate = CodeAnalysis::getNodeRate(current, scope, tree);
@@ -2726,7 +2769,12 @@ bool StrideGenerator::resolveIOParamsFromDefinition(
                       : false;
 
               if (role == CodeAnalysis::NodeRole::External) {
-                ExternalParams.push_back(arg);
+                // A function called from C++ (a standalone action) has no
+                // caller to pass module globals in, so its body uses them
+                // directly
+                if (funcInstance || !state.globalExists(entityName)) {
+                  ExternalParams.push_back(arg);
+                }
               } else if (isDomainMember && isCodeGenerator) {
                 usedInternalVariables.push_back(outEntityDecl);
               } else if (role == CodeAnalysis::NodeRole::Persistent) {
@@ -2901,6 +2949,11 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
         if (var.first->getNodeType() == AST::Declaration ||
             var.first->getNodeType() == AST::ArrayDeclaration) {
           auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
+          // A function called from C++ (a standalone action) has no caller
+          // to pass module globals in, so its body uses them directly
+          if (!funcInstance && state.globalExists(decl->getName())) {
+            continue;
+          }
           auto type =
               state.getLLVMTypeForCodegenEntity(decl, funcDecl, funcInstance);
           ExternalParams.push_back(

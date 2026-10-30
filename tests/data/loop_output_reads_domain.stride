@@ -1,0 +1,83 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    stateMachines: [Machine]
+    inputs: []
+    outputs: []
+	domainFunctionCode: ''
+}
+
+module Equal {
+    ports: [
+        mainOutputPort OutputPort {
+            name:       'output'
+            block: Output
+        },
+        mainInputPort InputPort {
+            name:       'input'
+            block: Input
+			meta: "A list with the two values to be compared"
+        }
+    ]
+    blocks: [
+        signal Input[2] {domain: OutputPort.domain type: Int}
+		switch Output {domain: OutputPort.domain}
+    ]
+    streams: [
+       [Input[0], Input[1]] >> __Equal() >> Output;
+    ]
+    meta: "Compare two input values."
+}
+
+platformModule __Equal@Int_Bool {
+    inputs: [Int, Int]
+	outputs: [Switch]
+#    linkTo: []
+#    declarations: ['']
+    # initializations: ["// CPP Greater Init"]
+    processing: "%%outtokens:0%% = llvm::icmp eq %%intokens:0%%, %%intokens:1%%"
+    inherits: [_Signal]
+}
+
+
+# Copies a domain switch array into its output, as large as what it writes to
+loop CopyFlags {
+	ports: [
+		mainOutputPort OutputPort {
+			block: Output
+		}
+	]
+	blocks: [
+		switch Output[OutputPort.size] {}
+		signal Index { default: 0 type: Int reset: Reset }
+		switch Found {}
+		switch Done { default: off }
+		trigger Reset {}
+	]
+	onExecution: Reset
+	terminateWhen: Done
+	streams: [
+		Source[Index] >> Found;
+		Found >> Output[Index];
+		Index + 1 >> Index;
+		[ Index, OutputPort.size ] >> Equal() >> Done;
+	]
+}
+
+switch Source[4] { domain: RootDomain default: off }
+switch Flags[4] { domain: RootDomain default: off }
+
+state Only {
+    updateGuard: [
+        CopyFlags() >> Flags;
+    ]
+}
+
+state Machine {
+    initialState: Only
+    states: [Only]
+}

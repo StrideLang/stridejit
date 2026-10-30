@@ -1,7 +1,9 @@
 #include "gtest/gtest.h"
 #include <cstdint>
+#include <filesystem>
 
 #include "stride/stridegen/codeanalysis.hpp"
+#include "stride/stridegen/codevalidator.hpp"
 #include "stride/stridejit/strideenvironment.hpp"
 #include "stride/stridejit/stridegenerator.hpp"
 #include "stride/utils/astfunctions.h"
@@ -186,6 +188,253 @@ TEST(JITControlFlowTest, LoopBasic) {
                                        "RootDomain")
                  .value_or(0);
   EXPECT_EQ(Out, 1118);
+}
+
+// A loop's output array sized by OutputPort.size takes the size of the array
+// the call writes to, and the loop fills it in place.
+TEST(JITControlFlowTest, LoopOutputPortSize) {
+  strd::StrideEnvironment strenv;
+
+  ASSERT_TRUE(
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "loop_output_size.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_process", args);
+  for (int i = 0; i < 6; ++i) {
+    EXPECT_EQ(strenv
+                  .getStateVar<int32_t>(statePtr.get(), "Table", i,
+                                        "RootDomain")
+                  .value_or(-1),
+              3 * i)
+        << "Table[" << i << "]";
+  }
+}
+
+// A constant without a value is a writable global: a loop fills it and later
+// code reads it
+TEST(JITControlFlowTest, ConstantFilledByLoop) {
+  strd::StrideEnvironment strenv;
+
+  ASSERT_TRUE(
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "constant_fill.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(
+      strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                  "RootDomain")
+          .value_or(-1),
+      12);
+}
+
+// Output port sizes in a loop sized by both ports, into a slice and a
+// single signal, in a module, and with an output default
+TEST(JITControlFlowTest, LoopOutputPortSizeCases) {
+  strd::StrideEnvironment strenv;
+
+  ASSERT_TRUE(
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "loop_output_cases.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_init", args);
+  strenv.invoke("RootDomain_process", args);
+  auto value = [&](const char *name, std::optional<int> index) {
+    return strenv.getStateVar<int32_t>(statePtr.get(), name, index,
+                                       "RootDomain")
+        .value_or(-100);
+  };
+  for (int i = 0; i < 6; ++i) {
+    EXPECT_EQ(value("Doubled", i), 6 * i) << "Doubled[" << i << "]";
+  }
+  // Slice[2:4] is filled as a 3 entry table; the rest keep their default
+  const int slice[6] = {-1, -1, 0, 3, 6, -1};
+  for (int i = 0; i < 6; ++i) {
+    EXPECT_EQ(value("Slice", i), slice[i]) << "Slice[" << i << "]";
+  }
+  EXPECT_EQ(value("Scalar", std::nullopt), 0);
+  EXPECT_EQ(value("Sizes", 0), 5);
+  // Entries a loop does not write keep their values
+  EXPECT_EQ(value("Partial", 0), -1);
+  EXPECT_EQ(value("Partial", 1), 5);
+  EXPECT_EQ(value("Partial", 2), -1);
+}
+
+// An output sized by OutputPort.size must write to a declared array,
+// element or bundle: into another call that sizes its input from what feeds
+// it, or into nothing, the size is unknown. An input sized by InputPort.size
+// must be fed.
+TEST(JITControlFlowTest, UnsizedPorts) {
+  for (const char *fixture :
+       {"loop_output_chained.stride", "loop_output_unwritten.stride"}) {
+    auto tree = strd::AST::parseFile(
+        (std::string(STRIDEJIT_TESTS_SOURCE_DIR) + fixture).c_str());
+    ASSERT_NE(tree, nullptr) << fixture;
+    strd::StrideEnvironment strenv;
+    strenv.prepareTree(tree);
+    auto errors = strd::CodeValidator::findUnsizedPorts(tree);
+    ASSERT_EQ(errors.size(), 1u) << fixture;
+    EXPECT_NE(errors[0].getErrorText().find(
+                  "'Fill()' takes the size of its output from what it writes "
+                  "to (OutputPort.size)"),
+              std::string::npos)
+        << errors[0].getErrorText();
+  }
+  // The same for an input sized by what feeds it
+  {
+    auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                                     "loop_input_unfed.stride");
+    ASSERT_NE(tree, nullptr);
+    strd::StrideEnvironment strenv;
+    strenv.prepareTree(tree);
+    auto errors = strd::CodeValidator::findUnsizedPorts(tree);
+    ASSERT_EQ(errors.size(), 1u);
+    EXPECT_NE(errors[0].getErrorText().find(
+                  "'Double()' takes the size of its input from what feeds it "
+                  "(InputPort.size), so it must be fed"),
+              std::string::npos)
+        << errors[0].getErrorText();
+  }
+  // The working cases have none
+  auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                                   "loop_output_cases.stride");
+  ASSERT_NE(tree, nullptr);
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+  for (auto &error : strd::CodeValidator::findUnsizedPorts(tree)) {
+    ADD_FAILURE() << error.getErrorText();
+  }
+}
+
+// A reaction's input is the trigger that runs it: no fixture declares a
+// reaction with a main input port
+TEST(JITControlFlowTest, NoReactionDeclaresAMainInput) {
+  for (const auto &entry :
+       std::filesystem::directory_iterator(STRIDEJIT_TESTS_SOURCE_DIR)) {
+    if (entry.path().extension() != ".stride") {
+      continue;
+    }
+    auto tree = strd::AST::parseFile(entry.path().string().c_str());
+    if (!tree) {
+      continue; // Fixtures of parse errors
+    }
+    for (auto &error : strd::CodeValidator::findReactionMainInputs(tree)) {
+      ADD_FAILURE() << entry.path().filename().string() << ": "
+                    << error.getErrorText();
+    }
+  }
+}
+
+// A loop fills a switch array sized by what it writes to, whole or a slice
+TEST(JITControlFlowTest, LoopOutputSwitches) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                "loop_output_switches.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_init", args);
+  strenv.invoke("RootDomain_process", args);
+  auto flag = [&](const char *name, int i) {
+    return strenv.getStateVar<int8_t>(statePtr.get(), name, i, "RootDomain")
+        .value_or(-1);
+  };
+  const int flags[4] = {0, 1, 0, 0};
+  for (int i = 0; i < 4; ++i) {
+    EXPECT_EQ(flag("Flags", i), flags[i]) << "Flags[" << i << "]";
+  }
+  // Slice[1:4] is a 4 entry table: its entry 1 is Slice[2]
+  const int slice[6] = {0, 0, 1, 0, 0, 0};
+  for (int i = 0; i < 6; ++i) {
+    EXPECT_EQ(flag("Slice", i), slice[i]) << "Slice[" << i << "]";
+  }  // A switch written into the output element, rather than a call's result
+  for (int i = 0; i < 4; ++i) {
+    EXPECT_EQ(flag("Copied", i), flags[i]) << "Copied[" << i << "]";
+  }
+}
+
+// The same loop called from a state's updateGuard
+TEST(JITControlFlowTest, LoopOutputInStateMachine) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                "loop_output_in_state.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_init", args);
+  strenv.invoke("RootDomain_process", args);
+  auto flag = [&](const char *name, int i) {
+    return strenv.getStateVar<int8_t>(statePtr.get(), name, i, "RootDomain")
+        .value_or(-1);
+  };
+  const int flags[4] = {0, 1, 0, 0};
+  for (int i = 0; i < 4; ++i) {
+    EXPECT_EQ(flag("Flags", i), flags[i]) << "Flags[" << i << "]";
+  }
+  const int slice[6] = {0, 0, 1, 0, 0, 0};
+  for (int i = 0; i < 6; ++i) {
+    EXPECT_EQ(flag("Slice", i), slice[i]) << "Slice[" << i << "]";
+  }
+}
+
+// A loop that reads a domain array and writes its output array, called from
+// a state's updateGuard
+TEST(JITControlFlowTest, LoopOutputReadsDomainArray) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                "loop_output_reads_domain.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_init", args);
+  const int flags[4] = {0, 1, 0, 1};
+  for (int i = 0; i < 4; ++i) {
+    strenv.setStateVar(statePtr.get(), "Source", static_cast<bool>(flags[i]), i,
+                       "RootDomain");
+  }
+  strenv.invoke("RootDomain_process", args);
+  for (int i = 0; i < 4; ++i) {
+    EXPECT_EQ(strenv.getStateVar<int8_t>(statePtr.get(), "Flags", i,
+                                         "RootDomain")
+                  .value_or(-1),
+              flags[i])
+        << "Flags[" << i << "]";
+  }
+}
+
+// A call's properties are matched to the callee's ports by name, in any order
+TEST(JITControlFlowTest, PropertiesMatchedByName) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "property_order.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                        "RootDomain")
+                .value_or(-100),
+            9);
+  EXPECT_EQ(strenv.getStateVar<int32_t>(statePtr.get(), "OutInOrder",
+                                        std::nullopt, "RootDomain")
+                .value_or(-100),
+            9);
 }
 
 TEST(JITControlFlowTest, StandaloneReactionSimple) {

@@ -504,7 +504,12 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
           auto defaultNode =
               outDecl ? outDecl->getPropertyValue("default") : nullptr;
           llvm::Type *outType = outArg.llvmType;
-          if (!defaultNode || !outType || outType->isArrayTy()) {
+          // An array output (Output[OutputPort.size]) is the caller's array,
+          // passed as a pointer to its first element: it is not prefilled, so
+          // entries the loop does not write keep their values
+          if (!defaultNode || !outType || outType->isArrayTy() ||
+              (outDecl &&
+               outDecl->getNodeType() == AST::ArrayDeclaration)) {
             continue;
           }
           llvm::Constant *defaultVal = nullptr;
@@ -1339,23 +1344,47 @@ CallExprAST::codegen(StrideCompiler &state) {
   }
 
   auto protoIt = state.FunctionProtos.find(Callee);
-  size_t expectedInArgs = 0;
-  if (protoIt != state.FunctionProtos.end()) {
-    expectedInArgs = protoIt->second->getInArgs().size();
-  } else if (CalleeF) {
-    size_t outCount = OutArgs.size();
-    size_t portPropCount = PortPropArgs.size();
-    size_t externalCount = ExternalArgs.size();
-    size_t stateCount = calleeNeedsState ? 1 : 0;
-    if (CalleeF->arg_size() >=
-        outCount + portPropCount + externalCount + stateCount) {
-      expectedInArgs = CalleeF->arg_size() - outCount - portPropCount -
-                       externalCount - stateCount;
+
+  // Destinations of a bundle written by a single array output
+  // (Fill() >> Table[2:4]): the callee fills a temporary array, copied to
+  // each of them after the call
+  std::vector<std::pair<llvm::Value *, llvm::Type *>> scatterOuts;
+  llvm::Type *scatterElemType = nullptr;
+  llvm::Value *scatterBase = nullptr;
+  if ((callType == CallableType::Module || callType == CallableType::Loop) &&
+      protoIt != state.FunctionProtos.end() &&
+      protoIt->second->getOutArgs().size() == 1 && CallArgs.size() > 1) {
+    scatterElemType =
+        (CallArgs[0].second.has_value() && CallArgs[0].second.value() &&
+         !CallArgs[0].second.value()->isVoidTy())
+            ? CallArgs[0].second.value()
+            : llvm::Type::getInt32Ty(*state.TheContext);
+    llvm::Function *TheFunction = state.Builder->GetInsertBlock()->getParent();
+    llvm::ArrayType *arrayTy =
+        llvm::ArrayType::get(scatterElemType, CallArgs.size());
+    llvm::AllocaInst *arrayAlloc =
+        state.CreateEntryBlockAlloca(TheFunction, "output_bundle", arrayTy);
+    llvm::Value *zero = state.Builder->getInt32(0);
+    scatterBase = state.Builder->CreateInBoundsGEP(arrayTy, arrayAlloc,
+                                                   {zero, zero}, "output_base");
+    for (const auto &[value, type] : CallArgs) {
+      // Inner members of a range come as their value; write to where it is
+      // loaded from
+      llvm::Value *ptr = value;
+      if (auto *load = llvm::dyn_cast_or_null<llvm::LoadInst>(value)) {
+        ptr = load->getPointerOperand();
+      }
+      scatterOuts.push_back(
+          {ptr, type.has_value() && type.value() ? type.value()
+                                                 : scatterElemType});
     }
+    CallArgs.clear();
+    CallArgs.push_back({scatterBase, scatterElemType});
   }
 
-  if (callType == CallableType::Module || callType == CallableType::Loop ||
-      (callType == CallableType::Reaction && expectedInArgs > 0)) {
+  // Reactions and actions have no main input: what comes before them in the
+  // stream is the trigger that decides whether they run (below)
+  if (callType == CallableType::Module || callType == CallableType::Loop) {
 
     int outArgCount = CallArgs.size();
     processArgGroup(state, InArgs, CalleeF, CallArgs, false);
@@ -1732,8 +1761,7 @@ CallExprAST::codegen(StrideCompiler &state) {
   }
   llvm::CallInst *call;
 
-  if (callType == CallableType::Reaction && expectedInArgs == 0 &&
-      !InArgs.empty()) {
+  if (callType == CallableType::Reaction && !InArgs.empty()) {
     llvm::Value *CondV = InArgs[0]->codegen(state).first;
     if (Logger::isDebugEnabled()) {
       std::string s;
@@ -1813,6 +1841,19 @@ CallExprAST::codegen(StrideCompiler &state) {
     }
     call =
         state.Builder->CreateCall(CalleeF, CallArgsValues, CalleeF->getReturnType()->isVoidTy() ? "" : CalleeF->getName());
+  }
+
+  for (size_t i = 0; i < scatterOuts.size(); ++i) {
+    llvm::Value *elementPtr = state.Builder->CreateInBoundsGEP(
+        scatterElemType, scatterBase, state.Builder->getInt32(i),
+        "output_element_ptr");
+    llvm::Value *element = state.Builder->CreateLoad(
+        scatterElemType, elementPtr, "output_element");
+    if (scatterOuts[i].first->getType()->isPointerTy()) {
+      state.Builder->CreateStore(
+          convertScalar(state, element, scatterOuts[i].second),
+          scatterOuts[i].first);
+    }
   }
 
   // Write to output

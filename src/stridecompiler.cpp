@@ -446,17 +446,21 @@ void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
 
   // A constant is read-only data, private to the module. Lookups with a
   // constant index are folded, and LLVM removes the global when nothing reads
-  // it at run time.
+  // it at run time. A constant without a value is written once at run time
+  // (a table filled at setup), so it stays private but writable.
   bool isConstant = ASTQuery::isConstant(globalDecl, {}, m_tree);
+  auto constantValue = globalDecl->getPropertyValue("value");
+  bool isReadOnly = isConstant && constantValue &&
+                    constantValue->getNodeType() != AST::None;
   llvm::GlobalVariable *MyGlobal = new llvm::GlobalVariable(
-      *TheModule, Type, isConstant,
+      *TheModule, Type, isReadOnly,
       // External linkage makes signals visible to the JIT
       isConstant ? llvm::GlobalValue::InternalLinkage
                  : llvm::GlobalValue::ExternalLinkage,
       Initializer, fullName);
 
   // Avoid optimization to force memory location
-  MyGlobal->setUnnamedAddr(isConstant ? llvm::GlobalValue::UnnamedAddr::Global
+  MyGlobal->setUnnamedAddr(isReadOnly ? llvm::GlobalValue::UnnamedAddr::Global
                                       : llvm::GlobalValue::UnnamedAddr::None);
   // Optional: Set data alignment for optimal CPU access
   MyGlobal->setAlignment(llvm::MaybeAlign(4));

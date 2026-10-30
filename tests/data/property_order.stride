@@ -1,0 +1,34 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [ ]
+    outputs: [
+        signal Out { domain: RootDomain type: Int }
+        signal OutInOrder { domain: RootDomain type: Int }
+    ]
+	domainFunctionCode: ''
+}
+
+# Properties are matched by name, not by the order a call writes them in
+reaction Subtract {
+    ports: [
+        propertyInputPort APort { name: "a" block: A }
+        propertyInputPort BPort { name: "b" block: B }
+        mainOutputPort OutputPort { block: Output }
+    ]
+    blocks: [
+        signal A { type: Int }
+        signal B { type: Int }
+        signal Output { type: Int }
+    ]
+    streams: [
+        A - B >> Output;
+    ]
+}
+
+on >> Subtract(b: 1 a: 10) >> Out;
+on >> Subtract(a: 10 b: 1) >> OutInOrder;

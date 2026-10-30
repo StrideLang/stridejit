@@ -19,7 +19,7 @@ platformModule __Equal@Int_Bool {
     inherits: [_Signal]
 }
 reaction AddTwo {
-    ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
+    ports: [ propertyInputPort InputPort { name: "input" block: Input }, mainOutputPort OutputPort { block: Output } ]
     blocks: [ signal Input { type: Int domain: OutputPort.domain } signal Output { type: Int domain: OutputPort.domain } ]
     streams: [ Input + 2 >> Output; ]
 }
@@ -31,10 +31,12 @@ loop TestLoop {
 		signal Index { default: 0 type: Int reset: Reset domain: OutputPort.domain }
 		switch Done { default: off domain: OutputPort.domain }
         signal AddResult { type: Int domain: OutputPort.domain }
+        signal Element { type: Int domain: OutputPort.domain }
 	]
 	terminateWhen: Done
 	streams: [
-		Input[Index] >> AddTwo() >> AddResult;
+		Input[Index] >> Element;
+		on >> AddTwo(input: Element) >> AddResult;
         AddResult + Output >> Output;
 		Index + 1 >> Index;
 		[ Index , InputPort.size ] >> Equal() >> Done;

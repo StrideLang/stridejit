@@ -1,0 +1,83 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    stateMachines: [Machine]
+    inputs: []
+    outputs: []
+	domainFunctionCode: ''
+}
+
+module Equal {
+    ports: [
+        mainOutputPort OutputPort {
+            name:       'output'
+            block: Output
+        },
+        mainInputPort InputPort {
+            name:       'input'
+            block: Input
+			meta: "A list with the two values to be compared"
+        }
+    ]
+    blocks: [
+        signal Input[2] {domain: OutputPort.domain type: Int}
+		switch Output {domain: OutputPort.domain}
+    ]
+    streams: [
+       [Input[0], Input[1]] >> __Equal() >> Output;
+    ]
+    meta: "Compare two input values."
+}
+
+platformModule __Equal@Int_Bool {
+    inputs: [Int, Int]
+	outputs: [Switch]
+#    linkTo: []
+#    declarations: ['']
+    # initializations: ["// CPP Greater Init"]
+    processing: "%%outtokens:0%% = llvm::icmp eq %%intokens:0%%, %%intokens:1%%"
+    inherits: [_Signal]
+}
+
+
+# Turns on entry 1 of a switch array, as large as what it writes to
+loop SecondFlag {
+	ports: [
+		mainOutputPort OutputPort {
+			block: Output
+		}
+	]
+	blocks: [
+		switch Output[OutputPort.size] {}
+		signal Index { default: 0 type: Int reset: Reset }
+		switch Done { default: off }
+		trigger Reset {}
+	]
+	onExecution: Reset
+	terminateWhen: Done
+	streams: [
+		[ Index, 1 ] >> Equal() >> Output[Index];
+		Index + 1 >> Index;
+		[ Index, OutputPort.size ] >> Equal() >> Done;
+	]
+}
+
+switch Flags[4] { domain: RootDomain default: off }
+switch Slice[6] { domain: RootDomain default: off }
+
+# The loop called from a state's updateGuard
+state Only {
+    updateGuard: [
+        SecondFlag() >> Flags;
+        SecondFlag() >> Slice[1:4];
+    ]
+}
+
+state Machine {
+    initialState: Only
+    states: [Only]
+}
