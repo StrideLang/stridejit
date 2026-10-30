@@ -1,5 +1,6 @@
 #include "stride/utils/logger.h"
 #include <algorithm>
+#include <functional>
 #include <iostream>
 #include <optional>
 #include <set>
@@ -301,6 +302,15 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
         /* PropertyArgs */ std::vector<PrototypeArg>{}, ExternalArgs,
         std::vector<PrototypeArg>{});
     std::vector<std::unique_ptr<ExprAST>> resetBody;
+    // The domain's onInit streams come first: every init runs them, before
+    // the blocks take their defaults (the load is inserted ahead of them)
+    if (auto onInit = domainDecl ? domainDecl->getPropertyValue("onInit")
+                                 : nullptr) {
+      if (onInit->getNodeType() == AST::List) {
+        resetBody = generateStreamsForNodes(onInit->getChildren(), scope,
+                                            state, domainName);
+      }
+    }
     for (auto &extArg : ExternalArgs) {
       if (std::holds_alternative<int32_t>(extArg.defaultValue)) {
         auto varInit = std::make_unique<BinaryExprAST>(
@@ -590,6 +600,162 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
 
     state.domainArgs[domainName] = generatedIRCode.domainArgs;
   }
+
+  // Each domain's load function, made after all domains so that generating
+  // the onLoad streams does not disturb their code
+  for (const auto &domainCode : generatedIRCode.domainGeneratedCode) {
+    generateLoadFunction(domainCode.first, tree, state);
+  }
+}
+
+void StrideGenerator::generateLoadFunction(const std::string &domainName,
+                                           ASTNode tree,
+                                           StrideCompiler &state) {
+  auto *initFn = state.TheModule->getFunction(domainName + "_init");
+  if (!initFn || initFn->isDeclaration()) {
+    return;
+  }
+  // The domain's onLoad streams, resolved in place like any stream list the
+  // schema types as _StreamType. They become __<Domain>_onLoad, compiled in
+  // the root scope with no domain state, so they can use constants and other
+  // module globals but not the domain's blocks.
+  llvm::Function *bodyFn = nullptr;
+  auto domainDecl = ASTQuery::findDeclarationByName(domainName, {}, tree);
+  auto onLoad = domainDecl ? domainDecl->getPropertyValue("onLoad") : nullptr;
+  // A block the streams use that is not a module global belongs to the
+  // domain's instances, which onLoad runs outside of
+  std::string domainBlock;
+  std::function<void(const ASTNode &)> findDomainBlock =
+      [&](const ASTNode &node) {
+        if (!node || !domainBlock.empty()) {
+          return;
+        }
+        if (node->getNodeType() == AST::Entity ||
+            node->getNodeType() == AST::Array) {
+          const std::string name = ASTQuery::getNodeName(node);
+          auto decl = ASTQuery::findDeclarationByName(name, {}, tree);
+          const std::string type = decl ? decl->getEntityType() : "";
+          if ((type == "signal" || type == "switch" || type == "trigger" ||
+               type == "string" || type == "buffer") &&
+              !state.globalExists(name)) {
+            domainBlock = name;
+            return;
+          }
+        }
+        if (node->getNodeType() == AST::Function) {
+          for (const auto &property :
+               std::static_pointer_cast<FunctionNode>(node)->getProperties()) {
+            findDomainBlock(property->getValue());
+          }
+        }
+        if (node->getNodeType() == AST::Stream) {
+          auto stream = std::static_pointer_cast<StreamNode>(node);
+          findDomainBlock(stream->getLeft());
+          findDomainBlock(stream->getRight());
+        }
+        for (const auto &child : node->getChildren()) {
+          findDomainBlock(child);
+        }
+      };
+  if (onLoad) {
+    findDomainBlock(onLoad);
+  }
+  if (!domainBlock.empty()) {
+    LOG_ERROR() << "onLoad of " << domainName << " uses " << domainBlock
+                << ", a block of the domain. onLoad runs once per program, "
+                   "outside any instance of the domain, so it sees only root "
+                   "blocks such as constants"
+                << std::endl;
+  } else if (onLoad && onLoad->getNodeType() == AST::List &&
+             !onLoad->getChildren().empty()) {
+    ScopeStack scope = {{nullptr, tree->getChildren()}};
+    std::vector<std::unique_ptr<ExprAST>> body;
+    for (const auto &node : onLoad->getChildren()) {
+      if (node->getNodeType() != AST::Stream) {
+        continue;
+      }
+      auto code = createStreamCode(std::static_pointer_cast<StreamNode>(node),
+                                   tree, scope, state);
+      for (auto &domainCode : code) {
+        for (const auto &f : domainCode.second.functions) {
+          f->codegen(state);
+        }
+        for (auto &expr : domainCode.second.expr) {
+          body.push_back(std::move(expr));
+        }
+      }
+    }
+    const std::string bodyName = "__" + domainName + "_onLoad";
+    auto proto = std::make_unique<PrototypeAST>(
+        bodyName, std::vector<PrototypeArg>{}, std::vector<PrototypeArg>{},
+        std::vector<PrototypeArg>{}, std::vector<PrototypeArg>{},
+        std::vector<PrototypeArg>{}, std::vector<PrototypeArg>{});
+    auto bodyFunc =
+        std::make_unique<FunctionAST>(std::move(proto), std::move(body));
+    bodyFunc->callType = CallableType::DomainFunction;
+    bodyFunc->hasState = false;
+    bodyFunc->funcInstance = domainDecl;
+    bodyFunc->displayName = domainName + "::onLoad";
+    bodyFn = bodyFunc->codegen(state);
+    if (!bodyFn) {
+      LOG_ERROR() << "onLoad of " << domainName
+                  << " could not be compiled. Its streams run once per "
+                     "program, outside any instance of the domain, so they "
+                     "can use constants and other root blocks, not the "
+                     "domain's blocks"
+                  << std::endl;
+    }
+  }
+
+  auto &context = *state.TheContext;
+  auto *i32 = llvm::Type::getInt32Ty(context);
+  // 0: not loaded, 1: loading, 2: loaded
+  auto *guard = new llvm::GlobalVariable(
+      *state.TheModule, i32, false, llvm::GlobalValue::InternalLinkage,
+      llvm::ConstantInt::get(i32, 0), "__" + domainName + "_loadState");
+  guard->setAlignment(llvm::MaybeAlign(4));
+
+  // <Domain>_load runs the onLoad streams once per program. The first caller
+  // runs them; a caller that finds them running waits until they are done.
+  auto *loadFn = llvm::Function::Create(
+      llvm::FunctionType::get(llvm::Type::getVoidTy(context), false),
+      llvm::GlobalValue::ExternalLinkage, domainName + "_load",
+      state.TheModule.get());
+  auto *entry = llvm::BasicBlock::Create(context, "entry", loadFn);
+  auto *run = llvm::BasicBlock::Create(context, "run", loadFn);
+  auto *wait = llvm::BasicBlock::Create(context, "wait", loadFn);
+  auto *done = llvm::BasicBlock::Create(context, "done", loadFn);
+  llvm::IRBuilder<> builder(entry);
+  auto *exchange = builder.CreateAtomicCmpXchg(
+      guard, llvm::ConstantInt::get(i32, 0), llvm::ConstantInt::get(i32, 1),
+      llvm::MaybeAlign(4), llvm::AtomicOrdering::AcquireRelease,
+      llvm::AtomicOrdering::Acquire);
+  builder.CreateCondBr(builder.CreateExtractValue(exchange, 1), run, wait);
+
+  builder.SetInsertPoint(run);
+  if (bodyFn) {
+    builder.CreateCall(bodyFn);
+  }
+  builder.CreateAlignedStore(llvm::ConstantInt::get(i32, 2), guard,
+                             llvm::MaybeAlign(4))
+      ->setAtomic(llvm::AtomicOrdering::Release);
+  builder.CreateRetVoid();
+
+  builder.SetInsertPoint(wait);
+  auto *loadState = builder.CreateAlignedLoad(i32, guard, llvm::MaybeAlign(4));
+  loadState->setAtomic(llvm::AtomicOrdering::Acquire);
+  builder.CreateCondBr(
+      builder.CreateICmpEQ(loadState, llvm::ConstantInt::get(i32, 2)), done,
+      wait);
+
+  builder.SetInsertPoint(done);
+  builder.CreateRetVoid();
+  generateInvoker(loadFn, state);
+
+  // Every instance's init loads first
+  llvm::IRBuilder<> initBuilder(&initFn->getEntryBlock(),
+                                initFn->getEntryBlock().getFirstInsertionPt());
+  initBuilder.CreateCall(loadFn);
 }
 
 std::unique_ptr<ExprAST> StrideGenerator::createExpr(ASTNode node) {

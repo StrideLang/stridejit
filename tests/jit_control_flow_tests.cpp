@@ -10,6 +10,7 @@
 #include "stride/utils/astquery.h"
 
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
 
 namespace {
 
@@ -414,6 +415,128 @@ TEST(JITControlFlowTest, LoopOutputReadsDomainArray) {
               flags[i])
         << "Flags[" << i << "]";
   }
+}
+
+// A domain's onLoad streams run in <Domain>_load, once per program, which
+// <Domain>_init calls first: here they fill a constant table the domain reads
+TEST(JITControlFlowTest, DomainOnLoad) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "domain_on_load.stride"));
+  // The onLoad streams are in the load function only, not in processing
+  auto calls = [&](const char *caller, const std::string &callee) {
+    auto *function = strenv.mStrideEnv.TheModule->getFunction(caller);
+    if (!function) {
+      return false;
+    }
+    for (const auto &block : *function) {
+      for (const auto &instruction : block) {
+        if (auto *call = llvm::dyn_cast<llvm::CallInst>(&instruction)) {
+          if (call->getCalledFunction() &&
+              call->getCalledFunction()->getName().starts_with(callee)) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  };
+  EXPECT_TRUE(calls("__RootDomain_onLoad", "Fill"));
+  EXPECT_FALSE(calls("RootDomain_process", "Fill"));
+  EXPECT_TRUE(calls("RootDomain_init", "RootDomain_load"));
+  ASSERT_TRUE(strenv.compileInMemory());
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_init", args);
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                        "RootDomain")
+                .value_or(-1),
+            12);
+
+  // Another instance finds the domain loaded
+  auto second = strenv.allocateSharedState("RootDomain");
+  void *secondArgs[] = {second.get()};
+  strenv.invoke("RootDomain_init", secondArgs);
+  strenv.invoke("RootDomain_process", secondArgs);
+  EXPECT_EQ(strenv.getStateVar<int32_t>(second.get(), "Out", std::nullopt,
+                                        "RootDomain")
+                .value_or(-1),
+            12);
+}
+
+// onLoad runs outside any instance, so a domain block there is reported and
+// the load does nothing; the domain still compiles and runs
+TEST(JITControlFlowTest, DomainOnLoadUsesDomainBlock) {
+  strd::Logger::startBuffering();
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                "domain_on_load_domain_block.stride"));
+  const std::string logs = strd::Logger::getBufferedOutput();
+  EXPECT_NE(logs.find("onLoad of RootDomain uses Out, a block of the domain"),
+            std::string::npos)
+      << logs;
+  ASSERT_TRUE(strenv.compileInMemory());
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_init", args);
+  strenv.invoke("RootDomain_process", args);
+}
+
+// onInit opens every init: the load comes first, then the onInit streams,
+// then the blocks take their defaults, so what onInit writes to a block does
+// not last
+TEST(JITControlFlowTest, DomainOnInit) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "domain_on_init.stride"));
+  std::vector<std::string> initCalls;
+  if (auto *init = strenv.mStrideEnv.TheModule->getFunction("RootDomain_init")) {
+    for (const auto &block : *init) {
+      for (const auto &instruction : block) {
+        if (auto *call = llvm::dyn_cast<llvm::CallInst>(&instruction)) {
+          if (call->getCalledFunction()) {
+            initCalls.push_back(call->getCalledFunction()->getName().str());
+          }
+        }
+      }
+    }
+  }
+  ASSERT_GE(initCalls.size(), 2u);
+  EXPECT_EQ(initCalls[0], "RootDomain_load");
+  EXPECT_EQ(initCalls[1].rfind("Fill", 0), 0u) << initCalls[1];
+  ASSERT_TRUE(strenv.compileInMemory());
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_init", args);
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                        "RootDomain")
+                .value_or(-1),
+            0);
+}
+
+// A host can load the domain before its first instance
+TEST(JITControlFlowTest, DomainLoadBeforeInit) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "domain_on_load.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+  ASSERT_TRUE(static_cast<bool>(strenv.getFunction("RootDomain_load")));
+  strenv.invoke("RootDomain_load", nullptr);
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_init", args);
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                        "RootDomain")
+                .value_or(-1),
+            12);
 }
 
 // A call's properties are matched to the callee's ports by name, in any order

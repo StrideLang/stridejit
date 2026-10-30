@@ -2516,6 +2516,17 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
       }
     }
 
+    // 0. The load function: the domain's onLoad, once per program
+    if (mStrideEnv.TheModule &&
+        mStrideEnv.TheModule->getFunction(dom + "_load")) {
+      ss << "/**\n";
+      ss << " * @brief Runs the onLoad streams of " << dom
+         << " once per program. " << dom << "_init calls it\n";
+      ss << " * first; call it earlier to load before the first instance.\n";
+      ss << " */\n";
+      ss << "void " << dom << "_load(void);\n\n";
+    }
+
     // 1. Emit init function prototype
     auto initIt = mStrideEnv.FunctionProtos.find(initFunc);
     auto *initLlvm = mStrideEnv.TheModule
@@ -2637,9 +2648,11 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
   // Standalone functions if any
   for (const auto &protoPair : mStrideEnv.FunctionProtos) {
     const std::string &fname = protoPair.first;
+    // Internal functions (__<Domain>_onLoad) are not part of the interface
     if (fname.find("_init") != std::string::npos ||
         fname.find("_process") != std::string::npos ||
-        fname.find("_invoker") != std::string::npos) {
+        fname.find("_invoker") != std::string::npos ||
+        fname.rfind("__", 0) == 0) {
       continue;
     }
     const auto &proto = protoPair.second;

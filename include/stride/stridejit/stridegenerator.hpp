@@ -92,6 +92,10 @@ public:
   using GeneratedCode = std::map<std::string, DomainCode>;
 
   static void compile(ASTNode tree, ScopeStack &scope, StrideCompiler &state);
+  // <Domain>_load: runs the domain's onLoad streams once per program, the
+  // first time it is called; <Domain>_init calls it first
+  static void generateLoadFunction(const std::string &domainName,
+                                   ASTNode tree, StrideCompiler &state);
 
   static std::vector<std::unique_ptr<ExprAST>>
   generateStreamsForNodes(const std::vector<ASTNode> &nodes, ScopeStack scope,
