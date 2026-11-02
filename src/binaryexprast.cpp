@@ -1241,7 +1241,9 @@ BufferPushExprAST::codegen(StrideCompiler &state) {
   if (!ValueExpr || !reportBufferErrors(state, Spec)) {
     return {nullptr, std::nullopt};
   }
-  auto [val, valType] = ValueExpr->codegen(state);
+  auto valResult = ValueExpr->codegen(state);
+  llvm::Value *val = valResult.first;
+  auto valType = valResult.second;
   if (!val) {
     return {nullptr, std::nullopt};
   }
