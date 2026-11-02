@@ -12,7 +12,8 @@ class DisableCacheTestListener : public ::testing::EmptyTestEventListener {
 public:
   void OnTestStart(const ::testing::TestInfo &testInfo) override {
     LOG_DEBUG() << "[TestCacheGuard] Test '" << testInfo.test_suite_name()
-                << "." << testInfo.name() << "' start: ensuring cache disabled"
+                << "." << testInfo.name()
+                << "' start: ensuring cache force-recompile enabled"
                 << std::endl;
     resetCache();
   }
@@ -24,7 +25,9 @@ public:
 private:
   static void resetCache() {
     auto &cm = CacheManager::instance();
-    cm.setEnabled(false);
+    // Never read from cache during tests, but always regenerate cache files.
+    cm.setEnabled(true);
+    cm.setForceRecompile(true);
     cm.setCacheDirectory({});
     cm.clearCompilerBuildHashOverride();
     cm.resetStats();
@@ -36,6 +39,7 @@ public:
   explicit ScopedCacheEnable(bool isolateTempDir = true) {
     auto &cm = CacheManager::instance();
     m_prevEnabled = cm.isEnabled();
+    m_prevForceRecompile = cm.isForceRecompile();
     m_prevCacheDir = cm.getCacheDirectory();
 
     if (isolateTempDir) {
@@ -49,6 +53,7 @@ public:
     }
 
     cm.setEnabled(true);
+    cm.setForceRecompile(false);
     cm.resetStats();
   }
 
@@ -56,6 +61,7 @@ public:
     auto &cm = CacheManager::instance();
     cm.clearCache();
     cm.setCacheDirectory(m_prevCacheDir);
+    cm.setForceRecompile(m_prevForceRecompile);
     cm.setEnabled(m_prevEnabled);
 
     if (!m_tempDir.empty()) {
@@ -68,6 +74,7 @@ public:
 
 private:
   bool m_prevEnabled{false};
+  bool m_prevForceRecompile{false};
   std::filesystem::path m_prevCacheDir;
   std::filesystem::path m_tempDir;
 };

@@ -9,6 +9,7 @@
 #include "stride/testing/specextractor.hpp"
 #include "stride/testing/testreporter.hpp"
 #include "stride/testing/testspec.hpp"
+#include "stride/utils/cachemanager.h"
 
 namespace fs = std::filesystem;
 using namespace strd;
@@ -30,6 +31,10 @@ void printUsage(const char *progName) {
 }
 
 int main(int argc, char *argv[]) {
+  // Never read from cache during tests, but always regenerate cache files.
+  CacheManager::instance().setEnabled(true);
+  CacheManager::instance().setForceRecompile(true);
+
   if (argc < 2) {
     printUsage(argv[0]);
     return 1;
