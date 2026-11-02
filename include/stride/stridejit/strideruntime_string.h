@@ -102,6 +102,11 @@ static_assert(offsetof(StrideFormatArg, strVal) == 16,
 
 } // namespace strd
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wreturn-type-c-linkage"
+#endif
+
 extern "C" {
 
 STRIDE_EXPORT strd::StrideStringView
@@ -243,5 +248,9 @@ STRIDE_EXPORT void __stride_jit_string_format(const strd::StrideStringView *fmt,
                                               int32_t count,
                                               strd::StrideStringView *out);
 }
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 #endif // STRIDERUNTIME_STRING_H
