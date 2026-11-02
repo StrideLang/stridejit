@@ -3,3 +3,4 @@
 build/
 .qtcreator/
 .vscode/
+out/
