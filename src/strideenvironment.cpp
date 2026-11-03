@@ -1312,7 +1312,7 @@ StrideEnvironment::getFunctionArgs(const std::string &funcName) const {
 
     fillTypeInfo(arg.llvmType, DL, info.type, info.typeName, info.elementSize);
 
-    auto blocksVal = funcDecl ? funcDecl->getPropertyValue("blocks") : nullptr;
+    auto blocksVal = funcDecl ? funcDecl->getPropertyValue("entities") : nullptr;
     auto entityDecl =
         (funcDecl && blocksVal)
             ? ASTQuery::findDeclarationByName(

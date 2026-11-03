@@ -1224,7 +1224,7 @@ bool BufferPushExprAST::writesTo(const std::string &varName) const {
   return varName == Spec.name || varName == Spec.readyName() ||
          varName == Spec.indexName() || varName == Spec.countName() ||
          varName == Spec.sinceName() ||
-         (Spec.hasTriggerBlock() && varName == Spec.flushName());
+         (Spec.hasTriggerEntity() && varName == Spec.flushName());
 }
 
 // Per pushed sample:
@@ -1262,11 +1262,11 @@ BufferPushExprAST::codegen(StrideCompiler &state) {
   llvm::Value *flushPtr = nullptr;
   llvm::Value *triggerPtr = nullptr;
   llvm::Type *triggerType = nullptr;
-  if (Spec.hasTriggerBlock()) {
+  if (Spec.hasTriggerEntity()) {
     flushPtr = findBufferState(state, Spec.flushName());
-    triggerPtr = findBufferState(state, Spec.triggerBlock, &triggerType);
+    triggerPtr = findBufferState(state, Spec.triggerEntity, &triggerType);
     if (!flushPtr || !triggerPtr) {
-      return {state.LogErrorV(("Unknown trigger '" + Spec.triggerBlock +
+      return {state.LogErrorV(("Unknown trigger '" + Spec.triggerEntity +
                                "' for buffer: " + Spec.name)
                                   .c_str()),
               std::nullopt};

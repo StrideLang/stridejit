@@ -16,13 +16,13 @@ _domainDefinition TestDomain {
 module AddTwo {
     ports: [
         mainInputPort {
-            block: Input
+            entity: Input
         }
         mainOutputPort {
-            block: Output
+            entity: Output
         }
     ]
-    blocks: [
+    entities: [
         signal Input { type: Real }
         signal Output { type: Real }
         signal Internal { type: Real }

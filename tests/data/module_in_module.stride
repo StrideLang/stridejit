@@ -18,15 +18,15 @@ module TestModule {
     ports: [
         mainOutputPort OutputPort {
             name:       'output'
-            block: Output
+            entity: Output
         },
         mainInputPort InputPort {
             name:       'input'
-            block: Input
+            entity: Input
             meta: "A list with the two values to be compared"
         }
     ]
-    blocks: [
+    entities: [
         signal Input {domain: OutputPort.domain}
 		switch Output {domain: OutputPort.domain}
     ]
@@ -39,13 +39,13 @@ module TestModule {
 module Add5 {
     ports: [
         mainInputPort InputPort {
-            block: Input
+            entity: Input
         },
         mainOutputPort OutputPort {
-            block: Output
+            entity: Output
         }
     ]
-    blocks: [
+    entities: [
         signal Input { type: Real domain: OutputPort.domain }
         signal Output { type: Real domain: OutputPort.domain }
     ]

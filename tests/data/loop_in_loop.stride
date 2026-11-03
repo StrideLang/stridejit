@@ -8,8 +8,8 @@ _domainDefinition RootDomain {
 	domainFunctionCode: ''
 }
 module Equal {
-    ports: [ mainOutputPort OutputPort { block: Output }, mainInputPort InputPort { block: Input } ]
-    blocks: [ signal Input[2] {domain: OutputPort.domain type: Int} switch Output {domain: OutputPort.domain} ]
+    ports: [ mainOutputPort OutputPort { entity: Output }, mainInputPort InputPort { entity: Input } ]
+    entities: [ signal Input[2] {domain: OutputPort.domain type: Int} switch Output {domain: OutputPort.domain} ]
     streams: [ [Input[0], Input[1]] >> __Equal() >> Output; ]
 }
 platformModule __Equal@Int_Bool {
@@ -19,8 +19,8 @@ platformModule __Equal@Int_Bool {
     inherits: [_Signal]
 }
 loop AddTwo {
-    ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
-    blocks: [
+    ports: [ mainInputPort InputPort { entity: Input }, mainOutputPort OutputPort { entity: Output } ]
+    entities: [
         signal Input { type: Int domain: OutputPort.domain }
         signal Output { default: 0 type: Int domain: OutputPort.domain }
         switch Done { default: off domain: OutputPort.domain }
@@ -34,8 +34,8 @@ loop AddTwo {
     ]
 }
 loop TestLoop {
-	ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
-	blocks: [
+	ports: [ mainInputPort InputPort { entity: Input }, mainOutputPort OutputPort { entity: Output } ]
+	entities: [
 		signal Input[InputPort.size] { type: Int domain: OutputPort.domain }
 		signal Output {default: 0 type: Int domain: OutputPort.domain }
 		signal Index { default: 0 type: Int reset: Reset domain: OutputPort.domain }

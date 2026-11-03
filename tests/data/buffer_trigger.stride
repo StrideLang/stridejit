@@ -19,10 +19,10 @@ buffer InBuffer {
 
 reaction IncrementReaction {
     ports: [
-        propertyInputPort InBufPort { name: "buffer" block: InBuf }
-        mainOutputPort OutPort { block: OutVal }
+        propertyInputPort InBufPort { name: "buffer" entity: InBuf }
+        mainOutputPort OutPort { entity: OutVal }
     ]
-    blocks: [
+    entities: [
         signal InBuf[4] { type: Real }
         signal OutVal { type: Real }
     ]

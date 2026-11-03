@@ -18,15 +18,15 @@ module Equal {
     ports: [
         mainOutputPort OutputPort {
             name:       'output'
-            block: Output
+            entity: Output
         },
         mainInputPort InputPort {
             name:       'input'
-            block: Input
+            entity: Input
 			meta: "A list with the two values to be compared"
         }
     ]
-    blocks: [
+    entities: [
         signal Input[2] {domain: OutputPort.domain type: Int}
 		switch Output {domain: OutputPort.domain}
     ]
@@ -50,13 +50,13 @@ platformModule __Equal@Int_Bool {
 loop Add {
 	ports: [
 		mainInputPort InputPort {
-			block: Input
+			entity: Input
 		}
 		mainOutputPort OutputPort {
-			block: Output
+			entity: Output
 		}
 	]
-	blocks: [
+	entities: [
 		signal Input[InputPort.size] { type: Int }
 		signal Output {default: 0 type: Int }
 		signal Index { default: 0 type: Int reset: Reset }

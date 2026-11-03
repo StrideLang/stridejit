@@ -18,15 +18,15 @@ module Greater {
     ports: [
         mainOutputPort OutputPort {
             name:       'output'
-            block: Output
+            entity: Output
         },
         mainInputPort InputPort {
             name:       'input'
-            block: Input
+            entity: Input
             meta: "A list with the two values to be compared"
         }
     ]
-    blocks: [
+    entities: [
         signal Input[2] {domain: OutputPort.domain}
 		switch Output {domain: OutputPort.domain}
     ]
@@ -53,13 +53,13 @@ platformModule __Greater@Real_Bool {
 module Max {
     ports: [
         mainInputPort InputPort {
-            block: Input
+            entity: Input
         }
         mainOutputPort OutputPort {
-            block: Output
+            entity: Output
         }
     ]
-    blocks: [
+    entities: [
         signal Input { type: Real domain: OutputPort.domain }
         signal Output { type: Real domain: OutputPort.domain type: Real }
     ]

@@ -19,13 +19,13 @@ _domainDefinition RootDomain {
 module PortProperty {
     ports: [
         mainInputPort InputPort {
-            block: Input
+            entity: Input
         }
         mainOutputPort {
-            block: Output
+            entity: Output
         }
     ]
-    blocks: [
+    entities: [
         signal Input[InputPort.size] { type: Int }
         signal Output { type: Int }
     ]

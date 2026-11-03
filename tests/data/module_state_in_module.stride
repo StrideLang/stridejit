@@ -9,8 +9,8 @@ _domainDefinition RootDomain {
 }
 
 module InnerAccumulator {
-    ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
-    blocks: [
+    ports: [ mainInputPort InputPort { entity: Input }, mainOutputPort OutputPort { entity: Output } ]
+    entities: [
         signal Input { type: Int domain: OutputPort.domain }
         signal Output { type: Int domain: OutputPort.domain }
         signal Acc { default: 10 type: Int reset: Reset domain: OutputPort.domain }
@@ -22,8 +22,8 @@ module InnerAccumulator {
 }
 
 module OuterModule {
-    ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
-    blocks: [
+    ports: [ mainInputPort InputPort { entity: Input }, mainOutputPort OutputPort { entity: Output } ]
+    entities: [
         signal Input { type: Int domain: OutputPort.domain }
         signal Output { type: Int domain: OutputPort.domain }
     ]

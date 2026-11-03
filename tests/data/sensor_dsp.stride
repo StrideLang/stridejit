@@ -15,17 +15,17 @@ _domainDefinition SensorDSP {
 module LowPassFilter {
     ports: [
         mainInputPort InputPort { 
-            block: RawIn 
+            entity: RawIn 
         }
         mainOutputPort OutputPort { 
-            block: FilteredOut 
+            entity: FilteredOut 
         }
         propertyInputPort AlphaPort { 
             name: "alpha" 
-            block: Alpha 
+            entity: Alpha 
         }
     ]
-    blocks: [
+    entities: [
         signal RawIn        { type: Real domain: OutputPort.domain }
         signal FilteredOut  { type: Real domain: OutputPort.domain }
         signal Alpha        { type: Real domain: OutputPort.domain }
@@ -40,17 +40,17 @@ module LowPassFilter {
 module ThresholdTrigger {
     ports: [
         mainInputPort InputPort { 
-            block: Value 
+            entity: Value 
         }
         mainOutputPort OutputPort { 
-            block: Triggered 
+            entity: Triggered 
         }
         propertyInputPort ThresholdPort { 
             name: "threshold" 
-            block: Threshold 
+            entity: Threshold 
         }
     ]
-    blocks: [
+    entities: [
         signal Value       { type: Real domain: OutputPort.domain }
         signal Threshold   { type: Real domain: OutputPort.domain }
         switch Triggered   { domain: OutputPort.domain }

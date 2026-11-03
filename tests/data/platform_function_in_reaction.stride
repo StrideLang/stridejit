@@ -2,14 +2,14 @@ reaction Outer {
     ports: [
         mainOutputPort OutputPort {
             name:       'output'
-            block: Output
+            entity: Output
         },
         propertyInputPort InputPort {
             name:       'input'
-            block: Input
+            entity: Input
         }
     ]
-    blocks: [
+    entities: [
         signal Input {domain: OutputPort.domain type: Int}
 		switch Output {domain: OutputPort.domain}
     ]

@@ -31,7 +31,7 @@ This document outlines critical architectural patterns, code generation invarian
   - Only signals/switches declared at the root/domain level outside of `inputs`/`outputs` are globals accessible via `strenv.getGlobal<T>("Name")`.
   - A `constant` with a `value` is a read-only internal global. A `constant` without one (`constant Table[8] { type: Int }`) is a **writable** internal global, written once at run time; stridegen's `CodeValidator::findConstantRewrites` rejects a second write.
   - A standalone function called from C++ (an action, no caller instance) takes no parameters for module globals; its body reads and writes them directly. Called from another function, the caller still passes them in.
-- **Output port sizes**: `signal Output[OutputPort.size]` in a loop or module takes the size of what the call writes to (the call's `outputBlock`), as `InputPort.size` takes the size of what feeds it. An array is written in place; a slice or bundle (`>> T[2:4]`) goes through a temporary array copied to each member after the call (`CallExprAST::codegen`, `scatterOuts`). Array outputs are never prefilled with their `default`. A sized port with nothing to size it is an `UnsizedPort` error from stridegen's `CodeValidator::findUnsizedPorts`. Fixtures: `loop_output_size.stride`, `loop_output_cases.stride`, `loop_output_chained.stride`, `loop_output_unwritten.stride`, `loop_input_unfed.stride`, `constant_fill.stride`. The language-level description is strideroot's `library/1.0/doc/CodeGenerators.md`.
+- **Output port sizes**: `signal Output[OutputPort.size]` in a loop or module takes the size of what the call writes to (the call's `outputEntity`), as `InputPort.size` takes the size of what feeds it. An array is written in place; a slice or bundle (`>> T[2:4]`) goes through a temporary array copied to each member after the call (`CallExprAST::codegen`, `scatterOuts`). Array outputs are never prefilled with their `default`. A sized port with nothing to size it is an `UnsizedPort` error from stridegen's `CodeValidator::findUnsizedPorts`. Fixtures: `loop_output_size.stride`, `loop_output_cases.stride`, `loop_output_chained.stride`, `loop_output_unwritten.stride`, `loop_input_unfed.stride`, `constant_fill.stride`. The language-level description is strideroot's `library/1.0/doc/CodeGenerators.md`.
 
 ---
 
@@ -188,14 +188,9 @@ This document outlines critical architectural patterns, code generation invarian
 
 ---
 
-## 13. Entity vs. Block Terminology & Property Aliasing
+## 13. Entity vs. Block Terminology
 
 - **Canonical Modern Terminology**:
-  - **`entity`** (for port bindings, e.g. `mainInputPort InPort { entity: Input }`) and **`entities`** (for internal declarations of modules, reactions, loops) is the standard terminology in Stride.
-  - **`block`** and **`blocks`** is legacy terminology that has been phased out and mostly removed across Stride.
+  - **`entity`** (for port bindings, e.g. `mainInputPort InPort { entity: Input }`) and **`entities`** (for internal declarations of modules, reactions, loops) is the canonical terminology in Stride.
+  - **`block`** and **`blocks`** terminology has been completely removed across Stride language schemas, ASTs, and codegen.
   - When desugaring syntax, lowering headers, synthesizing declarations, or emitting AST nodes, **always use `entity` and `entities`**.
-
-- **Bidirectional Aliasing & Shadowing Invariants**:
-  - The AST supports bidirectional aliasing between `entities` <-> `blocks` and `entity` <-> `block` (via `DeclarationNode::getPropertyValue`, `ASTQuery::findPropertyByName`, etc.).
-  - **Never inject legacy defaults over modern properties**: In schema population passes (such as `ASTFunctions::fillDefaultPropertiesForNode`), always verify whether the property OR its alias is present before populating a schema default. An empty default (e.g. `blocks: []`) must never be added if `entities: [ ... ]` is already declared, as it would shadow user declarations during direct property lookups.
-  - **Duplicate Rejection in `addProperty`**: `DeclarationNode::addProperty()` rejects adding a property if either the property name or its bidirectional alias already exists on the declaration.

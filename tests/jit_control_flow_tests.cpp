@@ -475,7 +475,7 @@ TEST(JITControlFlowTest, DomainOnLoadUsesDomainBlock) {
   ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
                                 "domain_on_load_domain_block.stride"));
   const std::string logs = strd::Logger::getBufferedOutput();
-  EXPECT_NE(logs.find("onLoad of RootDomain uses Out, a block of the domain"),
+  EXPECT_NE(logs.find("onLoad of RootDomain uses Out, an entity of the domain"),
             std::string::npos)
       << logs;
   ASSERT_TRUE(strenv.compileInMemory());

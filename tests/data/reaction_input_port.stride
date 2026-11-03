@@ -14,9 +14,9 @@ _domainDefinition TestDomain {
 
 reaction MyReaction {
     ports: [
-        propertyInputPort MyProp { block: _MyProp }
+        propertyInputPort MyProp { entity: _MyProp }
     ]
-    blocks: [
+    entities: [
         signal _MyProp { type: Real }
     ]
     streams: [

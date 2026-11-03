@@ -190,10 +190,10 @@ TEST(StrideEnvironmentTest, BenchmarkASTCacheVsParse) {
     for (int m = 0; m < 20; ++m) {
       out << "module Mod" << m << " {\n"
           << "  ports: [\n"
-          << "    mainInputPort InP { block: InB }\n"
-          << "    mainOutputPort OutP { block: OutB }\n"
+          << "    mainInputPort InP { entity: InB }\n"
+          << "    mainOutputPort OutP { entity: OutB }\n"
           << "  ]\n"
-          << "  blocks: [\n"
+          << "  entities: [\n"
           << "    signal InB { domain: OutP.domain type: OutP.type }\n"
           << "    signal OutB { domain: OutP.domain type: OutP.type }\n"
           << "  ]\n"

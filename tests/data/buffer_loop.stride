@@ -23,10 +23,10 @@ buffer InBuffer {
 
 module Equal {
     ports: [
-        mainOutputPort OutputPort { block: Output },
-        mainInputPort InputPort { block: Input }
+        mainOutputPort OutputPort { entity: Output },
+        mainInputPort InputPort { entity: Input }
     ]
-    blocks: [
+    entities: [
         signal Input[2] { domain: OutputPort.domain type: Int }
         switch Output { domain: OutputPort.domain }
     ]
@@ -45,10 +45,10 @@ platformModule __Equal@Int_Bool {
 # Sum of the frame
 loop FrameSum {
     ports: [
-        mainInputPort InputPort { block: Input }
-        mainOutputPort OutputPort { block: Output }
+        mainInputPort InputPort { entity: Input }
+        mainOutputPort OutputPort { entity: Output }
     ]
-    blocks: [
+    entities: [
         signal Input[InputPort.size] { type: Real }
         signal Output { default: 0.0 type: Real }
         signal Index { default: 0 type: Int }
@@ -64,10 +64,10 @@ loop FrameSum {
 
 reaction Analyse {
     ports: [
-        propertyInputPort InBufPort { name: "buffer" block: InBuf }
-        mainOutputPort OutPort { block: OutVal }
+        propertyInputPort InBufPort { name: "buffer" entity: InBuf }
+        mainOutputPort OutPort { entity: OutVal }
     ]
-    blocks: [
+    entities: [
         signal InBuf[InBufPort.size] { type: Real }
         signal OutVal { type: Real }
     ]

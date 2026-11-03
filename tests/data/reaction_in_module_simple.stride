@@ -17,13 +17,13 @@ _domainDefinition RootDomain {
 module TestModule {
     ports: [
         mainInputPort InputPort {
-            block: Input
+            entity: Input
         },
         mainOutputPort OutputPort {
-            block: Output
+            entity: Output
         }
     ]
-    blocks: [
+    entities: [
         signal Input { type: Real domain: OutputPort.domain }
         signal Output { type: Real domain: OutputPort.domain }
     ]

@@ -18,13 +18,13 @@ signal A[2] {type: Int default: [5,2] domain: RootDomain}
 module Add {
     ports: [
         mainInputPort {
-            block: Input
+            entity: Input
         }
         mainOutputPort {
-            block: Output
+            entity: Output
         }
     ]
-    blocks: [
+    entities: [
         signal Input[2] { type: Int}
         signal Internal[2] {type: Int default: [1,2]}
         signal Output {type: Int}
@@ -40,13 +40,13 @@ A >> Add() >> Out[0];
 module AddIntSingle {
     ports: [
         mainInputPort {
-            block: Input
+            entity: Input
         }
         mainOutputPort {
-            block: Output
+            entity: Output
         }
     ]
-    blocks: [
+    entities: [
         signal Input[2] { type: Int}
         signal Internal[2] {type: Int default: 3}
         signal Output {type: Int}

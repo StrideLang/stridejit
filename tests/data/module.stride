@@ -17,13 +17,13 @@ _domainDefinition RootDomain {
 module AddTwo {
     ports: [
         mainInputPort InputPort {
-            block: Input
+            entity: Input
         }
         mainOutputPort OutputPort {
-            block: Output
+            entity: Output
         }
     ]
-    blocks: [
+    entities: [
         signal Input {domain: OutputPort.domain type:OutputPort.type}
         signal Output {domain: OutputPort.domain type:OutputPort.type}
     ]

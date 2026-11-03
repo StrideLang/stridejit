@@ -185,16 +185,16 @@ BufferSpec BufferSpec::fromDeclaration(std::shared_ptr<DeclarationNode> decl,
           std::to_string(spec.hop) + ")");
   }
 
-  if (auto triggerBlock = property("trigger")) {
-    if (triggerBlock->getNodeType() != AST::Entity) {
+  if (auto triggerEntity = property("trigger")) {
+    if (triggerEntity->getNodeType() != AST::Entity) {
       error("'trigger' must name a switch");
     } else {
-      spec.triggerBlock = ASTQuery::getNodeName(triggerBlock);
+      spec.triggerEntity = ASTQuery::getNodeName(triggerEntity);
       auto blockDecl =
-          ASTQuery::findDeclarationByName(spec.triggerBlock, {}, tree);
+          ASTQuery::findDeclarationByName(spec.triggerEntity, {}, tree);
       if (!blockDecl || (blockDecl->getEntityType() != "switch" &&
                          blockDecl->getEntityType() != "trigger")) {
-        error("trigger '" + spec.triggerBlock + "' must be a declared switch");
+        error("trigger '" + spec.triggerEntity + "' must be a declared switch");
       }
     }
   }

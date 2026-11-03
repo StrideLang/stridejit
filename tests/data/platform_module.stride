@@ -42,13 +42,13 @@ platformModule __Test2 {
 module Wrapper {
     ports: [
         mainInputPort InputPort {
-            block: Input
+            entity: Input
         }
         mainOutputPort OutputPort {
-            block: Output
+            entity: Output
         }
     ]
-    blocks: [
+    entities: [
         signal Input {domain: OutputPort.domain type: Real}
         signal Output {domain: OutputPort.domain type: Real}
     ]

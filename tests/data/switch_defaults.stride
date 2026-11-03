@@ -11,9 +11,9 @@ switch OutArrayList2 { default: off }
 
 module TestSwitchScalar {
     ports: [
-        mainOutputPort OutPort { block: Output }
+        mainOutputPort OutPort { entity: Output }
     ]
-    blocks: [
+    entities: [
         switch SwOn { default: on }
         switch Output { default: off }
     ]
@@ -24,9 +24,9 @@ module TestSwitchScalar {
 
 module TestSwitchScalarOff {
     ports: [
-        mainOutputPort OutPort { block: Output }
+        mainOutputPort OutPort { entity: Output }
     ]
-    blocks: [
+    entities: [
         switch SwOff { default: off }
         switch Output { default: off }
     ]
@@ -37,9 +37,9 @@ module TestSwitchScalarOff {
 
 module TestSwitchArrayUniform0 {
     ports: [
-        mainOutputPort OutPort { block: Output }
+        mainOutputPort OutPort { entity: Output }
     ]
-    blocks: [
+    entities: [
         switch SwArr[3] { default: on }
         switch Output { default: off }
     ]
@@ -50,9 +50,9 @@ module TestSwitchArrayUniform0 {
 
 module TestSwitchArrayUniform1 {
     ports: [
-        mainOutputPort OutPort { block: Output }
+        mainOutputPort OutPort { entity: Output }
     ]
-    blocks: [
+    entities: [
         switch SwArr[3] { default: on }
         switch Output { default: off }
     ]
@@ -63,9 +63,9 @@ module TestSwitchArrayUniform1 {
 
 module TestSwitchArrayUniform2 {
     ports: [
-        mainOutputPort OutPort { block: Output }
+        mainOutputPort OutPort { entity: Output }
     ]
-    blocks: [
+    entities: [
         switch SwArr[3] { default: on }
         switch Output { default: off }
     ]
@@ -76,9 +76,9 @@ module TestSwitchArrayUniform2 {
 
 module TestSwitchArrayList0 {
     ports: [
-        mainOutputPort OutPort { block: Output }
+        mainOutputPort OutPort { entity: Output }
     ]
-    blocks: [
+    entities: [
         switch SwList[3] { default: [on, off, on] }
         switch Output { default: off }
     ]
@@ -89,9 +89,9 @@ module TestSwitchArrayList0 {
 
 module TestSwitchArrayList1 {
     ports: [
-        mainOutputPort OutPort { block: Output }
+        mainOutputPort OutPort { entity: Output }
     ]
-    blocks: [
+    entities: [
         switch SwList[3] { default: [on, off, on] }
         switch Output { default: off }
     ]
@@ -102,9 +102,9 @@ module TestSwitchArrayList1 {
 
 module TestSwitchArrayList2 {
     ports: [
-        mainOutputPort OutPort { block: Output }
+        mainOutputPort OutPort { entity: Output }
     ]
-    blocks: [
+    entities: [
         switch SwList[3] { default: [on, off, on] }
         switch Output { default: off }
     ]

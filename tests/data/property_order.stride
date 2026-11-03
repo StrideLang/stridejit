@@ -16,11 +16,11 @@ _domainDefinition RootDomain {
 # Properties are matched by name, not by the order a call writes them in
 reaction Subtract {
     ports: [
-        propertyInputPort APort { name: "a" block: A }
-        propertyInputPort BPort { name: "b" block: B }
-        mainOutputPort OutputPort { block: Output }
+        propertyInputPort APort { name: "a" entity: A }
+        propertyInputPort BPort { name: "b" entity: B }
+        mainOutputPort OutputPort { entity: Output }
     ]
-    blocks: [
+    entities: [
         signal A { type: Int }
         signal B { type: Int }
         signal Output { type: Int }

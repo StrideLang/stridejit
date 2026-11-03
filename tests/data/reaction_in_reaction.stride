@@ -8,13 +8,13 @@ _domainDefinition RootDomain {
 	domainFunctionCode: ''
 }
 reaction AddTwo {
-    ports: [ propertyInputPort InputPort { name: "input" block: Input }, mainOutputPort OutputPort { block: Output } ]
-    blocks: [ signal Input { type: Real domain: OutputPort.domain } signal Output { type: Real domain: OutputPort.domain } ]
+    ports: [ propertyInputPort InputPort { name: "input" entity: Input }, mainOutputPort OutputPort { entity: Output } ]
+    entities: [ signal Input { type: Real domain: OutputPort.domain } signal Output { type: Real domain: OutputPort.domain } ]
     streams: [ Input + 2.0 >> Output; ]
 }
 reaction TestReaction {
-    ports: [ propertyInputPort InputPort { name: "input" block: Input }, mainOutputPort OutputPort { block: Output } ]
-    blocks: [
+    ports: [ propertyInputPort InputPort { name: "input" entity: Input }, mainOutputPort OutputPort { entity: Output } ]
+    entities: [
         signal Input { type: Real domain: OutputPort.domain }
         signal Output { type: Real domain: OutputPort.domain }
     ]

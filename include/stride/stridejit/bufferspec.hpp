@@ -50,7 +50,7 @@ struct BufferSpec {
   Trigger trigger{Trigger::Full};
   // Switch registered through the `trigger` property. Empty when the buffer
   // only uses its built-in trigger mode.
-  std::string triggerBlock;
+  std::string triggerEntity;
   // Decided by the compiler: storage is doubled when a frame can straddle the
   // end of the ring, so every frame view is contiguous.
   bool mirrored{false};
@@ -60,7 +60,7 @@ struct BufferSpec {
                                     ASTNode tree);
 
   bool valid() const { return errors.empty(); }
-  bool hasTriggerBlock() const { return !triggerBlock.empty(); }
+  bool hasTriggerEntity() const { return !triggerEntity.empty(); }
   int storageSize() const { return mirrored ? 2 * capacity : capacity; }
 
   // Private state, synthesized next to the storage

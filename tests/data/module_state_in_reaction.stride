@@ -8,8 +8,8 @@ _domainDefinition RootDomain {
 	domainFunctionCode: ''
 }
 module Counter {
-    ports: [ mainInputPort InputPort { block: Input }, mainOutputPort OutputPort { block: Output } ]
-    blocks: [
+    ports: [ mainInputPort InputPort { entity: Input }, mainOutputPort OutputPort { entity: Output } ]
+    entities: [
         signal Input { type: Int domain: OutputPort.domain }
         signal Output { type: Int domain: OutputPort.domain }
         signal Count { default: 0 type: Int reset: Reset domain: OutputPort.domain }
@@ -20,8 +20,8 @@ module Counter {
     ]
 }
 reaction TestReaction {
-    ports: [ propertyInputPort InputPort { name: "input" block: Input }, mainOutputPort OutputPort { block: Output } ]
-    blocks: [
+    ports: [ propertyInputPort InputPort { name: "input" entity: Input }, mainOutputPort OutputPort { entity: Output } ]
+    entities: [
         signal Input { type: Int domain: OutputPort.domain }
         signal Output { type: Int domain: OutputPort.domain }
     ]

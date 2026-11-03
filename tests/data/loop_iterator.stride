@@ -1,13 +1,13 @@
 loop Max {
     ports: [
         mainInputPort InputPort {
-            block: Input
+            entity: Input
         }
         mainOutputPort OutputPort {
-            block: Output
+            entity: Output
         }
     ]
-    blocks: [
+    entities: [
         signal Input[InputPort.size] {}
         signal Output { default: 0 reset:Reset }
         iterator Index {

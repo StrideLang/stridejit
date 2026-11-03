@@ -12,7 +12,7 @@ _domainDefinition RootDomain {
 signal Counter { domain: RootDomain type: Int default: 0 }
 
 state State1 {
-    blocks: [
+    entities: [
         signal LocalSig { type: Int default: 1 }
     ]
     onEntry: [

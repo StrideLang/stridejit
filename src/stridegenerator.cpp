@@ -431,7 +431,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
       resetBody.push_back(std::make_unique<BinaryExprAST>(
           '=', std::make_unique<VariableExprAST>(spec.readyName()),
           std::make_unique<BoolExprAST>(false)));
-      if (spec.hasTriggerBlock()) {
+      if (spec.hasTriggerEntity()) {
         resetBody.push_back(std::make_unique<BinaryExprAST>(
             '=', std::make_unique<VariableExprAST>(spec.flushName()),
             std::make_unique<BoolExprAST>(false)));
@@ -675,10 +675,10 @@ void StrideGenerator::generateLoadFunction(const std::string &domainName,
   auto onLoad = domainDecl ? domainDecl->getPropertyValue("onLoad") : nullptr;
   // A block the streams use that is not a module global belongs to the
   // domain's instances, which onLoad runs outside of
-  std::string domainBlock;
-  std::function<void(const ASTNode &)> findDomainBlock =
+  std::string domainEntity;
+  std::function<void(const ASTNode &)> findDomainEntity =
       [&](const ASTNode &node) {
-        if (!node || !domainBlock.empty()) {
+        if (!node || !domainEntity.empty()) {
           return;
         }
         if (node->getNodeType() == AST::Entity ||
@@ -689,31 +689,31 @@ void StrideGenerator::generateLoadFunction(const std::string &domainName,
           if ((type == "signal" || type == "switch" || type == "trigger" ||
                type == "string" || type == "buffer") &&
               !state.globalExists(name)) {
-            domainBlock = name;
+            domainEntity = name;
             return;
           }
         }
         if (node->getNodeType() == AST::Function) {
           for (const auto &property :
                std::static_pointer_cast<FunctionNode>(node)->getProperties()) {
-            findDomainBlock(property->getValue());
+            findDomainEntity(property->getValue());
           }
         }
         if (node->getNodeType() == AST::Stream) {
           auto stream = std::static_pointer_cast<StreamNode>(node);
-          findDomainBlock(stream->getLeft());
-          findDomainBlock(stream->getRight());
+          findDomainEntity(stream->getLeft());
+          findDomainEntity(stream->getRight());
         }
         for (const auto &child : node->getChildren()) {
-          findDomainBlock(child);
+          findDomainEntity(child);
         }
       };
   if (onLoad) {
-    findDomainBlock(onLoad);
+    findDomainEntity(onLoad);
   }
-  if (!domainBlock.empty()) {
-    LOG_ERROR() << "onLoad of " << domainName << " uses " << domainBlock
-                << ", a block of the domain. onLoad runs once per program, "
+  if (!domainEntity.empty()) {
+    LOG_ERROR() << "onLoad of " << domainName << " uses " << domainEntity
+                << ", an entity of the domain. onLoad runs once per program, "
                    "outside any instance of the domain, so it sees only root "
                    "blocks such as constants"
                 << std::endl;
@@ -947,7 +947,7 @@ void StrideGenerator::processStateStreams(
   for (auto &fs : sm.flattenedStates) {
     if (fs.stateDecl == stateNode) {
       auto streamBlocks =
-          ASTQuery::getContainedStreamBlocks(stateNode, scope, tree);
+          ASTQuery::getContainedStreamEntities(stateNode, scope, tree);
       for (const auto &streamBlock : streamBlocks) {
         std::vector<ASTNode> streamNodes(streamBlock.streams.begin(),
                                          streamBlock.streams.end());
@@ -992,7 +992,7 @@ void StrideGenerator::processStateStreams(
             }
           }
           auto tBlocks =
-              ASTQuery::getContainedStreamBlocks(t.transitionDecl, scope, tree);
+              ASTQuery::getContainedStreamEntities(t.transitionDecl, scope, tree);
           for (const auto &tb : tBlocks) {
             if (tb.executionStage == "onTransition" ||
                 tb.propertyName == "onTransition") {
@@ -1572,7 +1572,7 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
         makeState(spec.countName(), "signal", intValue(0));
         makeState(spec.sinceName(), "signal", intValue(0));
         makeState(spec.readyName(), "trigger", offValue());
-        if (spec.hasTriggerBlock()) {
+        if (spec.hasTriggerEntity()) {
           makeState(spec.flushName(), "switch", offValue());
         }
         for (const auto &constant : spec.constantProperties()) {
@@ -1783,10 +1783,10 @@ void StrideGenerator::collectInputArgs(
         if (!inArgType && funcDecl) {
           auto inPort = ASTQuery::getModuleMainInputPort(funcDecl);
           if (inPort) {
-            auto inBlock = inPort->getPropertyValue("block");
+            auto inBlock = inPort->getPropertyValue("entity");
             if (inBlock) {
               ScopeStack localScope = scope;
-              if (auto blocks = funcDecl->getPropertyValue("blocks")) {
+              if (auto blocks = funcDecl->getPropertyValue("entities")) {
                 localScope.push_back({funcDecl, blocks->getChildren()});
               }
               auto inDecl = ASTQuery::findDeclarationByName(
@@ -2533,10 +2533,10 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         if (!outType) {
           auto outPort = ASTQuery::getModuleMainOutputPort(funcDecl);
           if (outPort) {
-            auto outBlock = outPort->getPropertyValue("block");
+            auto outBlock = outPort->getPropertyValue("entity");
             if (outBlock) {
               ScopeStack localScope = scope;
-              if (auto blocksNode = funcDecl->getPropertyValue("blocks")) {
+              if (auto blocksNode = funcDecl->getPropertyValue("entities")) {
                 localScope.push_back({funcDecl, blocksNode->getChildren()});
               }
               auto outDecl = ASTQuery::findDeclarationByName(
@@ -2596,10 +2596,10 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
           if (!inType) {
             auto inPort = ASTQuery::getModuleMainInputPort(nextDecl);
             if (inPort) {
-              auto inBlock = inPort->getPropertyValue("block");
+              auto inBlock = inPort->getPropertyValue("entity");
               if (inBlock) {
                 ScopeStack nextScope = scope;
-                if (auto blocksNode = nextDecl->getPropertyValue("blocks")) {
+                if (auto blocksNode = nextDecl->getPropertyValue("entities")) {
                   nextScope.push_back({nextDecl, blocksNode->getChildren()});
                 }
                 auto inDecl = ASTQuery::findDeclarationByName(
@@ -2697,7 +2697,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
           if (outputNode) {
             auto entityName = ASTQuery::getNodeName(outputNode);
             ScopeStack scope;
-            if (auto blocksNode = funcDecl->getPropertyValue("blocks")) {
+            if (auto blocksNode = funcDecl->getPropertyValue("entities")) {
               scope = {std::pair<ASTNode, std::vector<ASTNode>>(
                   nullptr, blocksNode->getChildren())};
             }
@@ -2874,7 +2874,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
             auto usedPortProps = CodeAnalysis::getUsedMemberAccesses(funcDecl);
             auto innerScope = scope;
             std::vector<ASTNode> innerEntities;
-            auto blocksNode = funcDecl->getPropertyValue("blocks");
+            auto blocksNode = funcDecl->getPropertyValue("entities");
             if (blocksNode) {
               innerEntities = blocksNode->getChildren();
             }
@@ -2889,7 +2889,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                 } else {
                   std::unique_ptr<ExprAST> dynamicSizeExpr;
                   auto inBlockNode =
-                      func ? func->getCompilerProperty("inputBlock") : nullptr;
+                      func ? func->getCompilerProperty("inputEntity") : nullptr;
                   if (!inBlockNode && func) {
                     inBlockNode = func->getCompilerProperty("mainInput");
                   }
@@ -3122,7 +3122,7 @@ bool StrideGenerator::resolveIOParamsFromDefinition(
       if (portTypeStr == "mainInputPort" || portTypeStr == "mainOutputPort" ||
           portTypeStr == "propertyInputPort" ||
           portTypeStr == "propertyOutputPort") {
-        auto portEntityNode = portDecl->getPropertyValue("block");
+        auto portEntityNode = portDecl->getPropertyValue("entity");
         if (portEntityNode && portEntityNode->getNodeType() == AST::Entity) {
           auto entityName =
               std::static_pointer_cast<EntityNode>(portEntityNode)->getName();
@@ -3245,7 +3245,7 @@ bool StrideGenerator::isPolymorphicCallable(
   if (entityType != "module" && entityType != "loop") {
     return false;
   }
-  auto blocks = funcDecl->getPropertyValue("blocks");
+  auto blocks = funcDecl->getPropertyValue("entities");
   if (!blocks) {
     return false;
   }
@@ -3294,7 +3294,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
     functionScope.push_back({nullptr, {}});
   }
   functionScope.push_back({funcDecl, {}});
-  auto blocks = funcDecl->getPropertyValue("blocks");
+  auto blocks = funcDecl->getPropertyValue("entities");
   if (blocks) {
     for (const auto &declNode : blocks->getChildren()) {
       functionScope.back().second.push_back(declNode);
@@ -3459,7 +3459,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
   std::vector<std::unique_ptr<ExprAST>> collected;
   // Generate function code by going through stream blocks.
   auto streamBlocks =
-      ASTQuery::getContainedStreamBlocks(funcDecl, functionScope, tree);
+      ASTQuery::getContainedStreamEntities(funcDecl, functionScope, tree);
   for (const auto &streamBlock : streamBlocks) {
     for (const auto &stream : streamBlock.streams) {
       auto code = createStreamCode(stream, tree, functionScope, state);

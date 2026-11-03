@@ -230,7 +230,7 @@ public:
   std::unique_ptr<llvm::IRBuilder<>> Builder;
   std::map<std::string, std::pair<llvm::Value *, std::optional<llvm::Type *>>>
       NamedValues;
-  std::map<std::string, llvm::Value *> PortBlockMap;
+  std::map<std::string, llvm::Value *> PortEntityMap;
   std::map<std::string, std::unique_ptr<PrototypeAST>> FunctionProtos;
   // Names of generated callables that are mangled, e.g. one variant per type
   // signature of a polymorphic module. Resolves them back to Stride names.
@@ -353,7 +353,7 @@ private:
                                     std::shared_ptr<FunctionNode> instance,
                                     int depth);
   // Type of a port's block for a given function instance.
-  llvm::Type *getPortBlockType(std::shared_ptr<DeclarationNode> portDecl,
+  llvm::Type *getPortEntityType(std::shared_ptr<DeclarationNode> portDecl,
                                std::shared_ptr<DeclarationNode> funcDecl,
                                std::shared_ptr<FunctionNode> instance,
                                int depth);

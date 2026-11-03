@@ -10,13 +10,13 @@ reaction StepOne {
     ports: [
         propertyInputPort FactorPort {
             name: "factor"
-            block: Factor
+            entity: Factor
         }
         mainOutputPort OutPort {
-            block: Doubled
+            entity: Doubled
         }
     ]
-    blocks: [
+    entities: [
         signal Factor { type: Int }
         signal Doubled { type: Int }
     ]
@@ -29,17 +29,17 @@ reaction StepTwo {
     ports: [
         propertyInputPort InPort {
             name: "input"
-            block: Input
+            entity: Input
         }
         propertyInputPort OffsetPort {
             name: "offset"
-            block: Offset
+            entity: Offset
         }
         mainOutputPort OutPort {
-            block: Output
+            entity: Output
         }
     ]
-    blocks: [
+    entities: [
         signal Input { type: Int }
         signal Offset { type: Int }
         signal Output { type: Int }

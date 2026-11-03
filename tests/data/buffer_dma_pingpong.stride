@@ -26,10 +26,10 @@ buffer InBuffer {
 # Reads the frame in order: first sample * 100 + last sample
 reaction Edges {
     ports: [
-        propertyInputPort InBufPort { name: "buffer" block: InBuf }
-        mainOutputPort OutPort { block: OutVal }
+        propertyInputPort InBufPort { name: "buffer" entity: InBuf }
+        mainOutputPort OutPort { entity: OutVal }
     ]
-    blocks: [
+    entities: [
         signal InBuf[4] { type: Real }
         signal OutVal { type: Real }
     ]

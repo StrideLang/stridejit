@@ -636,30 +636,30 @@ llvm::Type *StrideCompiler::resolvePortMemberType(
   }
   auto outputPort = ASTQuery::getModuleMainOutputPort(funcDecl);
   if (outputPort && outputPort->getName() == typeProp->getEntity()) {
-    return getConnectedNodeType(instance->getCompilerProperty("outputBlock"),
+    return getConnectedNodeType(instance->getCompilerProperty("outputEntity"),
                                 true, depth + 1);
   }
   auto inputPort = ASTQuery::getModuleMainInputPort(funcDecl);
   if (inputPort && inputPort->getName() == typeProp->getEntity()) {
-    return getConnectedNodeType(instance->getCompilerProperty("inputBlock"),
+    return getConnectedNodeType(instance->getCompilerProperty("inputEntity"),
                                 false, depth + 1);
   }
   return nullptr;
 }
 
 llvm::Type *
-StrideCompiler::getPortBlockType(std::shared_ptr<DeclarationNode> portDecl,
+StrideCompiler::getPortEntityType(std::shared_ptr<DeclarationNode> portDecl,
                                  std::shared_ptr<DeclarationNode> funcDecl,
                                  std::shared_ptr<FunctionNode> instance,
                                  int depth) {
   if (!portDecl || !funcDecl || depth > kMaxPortTypeDepth) {
     return nullptr;
   }
-  auto blocks = funcDecl->getPropertyValue("blocks");
+  auto blocks = funcDecl->getPropertyValue("entities");
   if (!blocks) {
     return nullptr;
   }
-  std::string blockName = ASTQuery::getNodeName(portDecl->getPropertyValue("block"));
+  std::string blockName = ASTQuery::getNodeName(portDecl->getPropertyValue("entity"));
   for (const auto &node : blocks->getChildren()) {
     if (node->getNodeType() != AST::Declaration &&
         node->getNodeType() != AST::ArrayDeclaration) {
@@ -725,7 +725,7 @@ llvm::Type *StrideCompiler::getConnectedNodeType(ASTNode node,
     }
     auto port = isDownstream ? ASTQuery::getModuleMainInputPort(decl)
                              : ASTQuery::getModuleMainOutputPort(decl);
-    return getPortBlockType(port, decl,
+    return getPortEntityType(port, decl,
                             std::static_pointer_cast<FunctionNode>(node),
                             depth + 1);
   }

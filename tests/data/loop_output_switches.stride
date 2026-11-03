@@ -18,15 +18,15 @@ module Equal {
     ports: [
         mainOutputPort OutputPort {
             name:       'output'
-            block: Output
+            entity: Output
         },
         mainInputPort InputPort {
             name:       'input'
-            block: Input
+            entity: Input
 			meta: "A list with the two values to be compared"
         }
     ]
-    blocks: [
+    entities: [
         signal Input[2] {domain: OutputPort.domain type: Int}
 		switch Output {domain: OutputPort.domain}
     ]
@@ -51,10 +51,10 @@ platformModule __Equal@Int_Bool {
 loop SecondFlag {
 	ports: [
 		mainOutputPort OutputPort {
-			block: Output
+			entity: Output
 		}
 	]
-	blocks: [
+	entities: [
 		switch Output[OutputPort.size] {}
 		signal Index { default: 0 type: Int reset: Reset }
 		switch Done { default: off }
@@ -73,10 +73,10 @@ loop SecondFlag {
 loop SecondFlagCopied {
 	ports: [
 		mainOutputPort OutputPort {
-			block: Output
+			entity: Output
 		}
 	]
-	blocks: [
+	entities: [
 		switch Output[OutputPort.size] {}
 		signal Index { default: 0 type: Int reset: Reset }
 		switch Found {}

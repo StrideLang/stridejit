@@ -1,10 +1,10 @@
 module Gain {
     ports: [
-        mainInputPort InputPort { block: In }
-        mainOutputPort OutputPort { block: Out }
-        propertyInputPort FactorPort { name: "factor" block: Factor }
+        mainInputPort InputPort { entity: In }
+        mainOutputPort OutputPort { entity: Out }
+        propertyInputPort FactorPort { name: "factor" entity: Factor }
     ]
-    blocks: [
+    entities: [
         signal In     { type: Real domain: OutputPort.domain }
         signal Out    { type: Real domain: OutputPort.domain }
         signal Factor { type: Real domain: OutputPort.domain }
@@ -16,11 +16,11 @@ module Gain {
 
 module Offset {
     ports: [
-        mainInputPort InputPort { block: In }
-        mainOutputPort OutputPort { block: Out }
-        propertyInputPort OffsetPort { name: "offset" block: OffsetVal }
+        mainInputPort InputPort { entity: In }
+        mainOutputPort OutputPort { entity: Out }
+        propertyInputPort OffsetPort { name: "offset" entity: OffsetVal }
     ]
-    blocks: [
+    entities: [
         signal In        { type: Real domain: OutputPort.domain }
         signal Out       { type: Real domain: OutputPort.domain }
         signal OffsetVal { type: Real domain: OutputPort.domain }

@@ -25,9 +25,9 @@ constant Table[6] {
 # Reads the table with an index known only at run time.
 loop SumTable {
     ports: [
-        mainOutputPort OutputPort { block: Output }
+        mainOutputPort OutputPort { entity: Output }
     ]
-    blocks: [
+    entities: [
         signal Output { default: 0 type: Int }
         signal Index { default: 0 type: Int }
         signal Element { default: 0 type: Int }

@@ -14,9 +14,9 @@ platformModule __Threshold@Int_Bool {
 
 loop LoopSimple {
     ports: [
-        mainOutputPort OutputPort { block: Output }
+        mainOutputPort OutputPort { entity: Output }
     ]
-    blocks: [
+    entities: [
         signal Output { default: 0 type: Int }
         switch Done { default: off }
     ]

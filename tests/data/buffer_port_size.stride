@@ -23,10 +23,10 @@ buffer InBuffer {
 # First sample of the frame * 100 + the frame length
 reaction FrameLength {
     ports: [
-        propertyInputPort InBufPort { name: "buffer" block: InBuf }
-        mainOutputPort OutPort { block: OutVal }
+        propertyInputPort InBufPort { name: "buffer" entity: InBuf }
+        mainOutputPort OutPort { entity: OutVal }
     ]
-    blocks: [
+    entities: [
         signal InBuf[InBufPort.size] { type: Real }
         signal OutVal { type: Real }
     ]

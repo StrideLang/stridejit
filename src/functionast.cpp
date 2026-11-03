@@ -299,7 +299,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   LOG_INFO() << " == FunctionAST codegen : " << Proto->getName() << std::endl;
   // Record the function arguments in the NamedValues map.
   state.NamedValues.clear();
-  state.PortBlockMap.clear();
+  state.PortEntityMap.clear();
   // Transfer ownership of the prototype to the FunctionProtos map, but keep a
   // reference to it for use below.
   auto &P = *Proto;
@@ -553,7 +553,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
         loopDecl = ASTQuery::findDeclarationByName(P.getName(), {},
                                                    state.m_tree);
       }
-      auto blocksNode = loopDecl ? loopDecl->getPropertyValue("blocks")
+      auto blocksNode = loopDecl ? loopDecl->getPropertyValue("entities")
                                  : nullptr;
       if (blocksNode) {
         for (const auto &outArg : P.getOutArgs()) {

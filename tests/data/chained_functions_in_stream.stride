@@ -5,11 +5,11 @@ signal OutputValue { type: Int }
 
 module Multiply {
     ports: [
-        mainInputPort InPort { block: Input }
-        propertyInputPort FactorPort { name: "factor" block: Factor }
-        mainOutputPort OutPort { block: Output }
+        mainInputPort InPort { entity: Input }
+        propertyInputPort FactorPort { name: "factor" entity: Factor }
+        mainOutputPort OutPort { entity: Output }
     ]
-    blocks: [
+    entities: [
         signal Input { type: Int }
         signal Factor { type: Int }
         signal Output { type: Int }
@@ -21,11 +21,11 @@ module Multiply {
 
 module AddOffset {
     ports: [
-        mainInputPort InPort { block: Input }
-        propertyInputPort OffsetPort { name: "offset" block: Offset }
-        mainOutputPort OutPort { block: Output }
+        mainInputPort InPort { entity: Input }
+        propertyInputPort OffsetPort { name: "offset" entity: Offset }
+        mainOutputPort OutPort { entity: Output }
     ]
-    blocks: [
+    entities: [
         signal Input { type: Int }
         signal Offset { type: Int }
         signal Output { type: Int }
@@ -37,11 +37,11 @@ module AddOffset {
 
 module SubtractBase {
     ports: [
-        mainInputPort InPort { block: Input }
-        propertyInputPort BasePort { name: "base" block: Base }
-        mainOutputPort OutPort { block: Output }
+        mainInputPort InPort { entity: Input }
+        propertyInputPort BasePort { name: "base" entity: Base }
+        mainOutputPort OutPort { entity: Output }
     ]
-    blocks: [
+    entities: [
         signal Input { type: Int }
         signal Base { type: Int }
         signal Output { type: Int }
