@@ -969,8 +969,18 @@ StrideCompiler::findTypeTreeNode(ASTNode node,
 llvm::Constant *StrideCompiler::StateStructInfo::getDefaultValue(
     const std::string &varName) const {
   auto it = varIndices.find(varName);
-  if (it != varIndices.end() && defaultConstant) {
-    return llvm::cast<llvm::Constant>(defaultConstant->getOperand(it->second));
+  if (it != varIndices.end()) {
+    if (defaultConstant) {
+      if (auto *elem = defaultConstant->getAggregateElement(it->second)) {
+        return elem;
+      }
+      if (it->second < defaultConstant->getNumOperands()) {
+        return llvm::cast<llvm::Constant>(defaultConstant->getOperand(it->second));
+      }
+    }
+    if (structType && it->second < structType->getNumElements()) {
+      return llvm::Constant::getNullValue(structType->getElementType(it->second));
+    }
   }
   return nullptr;
 }
@@ -979,7 +989,12 @@ llvm::Constant *StrideCompiler::StateStructInfo::getChildDefaultConstant(
     ASTNode childInstance) const {
   auto it = childIndices.find(childInstance);
   if (it != childIndices.end() && defaultConstant) {
-    return llvm::cast<llvm::Constant>(defaultConstant->getOperand(it->second));
+    if (auto *elem = defaultConstant->getAggregateElement(it->second)) {
+      return elem;
+    }
+    if (it->second < defaultConstant->getNumOperands()) {
+      return llvm::cast<llvm::Constant>(defaultConstant->getOperand(it->second));
+    }
   }
   return nullptr;
 }
@@ -1025,6 +1040,10 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
         auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
         defaultVal =
             makeDefaultConstant(decl->getPropertyValue("default"), varType);
+        auto resetProp = decl->getPropertyValue("reset");
+        if (resetProp) {
+          info.varResetSignals[varName] = ASTQuery::getNodeName(resetProp);
+        }
       }
       if (!defaultVal) {
         defaultVal = llvm::Constant::getNullValue(varType);

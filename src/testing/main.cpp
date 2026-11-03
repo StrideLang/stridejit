@@ -26,6 +26,8 @@ void printUsage(const char *progName) {
                "file path\n"
             << "  --root <path>        Explicit STRIDEROOT path for library "
                "definitions\n"
+            << "  --no-cache           Disable AST and binary cache completely\n"
+            << "  --force, -f          Force recompilation bypassing cached AST and binaries\n"
             << "  -v, --verbose        Enable verbose output\n"
             << "  -h, --help           Display this help message\n";
 }
@@ -34,6 +36,11 @@ int main(int argc, char *argv[]) {
   // Never read from cache during tests, but always regenerate cache files.
   CacheManager::instance().setEnabled(true);
   CacheManager::instance().setForceRecompile(true);
+#ifdef _WIN32
+  _putenv("STRIDE_FORCE_RECOMPILE=1");
+#else
+  setenv("STRIDE_FORCE_RECOMPILE", "1", 1);
+#endif
 
   if (argc < 2) {
     printUsage(argv[0]);
@@ -54,6 +61,20 @@ int main(int argc, char *argv[]) {
       return 0;
     } else if (arg == "-v" || arg == "--verbose") {
       verbose = true;
+    } else if (arg == "--no-cache") {
+      CacheManager::instance().setEnabled(false);
+#ifdef _WIN32
+      _putenv("STRIDE_NO_CACHE=1");
+#else
+      setenv("STRIDE_NO_CACHE", "1", 1);
+#endif
+    } else if (arg == "--force" || arg == "-f" || arg == "--force-recompile") {
+      CacheManager::instance().setForceRecompile(true);
+#ifdef _WIN32
+      _putenv("STRIDE_FORCE_RECOMPILE=1");
+#else
+      setenv("STRIDE_FORCE_RECOMPILE", "1", 1);
+#endif
     } else if ((arg == "--repeat" || arg == "-r" || arg == "-n") &&
                i + 1 < argc) {
       try {

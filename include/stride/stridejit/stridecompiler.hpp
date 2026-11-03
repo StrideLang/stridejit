@@ -279,6 +279,7 @@ public:
     llvm::Constant *defaultConstant{nullptr};
     std::map<std::string, unsigned> varIndices;
     std::map<ASTNode, unsigned> childIndices;
+    std::map<std::string, std::string> varResetSignals;
 
     size_t allocSize{0};
     std::vector<uint64_t> fieldOffsets;

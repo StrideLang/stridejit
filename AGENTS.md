@@ -156,7 +156,7 @@ This document outlines critical architectural patterns, code generation invarian
   - Persistent variables must **never** be re-initialized at the start of a module function body (`allocateInternalVariables`), as that would wipe accumulated state across calls.
 
 - **Independent Variable Resets**:
-  - When an independent reset is triggered on a persistent variable, look up its compile-time default constant using `StateStructInfo::getDefaultValue(varName)` (via `defaultConstant->getOperand(varIndices[varName])`) and store it back into the variable's GEP pointer.
+  - When an independent reset is triggered on a persistent variable, look up its compile-time default constant using `StateStructInfo::getDefaultValue(varName)` (via `defaultConstant->getAggregateElement(varIndices[varName]) to safely handle zero-folded ConstantAggregateZero as well as ConstantStruct`) and store it back into the variable's GEP pointer.
 
 - **MSVC Smart Pointer Ternary Operator**:
   - When assigning smart pointers of different derived AST types (e.g., `shared_ptr<FunctionNode>` vs `shared_ptr<DeclarationNode>`) to `ASTNode` via ternary operator `? :`, MSVC does not deduce the base type automatically. Explicitly cast both arms:
@@ -186,4 +186,16 @@ This document outlines critical architectural patterns, code generation invarian
     5. `ExternalArgs`: `typeName* name`
     6. `UsedPortProperties`: `typeName name` (passed by value)
 
+---
 
+## 13. Entity vs. Block Terminology & Property Aliasing
+
+- **Canonical Modern Terminology**:
+  - **`entity`** (for port bindings, e.g. `mainInputPort InPort { entity: Input }`) and **`entities`** (for internal declarations of modules, reactions, loops) is the standard terminology in Stride.
+  - **`block`** and **`blocks`** is legacy terminology that has been phased out and mostly removed across Stride.
+  - When desugaring syntax, lowering headers, synthesizing declarations, or emitting AST nodes, **always use `entity` and `entities`**.
+
+- **Bidirectional Aliasing & Shadowing Invariants**:
+  - The AST supports bidirectional aliasing between `entities` <-> `blocks` and `entity` <-> `block` (via `DeclarationNode::getPropertyValue`, `ASTQuery::findPropertyByName`, etc.).
+  - **Never inject legacy defaults over modern properties**: In schema population passes (such as `ASTFunctions::fillDefaultPropertiesForNode`), always verify whether the property OR its alias is present before populating a schema default. An empty default (e.g. `blocks: []`) must never be added if `entities: [ ... ]` is already declared, as it would shadow user declarations during direct property lookups.
+  - **Duplicate Rejection in `addProperty`**: `DeclarationNode::addProperty()` rejects adding a property if either the property name or its bidirectional alias already exists on the declaration.

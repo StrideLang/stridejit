@@ -405,6 +405,69 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
               state.currentFunctionStateInfo->structType,
               state.currentFunctionStatePtr, idx, varName + "_ptr");
           state.NamedValues[varName] = {fieldPtr, elemTy};
+
+          // Independent Variable Resets:
+          // When a persistent variable specifies a reset property (e.g. signal Total { reset: Reset }),
+          // and that reset signal/switch is available in the function's scope, emit a conditional check
+          // at function entry to restore its compile-time default value if the reset condition is active.
+          std::string resetSignalName;
+          auto resetSigIt =
+              state.currentFunctionStateInfo->varResetSignals.find(varName);
+          if (resetSigIt !=
+              state.currentFunctionStateInfo->varResetSignals.end()) {
+            resetSignalName = resetSigIt->second;
+          } else {
+            auto varDeclIt = std::find_if(
+                internalVariables.begin(), internalVariables.end(),
+                [&varName](const std::shared_ptr<DeclarationNode> &d) {
+                  return d && d->getName() == varName;
+                });
+            if (varDeclIt != internalVariables.end()) {
+              auto resetProp = (*varDeclIt)->getPropertyValue("reset");
+              if (resetProp) {
+                resetSignalName = ASTQuery::getNodeName(resetProp);
+              }
+            }
+          }
+
+          if (!resetSignalName.empty()) {
+            auto resetIt = state.NamedValues.find(resetSignalName);
+            if (resetIt != state.NamedValues.end()) {
+              llvm::Value *resetVal = resetIt->second.first;
+              if (resetVal->getType()->isPointerTy()) {
+                llvm::Type *valTy = resetIt->second.second.value_or(
+                    llvm::Type::getInt1Ty(*state.TheContext));
+                resetVal = state.Builder->CreateLoad(
+                    valTy, resetVal,
+                    resetSignalName + "_val");
+              }
+              llvm::Value *cond = resetVal;
+              if (cond->getType()->isFloatingPointTy()) {
+                cond = state.Builder->CreateFCmpONE(
+                    cond, llvm::ConstantFP::get(cond->getType(), 0.0),
+                    "reset_cond");
+              } else if (cond->getType()->isIntegerTy() &&
+                         !cond->getType()->isIntegerTy(1)) {
+                cond = state.Builder->CreateICmpNE(
+                    cond, llvm::ConstantInt::get(cond->getType(), 0),
+                    "reset_cond");
+              }
+              llvm::Constant *defaultVal =
+                  state.currentFunctionStateInfo->getDefaultValue(varName);
+              if (defaultVal) {
+                llvm::BasicBlock *resetBB = llvm::BasicBlock::Create(
+                    *state.TheContext, varName + "_reset", TheFunction);
+                llvm::BasicBlock *contBB = llvm::BasicBlock::Create(
+                    *state.TheContext, varName + "_cont", TheFunction);
+
+                state.Builder->CreateCondBr(cond, resetBB, contBB);
+                state.Builder->SetInsertPoint(resetBB);
+                state.Builder->CreateStore(defaultVal, fieldPtr);
+                state.Builder->CreateBr(contBB);
+                state.Builder->SetInsertPoint(contBB);
+              }
+            }
+          }
           if (state.debugEmitter && subprogram) {
             std::string relFile = !relativeFilename.empty()
                 ? relativeFilename
