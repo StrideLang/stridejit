@@ -1342,25 +1342,36 @@ void processArgGroup(
         newArgVal = calleeArg ? func(value, type, calleeArg, state) : value;
       }
 
-      if (calleeArg && calleeArg->getType()->isPointerTy() &&
-          !newArgVal->getType()->isPointerTy()) {
-        llvm::Function *TheFunction =
-            state.Builder->GetInsertBlock()->getParent();
-        llvm::Type *elemTy =
-            type.has_value() ? type.value() : newArgVal->getType();
-        auto *varExpr = dynamic_cast<VariableExprAST *>(ArgGroup[i].get());
-        std::string varName = varExpr ? varExpr->getName() : "call_tmp";
-        llvm::AllocaInst *tempAlloc =
-            state.CreateEntryBlockAlloca(TheFunction, varName + "_tmp", elemTy);
+      if (calleeArg && calleeArg->getType()->isPointerTy()) {
+        llvm::Type *targetElemTy =
+            (argTypes && i < argTypes->size() && (*argTypes)[i] &&
+             !(*argTypes)[i]->isVoidTy())
+                ? (*argTypes)[i]
+                : (type.has_value() ? type.value() : nullptr);
 
-        if (isOutputGroup) {
-          newArgVal = tempAlloc;
-          if (tempOuts && varExpr) {
-            tempOuts->push_back({varExpr->getName(), tempAlloc, elemTy});
+        if (!newArgVal->getType()->isPointerTy()) {
+          llvm::Function *TheFunction =
+              state.Builder->GetInsertBlock()->getParent();
+          llvm::Type *elemTy =
+              targetElemTy ? targetElemTy : newArgVal->getType();
+          if (newArgVal->getType() != elemTy) {
+            newArgVal = convertScalar(state, newArgVal, elemTy);
           }
-        } else {
-          state.Builder->CreateStore(newArgVal, tempAlloc);
-          newArgVal = tempAlloc;
+          auto *varExpr = dynamic_cast<VariableExprAST *>(ArgGroup[i].get());
+          std::string varName = varExpr ? varExpr->getName() : "call_tmp";
+          llvm::AllocaInst *tempAlloc =
+              state.CreateEntryBlockAlloca(TheFunction, varName + "_tmp", elemTy);
+
+          if (isOutputGroup) {
+            newArgVal = tempAlloc;
+            if (tempOuts && varExpr) {
+              tempOuts->push_back({varExpr->getName(), tempAlloc, elemTy});
+            }
+          } else {
+            state.Builder->CreateStore(newArgVal, tempAlloc);
+            newArgVal = tempAlloc;
+          }
+          type = elemTy;
         }
       } else if (calleeArg && !calleeArg->getType()->isPointerTy() &&
                  newArgVal->getType()->isPointerTy()) {
@@ -1450,7 +1461,8 @@ CallExprAST::codegen(StrideCompiler &state) {
   if (callType == CallableType::Module || callType == CallableType::Loop) {
 
     int outArgCount = CallArgs.size();
-    processArgGroup(state, InArgs, CalleeF, CallArgs, false);
+    processArgGroup(state, InArgs, CalleeF, CallArgs, false, nullptr,
+                    &InArgsDataType);
 
     if (protoIt != state.FunctionProtos.end()) {
       const auto &proto = *protoIt->second;
@@ -1696,7 +1708,8 @@ CallExprAST::codegen(StrideCompiler &state) {
         CallArgs.push_back({state.Builder->getInt32(numVarArgs), i32Ty});
       }
     } else {
-      processArgGroup(state, InArgs, CalleeF, CallArgs);
+      processArgGroup(state, InArgs, CalleeF, CallArgs, false, nullptr,
+                      &InArgsDataType);
     }
     // processArgGroup(state, InternalArgs, CalleeF, CallArgs)
     if (CalleeF->hasFnAttribute("stride.struct_out") && !OutArgs.empty()) {
@@ -1744,7 +1757,14 @@ CallExprAST::codegen(StrideCompiler &state) {
       }
     }
   }
-  processArgGroup(state, PropertyArgs, CalleeF, CallArgs);
+  std::vector<llvm::Type *> calleePropTypes;
+  if (protoIt != state.FunctionProtos.end()) {
+    for (const auto &arg : protoIt->second->getPropertyArgs()) {
+      calleePropTypes.push_back(arg.llvmType);
+    }
+  }
+  processArgGroup(state, PropertyArgs, CalleeF, CallArgs, false, nullptr,
+                  calleePropTypes.empty() ? &PropertyArgsDataType : &calleePropTypes);
 
   if (calleeNeedsState) {
     llvm::Value *statePtrVal = nullptr;

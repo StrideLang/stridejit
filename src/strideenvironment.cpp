@@ -306,8 +306,23 @@ bool StrideEnvironment::generateAllRootFunctions(ASTNode root) {
       auto decl = std::static_pointer_cast<DeclarationNode>(child);
       std::string entType = decl->getEntityType();
 
-      if (entType == "module" || entType == "reaction" || entType == "action" ||
-          entType == "function" || entType == "loop") {
+      bool isCallable = (entType == "module" || entType == "reaction" ||
+                         entType == "function" || entType == "loop");
+      if (!isCallable) {
+        auto typeDecl = ASTQuery::findTypeDeclaration(decl, scope, root);
+        if (typeDecl) {
+          auto inherited = ASTQuery::getInheritedTypes(typeDecl, scope, root);
+          for (const auto &p : inherited) {
+            if (p && (p->getName() == "_Reaction" || p->getName() == "_Module" ||
+                      p->getName() == "_Loop")) {
+              isCallable = true;
+              break;
+            }
+          }
+        }
+      }
+
+      if (isCallable) {
         if (entType == "domain" || entType == "_domainDefinition" ||
             entType == "platformModule") {
           continue;

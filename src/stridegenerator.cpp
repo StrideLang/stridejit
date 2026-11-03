@@ -75,11 +75,12 @@ parseExternalCallTemplate(const std::string &processing) {
     size_t last = op.find_last_not_of(" \t\r\n");
     op.erase(last == std::string::npos ? 0 : last + 1);
     if (!op.empty()) {
-      if (op.size() > prefix.size() + suffix.size() &&
-          op.compare(0, prefix.size(), prefix) == 0 &&
+      size_t tokPos = op.find(prefix);
+      if (tokPos != std::string::npos &&
           op.compare(op.size() - suffix.size(), suffix.size(), suffix) == 0) {
         std::string idxStr = op.substr(
-            prefix.size(), op.size() - prefix.size() - suffix.size());
+            tokPos + prefix.size(),
+            op.size() - tokPos - prefix.size() - suffix.size());
         try {
           result.inTokenOrder.push_back(
               static_cast<size_t>(std::stoul(idxStr)));
@@ -96,6 +97,56 @@ parseExternalCallTemplate(const std::string &processing) {
     start = comma + 1;
   }
   return result;
+}
+
+bool isReaction(const std::shared_ptr<DeclarationNode> &decl,
+                const ScopeStack &scope, const ASTNode &tree) {
+  if (!decl) {
+    return false;
+  }
+  const auto &entType = decl->getEntityType();
+  if (entType == "reaction" || entType == "_Reaction") {
+    return true;
+  }
+  auto typeDecl = ASTQuery::findTypeDeclaration(decl, scope, tree);
+  if (typeDecl) {
+    if (typeDecl->getName() == "_Reaction") {
+      return true;
+    }
+    auto inherited = ASTQuery::getInheritedTypes(typeDecl, scope, tree);
+    for (const auto &p : inherited) {
+      if (p && p->getName() == "_Reaction") {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool isCallable(const std::shared_ptr<DeclarationNode> &decl,
+                const ScopeStack &scope, const ASTNode &tree) {
+  if (!decl) {
+    return false;
+  }
+  const auto &t = decl->getEntityType();
+  if (t == "module" || t == "reaction" || t == "loop" ||
+      t == "platformModule" || t == "function") {
+    return true;
+  }
+  if (isReaction(decl, scope, tree)) {
+    return true;
+  }
+  auto typeDecl = ASTQuery::findTypeDeclaration(decl, scope, tree);
+  if (typeDecl) {
+    auto inherited = ASTQuery::getInheritedTypes(typeDecl, scope, tree);
+    for (const auto &p : inherited) {
+      if (p && (p->getName() == "_Reaction" || p->getName() == "_Module" ||
+                p->getName() == "_Loop")) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 } // namespace
@@ -1711,27 +1762,75 @@ void StrideGenerator::collectInputArgs(
         // connected function
         std::string intermediateSymbol =
             ASTQuery::getNodeName(intermediateNode);
-        args.MainIn.args.emplace_back(
-            std::make_unique<VariableExprAST>(intermediateSymbol));
-        auto prevDecls = ASTQuery::findAllDeclarations(
-            ASTQuery::getNodeName(prevFunc), scope, tree);
-        auto prevDecl = CodeAnalysis::matchDefinitionToTypes(
-            prevDecls, prevFunc, scope, tree);
-        if (prevDecl) {
-          auto protoIt =
-              state.FunctionProtos.find(ASTQuery::getNodeName(prevDecl));
-          if (protoIt != state.FunctionProtos.end() &&
-              !protoIt->second->getOutArgs().empty()) {
-            args.MainIn.argTypes.push_back(
-                protoIt->second->getOutArgs()[0].llvmType);
-          } else {
-            args.MainIn.argTypes.push_back(
-                llvm::Type::getInt32Ty(*state.TheContext));
+        auto varExpr = std::make_unique<VariableExprAST>(intermediateSymbol);
+        setTypeCastMetadata(intermediateNode, varExpr.get());
+        args.MainIn.args.emplace_back(std::move(varExpr));
+
+        llvm::Type *inArgType = nullptr;
+        // 1. If intermediate has typecast, use the cast type
+        if (auto typecastNode =
+                intermediateNode->getCompilerProperty("typecast")) {
+          if (typecastNode->getNodeType() == AST::String) {
+            std::string tName =
+                std::static_pointer_cast<ValueNode>(typecastNode)
+                    ->getStringValue();
+            if (state.typesMap.find(tName) != state.typesMap.end()) {
+              inArgType = state.typesMap[tName];
+            }
           }
-        } else {
-          args.MainIn.argTypes.push_back(
-              llvm::Type::getInt32Ty(*state.TheContext));
         }
+        // 2. Otherwise check if callee funcDecl expects a specific type on its mainInputPort
+        if (!inArgType && funcDecl) {
+          auto inPort = ASTQuery::getModuleMainInputPort(funcDecl);
+          if (inPort) {
+            auto inBlock = inPort->getPropertyValue("block");
+            if (inBlock) {
+              ScopeStack localScope = scope;
+              if (auto blocks = funcDecl->getPropertyValue("blocks")) {
+                localScope.push_back({funcDecl, blocks->getChildren()});
+              }
+              auto inDecl = ASTQuery::findDeclarationByName(
+                  ASTQuery::getNodeName(inBlock), localScope, tree);
+              if (inDecl) {
+                inArgType =
+                    state.getLLVMTypeForCodegenEntity(inDecl, funcDecl, func);
+              }
+            }
+          }
+        }
+        // 3. Otherwise check intermediateNode's outType
+        if (!inArgType) {
+          if (auto outTypeNode =
+                  intermediateNode->getCompilerProperty("outType")) {
+            if (outTypeNode->getNodeType() == AST::String) {
+              std::string tName =
+                  std::static_pointer_cast<ValueNode>(outTypeNode)
+                      ->getStringValue();
+              if (state.typesMap.find(tName) != state.typesMap.end()) {
+                inArgType = state.typesMap[tName];
+              }
+            }
+          }
+        }
+        // 4. Check function prototype
+        if (!inArgType) {
+          auto prevDecls = ASTQuery::findAllDeclarations(
+              ASTQuery::getNodeName(prevFunc), scope, tree);
+          auto prevDecl = CodeAnalysis::matchDefinitionToTypes(
+              prevDecls, prevFunc, scope, tree);
+          if (prevDecl) {
+            auto protoIt =
+                state.FunctionProtos.find(ASTQuery::getNodeName(prevDecl));
+            if (protoIt != state.FunctionProtos.end() &&
+                !protoIt->second->getOutArgs().empty()) {
+              inArgType = protoIt->second->getOutArgs()[0].llvmType;
+            }
+          }
+        }
+        if (!inArgType || inArgType->isVoidTy()) {
+          inArgType = llvm::Type::getDoubleTy(*state.TheContext);
+        }
+        args.MainIn.argTypes.push_back(inArgType);
       } else {
         if (!exprs.empty()) {
           args.MainIn.args.emplace_back(std::move(exprs.back()));
@@ -1932,9 +2031,30 @@ void StrideGenerator::collectPropertyArgs(
         }
       }
       args.Properties.args.emplace_back(createExpr(value));
-      // FIXME set correct type
-      args.Properties.argTypes.push_back(
-          llvm::Type::getDoubleTy(*state.TheContext));
+      llvm::Type *propType = nullptr;
+      if (value) {
+        if (value->getNodeType() == AST::Int) {
+          propType = llvm::Type::getInt32Ty(*state.TheContext);
+        } else if (value->getNodeType() == AST::Real) {
+          propType = llvm::Type::getDoubleTy(*state.TheContext);
+        } else if (value->getNodeType() == AST::Switch) {
+          propType = state.typesMap[DataTypes::Switch];
+        } else if (value->getNodeType() == AST::String) {
+          propType = state.typesMap[DataTypes::String];
+        } else if (value->getNodeType() == AST::Entity ||
+                   value->getNodeType() == AST::Array) {
+          auto valueDecl = ASTQuery::findDeclarationByName(
+              ASTQuery::getNodeName(value), scope, tree);
+          if (valueDecl) {
+            propType =
+                state.getLLVMTypeForCodegenEntity(valueDecl, funcDecl, func);
+          }
+        }
+      }
+      if (!propType) {
+        propType = llvm::Type::getDoubleTy(*state.TheContext);
+      }
+      args.Properties.argTypes.push_back(propType);
     }
   }
 }
@@ -1979,11 +2099,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
             ASTQuery::getNodeName(funcNode), scope, tree);
         decltype(funcDecls) callableDecls;
         for (const auto &d : funcDecls) {
-          if (!d)
-            continue;
-          const auto &t = d->getEntityType();
-          if (t == "module" || t == "reaction" || t == "action" ||
-              t == "loop" || t == "platformModule" || t == "function") {
+          if (isCallable(d, scope, tree)) {
             callableDecls.push_back(d);
           }
         }
@@ -1993,8 +2109,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         auto firstFuncDecl = CodeAnalysis::matchDefinitionToTypes(
             funcDecls, funcNode, scope, tree);
         if (firstFuncDecl) {
-          std::string entType = firstFuncDecl->getEntityType();
-          if (entType == "reaction" || entType == "action") {
+          if (isReaction(firstFuncDecl, scope, tree)) {
             isTriggeredReactionStream = true;
           }
         }
@@ -2315,19 +2430,9 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         // A function call can only resolve to a callable declaration. Other
         // declarations may share the name (e.g. a named generator transition
         // `transition Place_X[Index in 0:8]` calling `action Place_X`).
-        auto isCallableDecl = [](const std::shared_ptr<DeclarationNode> &d) {
-          if (!d)
-            return false;
-          const auto &t = d->getEntityType();
-          if (t == "module" || t == "reaction" || t == "action" ||
-              t == "loop" || t == "platformModule" || t == "function") {
-            return true;
-          }
-          return false;
-        };
         decltype(decls) callableDecls;
         for (const auto &d : decls) {
-          if (isCallableDecl(d)) {
+          if (isCallable(d, scope, tree)) {
             callableDecls.push_back(d);
           }
         }
@@ -2380,59 +2485,227 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
 
       // find if function is external
       std::optional<ExternalFunction> externFunc;
+      llvm::Type *retType = nullptr;
 
-      // FIXME: ensure next node is processed correctly. This will not
-      // work for many cases, e.g. if next is a function
-      std::shared_ptr<DeclarationNode> nextDecl =
-          ASTQuery::findDeclarationByName(ASTQuery::getNodeName(next), scope,
-                                          tree);
+      bool nextIsReaction = false;
+      if (next && next->getNodeType() == AST::Function) {
+        auto nextFunc = std::static_pointer_cast<FunctionNode>(next);
+        auto nextDecls =
+            ASTQuery::findAllDeclarations(nextFunc->getName(), scope, tree);
+        decltype(nextDecls) callableDecls;
+        for (const auto &d : nextDecls) {
+          if (isCallable(d, scope, tree)) {
+            callableDecls.push_back(d);
+          }
+        }
+        if (!callableDecls.empty()) {
+          nextDecls = std::move(callableDecls);
+        }
+        auto nextDecl =
+            CodeAnalysis::matchDefinitionToTypes(nextDecls, nextFunc, scope, tree);
+        if (!nextDecl && !nextDecls.empty()) {
+          nextDecl = nextDecls.front();
+        }
+        if (isReaction(nextDecl, scope, tree)) {
+          nextIsReaction = true;
+        }
+      }
 
-      llvm::Type *retType = state.getLLVMType(nextDecl);
-      if (retType->isVoidTy() &&
-          funcDecl->getEntityType() == "platformModule") {
-        auto outputList = funcDecl->getPropertyValue("outputs");
-        if (outputList && outputList->getNodeType() == AST::List &&
-            outputList->getChildren().size() > 0) {
-          auto outputBlock = outputList->getChildren()[0];
-          if (outputBlock->getNodeType() == AST::Entity) {
-            auto outputType =
-                std::static_pointer_cast<EntityNode>(outputBlock)->getName();
-            if (state.typesMap.find(outputType) != state.typesMap.end()) {
-              retType = state.typesMap[outputType];
+      if (next && next->getNodeType() == AST::Function && !nextIsReaction) {
+        auto nextFunc = std::static_pointer_cast<FunctionNode>(next);
+        // 1. Resolve output type of current func
+        llvm::Type *outType = nullptr;
+        std::string outTypeStr;
+        if (funcDecl->getEntityType() == "platformModule") {
+          auto outputList = funcDecl->getPropertyValue("outputs");
+          if (outputList && outputList->getNodeType() == AST::List &&
+              !outputList->getChildren().empty()) {
+            auto outputBlock = outputList->getChildren()[0];
+            if (outputBlock->getNodeType() == AST::Entity) {
+              outTypeStr =
+                  std::static_pointer_cast<EntityNode>(outputBlock)->getName();
+              if (state.typesMap.find(outTypeStr) != state.typesMap.end()) {
+                outType = state.typesMap[outTypeStr];
+              }
             }
           }
         }
-      }
-
-      if (funcDecl->getEntityType() == "platformModule") {
-        externFunc = state.getExternalFunction(func->getName(), retType,
-                                               args.MainIn.argTypes);
-      }
-
-      std::unique_ptr<ExprAST> nextExpr = nullptr;
-      if (next && next->getNodeType() != AST::Function) {
-        nextExpr = createExpr(next);
-      }
-      if (nextExpr) {
-        ASTNode outputNode = nullptr;
-        if (typeTree && typeTree->instance) {
-          outputNode = typeTree->instance->getCompilerProperty("mainOutput");
-        }
-        if (!outputNode && func) {
-          outputNode = func->getCompilerProperty("mainOutput");
-        }
-        args.MainOut.args.emplace_back(std::move(nextExpr));
-        if (outputNode) {
-          auto entityName = ASTQuery::getNodeName(outputNode);
-          ScopeStack scope;
-          if (auto blocksNode = funcDecl->getPropertyValue("blocks")) {
-            scope = {std::pair<ASTNode, std::vector<ASTNode>>(
-                nullptr, blocksNode->getChildren())};
+        if (!outType) {
+          auto outPort = ASTQuery::getModuleMainOutputPort(funcDecl);
+          if (outPort) {
+            auto outBlock = outPort->getPropertyValue("block");
+            if (outBlock) {
+              ScopeStack localScope = scope;
+              if (auto blocksNode = funcDecl->getPropertyValue("blocks")) {
+                localScope.push_back({funcDecl, blocksNode->getChildren()});
+              }
+              auto outDecl = ASTQuery::findDeclarationByName(
+                  ASTQuery::getNodeName(outBlock), localScope, tree);
+              if (outDecl) {
+                outType =
+                    state.getLLVMTypeForCodegenEntity(outDecl, funcDecl, func);
+                if (auto typeProp = outDecl->getPropertyValue("type")) {
+                  if (typeProp->getNodeType() == AST::Entity) {
+                    outTypeStr =
+                        std::static_pointer_cast<EntityNode>(typeProp)->getName();
+                  }
+                }
+              }
+            }
           }
-          auto mainOutputDecl =
-              ASTQuery::findDeclarationByName(entityName, scope, nullptr);
+        }
+        if (!outType) {
+          auto outTypes = CodeAnalysis::getOutputDataTypes(func, scope, tree);
+          if (!outTypes.empty()) {
+            outTypeStr = ASTQuery::getNodeName(outTypes.front());
+            if (state.typesMap.find(outTypeStr) != state.typesMap.end()) {
+              outType = state.typesMap[outTypeStr];
+            }
+          }
+        }
+        if (!outType || outType->isVoidTy()) {
+          outType = state.typesMap[DataTypes::Real];
+          outTypeStr = DataTypes::Real;
+        }
 
-          args.MainOut.argTypes.push_back(state.getLLVMType(mainOutputDecl));
+        // 2. Resolve expected input type of downstream nextFunc
+        llvm::Type *inType = nullptr;
+        std::string inTypeStr;
+        auto nextDecls =
+            ASTQuery::findAllDeclarations(nextFunc->getName(), scope, tree);
+        auto nextDecl =
+            CodeAnalysis::matchDefinitionToTypes(nextDecls, nextFunc, scope, tree);
+        if (!nextDecl && !nextDecls.empty()) {
+          nextDecl = nextDecls.front();
+        }
+        if (nextDecl) {
+          if (nextDecl->getEntityType() == "platformModule") {
+            auto inputsList = nextDecl->getPropertyValue("inputs");
+            if (inputsList && inputsList->getNodeType() == AST::List &&
+                !inputsList->getChildren().empty()) {
+              auto inputBlock = inputsList->getChildren()[0];
+              if (inputBlock->getNodeType() == AST::Entity) {
+                inTypeStr =
+                    std::static_pointer_cast<EntityNode>(inputBlock)->getName();
+                if (state.typesMap.find(inTypeStr) != state.typesMap.end()) {
+                  inType = state.typesMap[inTypeStr];
+                }
+              }
+            }
+          }
+          if (!inType) {
+            auto inPort = ASTQuery::getModuleMainInputPort(nextDecl);
+            if (inPort) {
+              auto inBlock = inPort->getPropertyValue("block");
+              if (inBlock) {
+                ScopeStack nextScope = scope;
+                if (auto blocksNode = nextDecl->getPropertyValue("blocks")) {
+                  nextScope.push_back({nextDecl, blocksNode->getChildren()});
+                }
+                auto inDecl = ASTQuery::findDeclarationByName(
+                    ASTQuery::getNodeName(inBlock), nextScope, tree);
+                if (inDecl) {
+                  inType =
+                      state.getLLVMTypeForCodegenEntity(inDecl, nextDecl, nextFunc);
+                  if (auto typeProp = inDecl->getPropertyValue("type")) {
+                    if (typeProp->getNodeType() == AST::Entity) {
+                      inTypeStr =
+                          std::static_pointer_cast<EntityNode>(typeProp)->getName();
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        if (!inType) {
+          inType = outType;
+          inTypeStr = outTypeStr;
+        }
+
+        // 3. Create intermediate entity
+        std::string intermediateName =
+            "__intermediate_" + state.getName() + "_" +
+            std::to_string(state.m_idCounter++);
+        auto intermediateEntity = std::make_shared<EntityNode>(
+            intermediateName, func->getFilename().c_str(), func->getLine());
+
+        // 4. If outType != inType, tag intermediate entity with typecast
+        if (outType != inType && !inTypeStr.empty()) {
+          intermediateEntity->setCompilerProperty(
+              "typecast",
+              std::make_shared<ValueNode>(inTypeStr, func->getFilename().c_str(),
+                                          func->getLine()));
+        }
+        intermediateEntity->setCompilerProperty(
+            "outType",
+            std::make_shared<ValueNode>(
+                outTypeStr.empty() ? DataTypes::Real : outTypeStr,
+                func->getFilename().c_str(), func->getLine()));
+
+        func->setCompilerProperty("intermediateOutput", intermediateEntity);
+
+        args.MainOut.args.emplace_back(
+            std::make_unique<VariableExprAST>(intermediateName));
+        args.MainOut.argTypes.push_back(outType);
+
+        if (funcDecl->getEntityType() == "platformModule") {
+          retType = outType;
+          externFunc = state.getExternalFunction(func->getName(), retType,
+                                                 args.MainIn.argTypes);
+        }
+      } else {
+        std::shared_ptr<DeclarationNode> nextDecl =
+            ASTQuery::findDeclarationByName(ASTQuery::getNodeName(next), scope,
+                                            tree);
+
+        retType = state.getLLVMType(nextDecl);
+        if (retType->isVoidTy() &&
+            funcDecl->getEntityType() == "platformModule") {
+          auto outputList = funcDecl->getPropertyValue("outputs");
+          if (outputList && outputList->getNodeType() == AST::List &&
+              outputList->getChildren().size() > 0) {
+            auto outputBlock = outputList->getChildren()[0];
+            if (outputBlock->getNodeType() == AST::Entity) {
+              auto outputType =
+                  std::static_pointer_cast<EntityNode>(outputBlock)->getName();
+              if (state.typesMap.find(outputType) != state.typesMap.end()) {
+                retType = state.typesMap[outputType];
+              }
+            }
+          }
+        }
+
+        if (funcDecl->getEntityType() == "platformModule") {
+          externFunc = state.getExternalFunction(func->getName(), retType,
+                                                 args.MainIn.argTypes);
+        }
+
+        std::unique_ptr<ExprAST> nextExpr = nullptr;
+        if (next && next->getNodeType() != AST::Function) {
+          nextExpr = createExpr(next);
+        }
+        if (nextExpr) {
+          ASTNode outputNode = nullptr;
+          if (typeTree && typeTree->instance) {
+            outputNode = typeTree->instance->getCompilerProperty("mainOutput");
+          }
+          if (!outputNode && func) {
+            outputNode = func->getCompilerProperty("mainOutput");
+          }
+          args.MainOut.args.emplace_back(std::move(nextExpr));
+          if (outputNode) {
+            auto entityName = ASTQuery::getNodeName(outputNode);
+            ScopeStack scope;
+            if (auto blocksNode = funcDecl->getPropertyValue("blocks")) {
+              scope = {std::pair<ASTNode, std::vector<ASTNode>>(
+                  nullptr, blocksNode->getChildren())};
+            }
+            auto mainOutputDecl =
+                ASTQuery::findDeclarationByName(entityName, scope, nullptr);
+
+            args.MainOut.argTypes.push_back(state.getLLVMType(mainOutputDecl));
+          }
         }
       }
 
@@ -2539,7 +2812,8 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               // TODO: Ensure this generated intermediate symbol is managed when
               // checking for symbol clashes across scopes.
               std::string intermediateName =
-                  "__intermediate_" + state.getName() + "_" + arg.name;
+                  "__intermediate_" + state.getName() + "_" + arg.name + "_" +
+                  std::to_string(state.m_idCounter++);
               if (func) {
                 func->setCompilerProperty(
                     "intermediateOutput",
@@ -2570,7 +2844,8 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                 // TODO: Ensure this generated intermediate symbol is managed
                 // when checking for symbol clashes across scopes.
                 std::string intermediateName =
-                    "__intermediate_" + state.getName() + "_" + arg.name;
+                    "__intermediate_" + state.getName() + "_" + arg.name + "_" +
+                    std::to_string(state.m_idCounter++);
                 if (func) {
                   func->setCompilerProperty(
                       "intermediateOutput",
@@ -2714,8 +2989,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
             if (funcDecl) {
               if (funcDecl->getEntityType() == "module") {
                 callexpr->callType = CallableType::Module;
-              } else if (funcDecl->getEntityType() == "reaction" ||
-                         funcDecl->getEntityType() == "action") {
+              } else if (funcDecl->getEntityType() == "reaction") {
                 callexpr->callType = CallableType::Reaction;
               } else if (funcDecl->getEntityType() == "loop") {
                 callexpr->callType = CallableType::Loop;
@@ -3224,8 +3498,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
 
   if (funcDecl->getEntityType() == "module") {
     newfunc->callType = CallableType::Module;
-  } else if (funcDecl->getEntityType() == "reaction" ||
-             funcDecl->getEntityType() == "action") {
+  } else if (funcDecl->getEntityType() == "reaction") {
     newfunc->callType = CallableType::Reaction;
   } else if (funcDecl->getEntityType() == "loop") {
     newfunc->callType = CallableType::Loop;
