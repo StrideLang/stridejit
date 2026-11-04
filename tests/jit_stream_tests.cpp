@@ -213,6 +213,60 @@ TEST(JITStreamTest, ChainedFunctionsInPipeline) {
   EXPECT_EQ(getOutput(), 5);
 }
 
+TEST(JITStreamTest, HeterogeneousChainedFunctionsInPipeline) {
+  strd::StrideEnvironment strenv;
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                               "chained_functions_heterogeneous.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+
+  strenv.invoke("RootDomain_init", args);
+
+  auto getOutputInt = [&]() {
+    return strenv
+        .getStateVar(statePtr.get(), "OutputInt", std::nullopt, "RootDomain")
+        .value_or(0);
+  };
+  auto getOutputReal = [&]() {
+    return strenv
+        .getStateVar<double>(statePtr.get(), "OutputReal", std::nullopt,
+                             "RootDomain")
+        .value_or(0.0);
+  };
+
+  // Run with defaults:
+  // Stream 1 (Int -> Real -> Int):
+  // InputInt = 5:
+  // IntScale: 5 * 3 = 15
+  // RealAddOffset(offset: 2.5): (15.0 * 0.5) + 2.5 = 10.0
+  // IntMultiply: (int)10.0 * 2 = 20
+  //
+  // Stream 2 (Real -> Int -> Real):
+  // InputReal = 4.2:
+  // RealDouble: 4.2 * 2.0 = 8.4
+  // IntAddOne: (int)8.4 + 1 = 8 + 1 = 9
+  // RealDouble: (double)9.0 * 2.0 = 18.0
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(getOutputInt(), 20);
+  EXPECT_NEAR(getOutputReal(), 18.0, 1e-4);
+
+  // Update InputInt = 10, InputReal = 1.6:
+  // Stream 1: (10 * 3 = 30) -> (30.0 * 0.5 + 2.5 = 17.5) -> ((int)17.5 * 2 = 34)
+  // Stream 2: (1.6 * 2.0 = 3.2) -> ((int)3.2 + 1 = 4) -> ((double)4.0 * 2.0 = 8.0)
+  strenv.setStateVar(statePtr.get(), "InputInt", 10, std::nullopt,
+                     "RootDomain");
+  strenv.setStateVar(statePtr.get(), "InputReal", 1.6, std::nullopt,
+                     "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(getOutputInt(), 34);
+  EXPECT_NEAR(getOutputReal(), 8.0, 1e-4);
+}
+
 TEST(JITStreamTest, TriggeredReactionStreamPipeline) {
   strd::StrideEnvironment strenv;
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR

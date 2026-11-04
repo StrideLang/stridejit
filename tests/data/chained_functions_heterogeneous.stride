@@ -1,0 +1,82 @@
+# Test chaining functions/modules with heterogeneous types (typecasting across stream connections)
+
+signal InputInt { type: Int default: 5 }
+signal OutputInt { type: Int }
+
+signal InputReal { type: Real default: 4.2 }
+signal OutputReal { type: Real }
+
+module IntScale {
+    ports: [
+        mainInputPort InPort { entity: Input }
+        mainOutputPort OutPort { entity: Output }
+    ]
+    entities: [
+        signal Input { type: Int }
+        signal Output { type: Int }
+    ]
+    streams: [
+        Input * 3 >> Output;
+    ]
+}
+
+module RealAddOffset {
+    ports: [
+        mainInputPort InPort { entity: Input }
+        propertyInputPort OffsetPort { name: "offset" entity: Offset }
+        mainOutputPort OutPort { entity: Output }
+    ]
+    entities: [
+        signal Input { type: Real }
+        signal Offset { type: Real }
+        signal Output { type: Real }
+    ]
+    streams: [
+        Input * 0.5 + Offset >> Output;
+    ]
+}
+
+module IntMultiply {
+    ports: [
+        mainInputPort InPort { entity: Input }
+        mainOutputPort OutPort { entity: Output }
+    ]
+    entities: [
+        signal Input { type: Int }
+        signal Output { type: Int }
+    ]
+    streams: [
+        Input * 2 >> Output;
+    ]
+}
+
+module RealDouble {
+    ports: [
+        mainInputPort InPort { entity: Input }
+        mainOutputPort OutPort { entity: Output }
+    ]
+    entities: [
+        signal Input { type: Real }
+        signal Output { type: Real }
+    ]
+    streams: [
+        Input * 2.0 >> Output;
+    ]
+}
+
+module IntAddOne {
+    ports: [
+        mainInputPort InPort { entity: Input }
+        mainOutputPort OutPort { entity: Output }
+    ]
+    entities: [
+        signal Input { type: Int }
+        signal Output { type: Int }
+    ]
+    streams: [
+        Input + 1 >> Output;
+    ]
+}
+
+InputInt >> IntScale() >> RealAddOffset(offset: 2.5) >> IntMultiply() >> OutputInt;
+InputReal >> RealDouble() >> IntAddOne() >> RealDouble() >> OutputReal;
