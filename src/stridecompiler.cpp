@@ -930,19 +930,35 @@ StrideCompiler::getStateStructInfo(const std::string &name) const {
   if (name.empty()) {
     return nullptr;
   }
+  // stateStructMap is keyed by node pointer, so its iteration order varies
+  // from run to run. Exact matches must win over substring matches, otherwise
+  // "PipelineDomain" can resolve to "ReactionPipelineDomain".
+  const std::string exactStructName = "struct." + name + "_state";
   for (const auto &pair : stateStructMap) {
     if (pair.first && ASTQuery::getNodeName(pair.first) == name) {
       return &pair.second;
     }
     if (pair.second.structType) {
-      std::string stName = pair.second.structType->getName().str();
-      if (stName == "struct." + name + "_state" || stName == name ||
-          stName.find(name) != std::string::npos) {
+      llvm::StringRef stName = pair.second.structType->getName();
+      // LLVM appends ".N" when it renames a duplicate struct type.
+      if (stName == exactStructName || stName == name ||
+          stName.starts_with(exactStructName + ".")) {
         return &pair.second;
       }
     }
   }
-  return nullptr;
+  // Substring fallback (e.g. mangled callable names), only if unambiguous.
+  const StateStructInfo *match = nullptr;
+  for (const auto &pair : stateStructMap) {
+    if (pair.second.structType &&
+        pair.second.structType->getName().contains(name)) {
+      if (match && match != &pair.second) {
+        return nullptr;
+      }
+      match = &pair.second;
+    }
+  }
+  return match;
 }
 
 const CodeAnalysis::TypeTree *

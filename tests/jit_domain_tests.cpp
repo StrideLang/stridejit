@@ -27,6 +27,37 @@ TEST(JITDomainTest, PassThru) {
   EXPECT_FLOAT_EQ(out, 1.0);
 }
 
+TEST(JITDomainTest, DomainNameIsSubstringOfAnother) {
+  // State struct lookup order depends on node addresses, so a substring match
+  // only failed some of the time. Repeat with fresh environments to catch it.
+  for (int i = 0; i < 10; ++i) {
+    strd::StrideEnvironment strenv;
+    auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                 "domain_name_prefix.stride");
+    ASSERT_TRUE(ret);
+    ret = strenv.compileInMemory();
+    ASSERT_TRUE(ret);
+
+    const auto *info = strenv.mStrideEnv.getStateStructInfo("PipelineDomain");
+    ASSERT_NE(info, nullptr);
+    ASSERT_NE(info->structType, nullptr);
+    EXPECT_EQ(info->structType->getName().str(),
+              "struct.PipelineDomain_state");
+
+    auto statePtr = strenv.allocateSharedState("PipelineDomain");
+    ASSERT_NE(statePtr.get(), nullptr);
+    void *args[] = {statePtr.get()};
+
+    ASSERT_TRUE(strenv.setStateVar(statePtr.get(), "PipeIn", 2.0,
+                                   std::nullopt, "PipelineDomain"));
+    strenv.invoke("PipelineDomain_process", args);
+    auto out = strenv.getStateVar<double>(statePtr.get(), "PipeOut",
+                                          std::nullopt, "PipelineDomain");
+    ASSERT_TRUE(out.has_value());
+    EXPECT_DOUBLE_EQ(*out, 12.0);
+  }
+}
+
 TEST(JITDomainTest, DomainVariable) {
   strd::StrideEnvironment strenv;
 

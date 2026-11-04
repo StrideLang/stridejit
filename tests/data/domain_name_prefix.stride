@@ -1,0 +1,29 @@
+# Two domains where one name is a substring of the other. State lookups by
+# name must resolve "PipelineDomain" to its own state, not to
+# "ReactionPipelineDomain".
+
+_domainDefinition ReactionPipelineDomain {
+    framework: _JitFramework
+    rate: -1
+    inputs: [
+        signal InVal { domain: ReactionPipelineDomain type: Real }
+    ]
+    outputs: [
+        signal OutVal { domain: ReactionPipelineDomain type: Real default: 0.0 }
+    ]
+}
+
+InVal + 1.0 >> OutVal;
+
+_domainDefinition PipelineDomain {
+    framework: _JitFramework
+    rate: -1
+    inputs: [
+        signal PipeIn { domain: PipelineDomain type: Real }
+    ]
+    outputs: [
+        signal PipeOut { domain: PipelineDomain type: Real }
+    ]
+}
+
+PipeIn * 6.0 >> PipeOut;
