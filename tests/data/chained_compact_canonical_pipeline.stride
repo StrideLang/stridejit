@@ -1,0 +1,37 @@
+# Test chaining compact syntax callable and canonical callable in a pipeline
+
+_domainDefinition PipelineDomain {
+    framework: _JitFramework
+    rate: -1
+    inputs: [
+        signal PipeIn { domain: PipelineDomain type: Real }
+    ]
+    outputs: [
+        signal PipeOut { domain: PipelineDomain type: Real }
+    ]
+}
+
+module Input >> CompactScaleModule(factor: signal Factor { default: 2.0 type: Real }) 
+            >> signal Output { default: 0.0 type: Real } {
+    code: [
+        Input * Factor >> Output;
+    ]
+}
+
+module ClassicScaleModule {
+    ports: [
+        mainInputPort InPort { entity: Input }
+        propertyInputPort FactorPort { name: "factor" entity: Factor }
+        mainOutputPort OutPort { entity: Output }
+    ]
+    entities: [
+        signal Input { default: 0.0 type: Real }
+        signal Factor { default: 2.0 type: Real }
+        signal Output { default: 0.0 type: Real }
+    ]
+    streams: [
+        Input * Factor >> Output;
+    ]
+}
+
+PipeIn >> CompactScaleModule(factor: 3.0) >> ClassicScaleModule(factor: 2.0) >> PipeOut;

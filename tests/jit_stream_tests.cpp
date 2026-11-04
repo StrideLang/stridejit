@@ -267,6 +267,37 @@ TEST(JITStreamTest, HeterogeneousChainedFunctionsInPipeline) {
   EXPECT_NEAR(getOutputReal(), 8.0, 1e-4);
 }
 
+TEST(JITStreamTest, ChainedCompactAndCanonicalModulesInPipeline) {
+  strd::StrideEnvironment strenv;
+  auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                               "chained_compact_canonical_pipeline.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  auto statePtr = strenv.allocateSharedState("PipelineDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("PipelineDomain_init", args);
+
+  // PipeIn >> CompactScaleModule(factor: 3.0) >> ClassicScaleModule(factor: 2.0)
+  // >> PipeOut, so PipeOut == PipeIn * 6
+  auto step = [&](double in) {
+    strenv.setStateVar(statePtr.get(), "PipeIn", in, std::nullopt,
+                       "PipelineDomain");
+    strenv.invoke("PipelineDomain_process", args);
+    return strenv
+        .getStateVar<double>(statePtr.get(), "PipeOut", std::nullopt,
+                             "PipelineDomain")
+        .value_or(0.0);
+  };
+
+  EXPECT_NEAR(step(1.0), 6.0, 1e-4);
+  EXPECT_NEAR(step(2.0), 12.0, 1e-4);
+  EXPECT_NEAR(step(5.0), 30.0, 1e-4);
+  EXPECT_NEAR(step(10.0), 60.0, 1e-4);
+}
+
 TEST(JITStreamTest, TriggeredReactionStreamPipeline) {
   strd::StrideEnvironment strenv;
   auto ret = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR

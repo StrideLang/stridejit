@@ -2705,6 +2705,8 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                 ASTQuery::findDeclarationByName(entityName, scope, nullptr);
 
             args.MainOut.argTypes.push_back(state.getLLVMType(mainOutputDecl));
+          } else if (retType && !retType->isVoidTy()) {
+            args.MainOut.argTypes.push_back(retType);
           }
         }
       }
@@ -2825,6 +2827,11 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                   std::make_unique<VariableExprAST>(intermediateName));
               args.MainOut.argTypes.push_back(arg.llvmType);
             }
+            while (args.MainOut.argTypes.size() < args.MainOut.args.size() &&
+                   args.MainOut.argTypes.size() < protoOuts.size()) {
+              args.MainOut.argTypes.push_back(
+                  protoOuts[args.MainOut.argTypes.size()].llvmType);
+            }
             for (const auto &arg : newFuncDecl->getProto().getExternalArgs()) {
               args.External.args.push_back(
                   std::make_unique<VariableExprAST>(arg.name));
@@ -2856,6 +2863,11 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                 args.MainOut.args.push_back(
                     std::make_unique<VariableExprAST>(intermediateName));
                 args.MainOut.argTypes.push_back(arg.llvmType);
+              }
+              while (args.MainOut.argTypes.size() < args.MainOut.args.size() &&
+                     args.MainOut.argTypes.size() < protoOuts.size()) {
+                args.MainOut.argTypes.push_back(
+                    protoOuts[args.MainOut.argTypes.size()].llvmType);
               }
               for (const auto &arg : protoIt->second->getExternalArgs()) {
                 args.External.args.push_back(
@@ -3134,9 +3146,10 @@ bool StrideGenerator::resolveIOParamsFromDefinition(
           }
           if (entityDecl->getEntityType() != "switch" &&
               entityDecl->getEntityType() != "trigger" &&
-              entityDecl->getEntityType() != "string") {
+              entityDecl->getEntityType() != "string" &&
+              entityDecl->getEntityType() != "signal") {
             auto typeNode = entityDecl->getPropertyValue("type");
-            if (!typeNode) {
+            if (!typeNode && !entityDecl->getPropertyValue("default")) {
               canResolve = false;
               break;
             }
