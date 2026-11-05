@@ -202,6 +202,10 @@ public:
   }
   int getOptimizationLevel() const { return m_optimizationLevel; }
   void setPrimarySourcePath(const std::string &path) { m_primarySourcePath = path; }
+  // Whether constants filled by streams are filled while compiling (the
+  // default) or by their streams at load time
+  void setConstantEvaluation(bool enabled) { m_evaluateConstants = enabled; }
+  bool isConstantEvaluationEnabled() const { return m_evaluateConstants; }
   const std::string &getPrimarySourcePath() const { return m_primarySourcePath; }
   std::string getJitObjectTag() const;
 
@@ -222,6 +226,20 @@ public:
   void deallocateState(void *statePtr);
   bool hasState(const std::string &funcName) const;
   size_t getStateSize(const std::string &funcName) const;
+
+  // A field of a state struct. Domain signals and switches have their
+  // declared names; internal fields (state machine variables, phases) have
+  // names that start with "__".
+  struct StateField {
+    enum class Kind { Switch, Integer, Real, String, Other };
+    std::string name;
+    Kind kind{Kind::Other};
+    size_t offset{0};
+    size_t count{1};       // Elements, 1 for a scalar
+    size_t elementSize{0}; // Bytes per element
+  };
+  // The fields of a function's or domain's state struct, in struct order
+  std::vector<StateField> getStateFields(const std::string &funcName) const;
 
   // Dynamic state variable access by name or pattern
   template <typename T>
@@ -350,6 +368,14 @@ private:
   void snapshotStateDefaults();
   bool loadLibrary(const char *libName, std::string &err);
   bool generateCompiledObject(std::string path, std::string TargetTriple);
+  // Constants are values known while compiling, like C++'s constexpr. A
+  // constant declared without a value and filled by a stream (at the top
+  // level or in a domain's onLoad) is filled here: the streams are compiled
+  // on their own in a separate JIT and run, the results become the
+  // constants' value lists, and the streams are removed. Reads of those
+  // constants with a known index are then folded. Streams that cannot be
+  // evaluated are left to run at load time.
+  void evaluateConstantFills(ASTNode root);
 
   // Configuration
   std::string m_strideRoot;
@@ -361,6 +387,7 @@ private:
   bool m_cacheObjectCode{true};
   bool m_cacheBitcode{true};
   bool m_debugInfo{false};
+  bool m_evaluateConstants{true};
   BuildType m_buildType{BuildType::Release};
   DebugInfoLevel m_debugInfoLevel{DebugInfoLevel::None};
   int m_optimizationLevel{2};

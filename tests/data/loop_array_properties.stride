@@ -1,0 +1,77 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [ ]
+    outputs: [
+        signal Visited { domain: RootDomain type: Int }
+    ]
+	domainFunctionCode: ''
+}
+
+module Equal {
+    ports: [
+        mainOutputPort OutputPort {
+            name:       'output'
+            entity: Output
+        },
+        mainInputPort InputPort {
+            name:       'input'
+            entity: Input
+			meta: "A list with the two values to be compared"
+        }
+    ]
+    entities: [
+        signal Input[2] {domain: OutputPort.domain type: Int}
+		switch Output {domain: OutputPort.domain}
+    ]
+    streams: [
+       [Input[0], Input[1]] >> __Equal() >> Output;
+    ]
+    meta: "Compare two input values."
+}
+
+platformModule __Equal@Int_Bool {
+    inputs: [Int, Int]
+	outputs: [Switch]
+#    linkTo: []
+#    declarations: ['']
+    # initializations: ["// CPP Greater Init"]
+    processing: "%%outtokens:0%% = llvm::icmp eq %%intokens:0%%, %%intokens:1%%"
+    inherits: [_Signal]
+}
+
+
+# Reads an array given as a property and writes an array given as a
+# property output: each entry of Marks is on when that entry of Table is 0
+loop MarkZeros {
+	ports: [
+		mainOutputPort OutputPort { entity: Count }
+		propertyInputPort TablePort { name: "table" entity: Table }
+		propertyOutputPort MarksPort { name: "marks" entity: Marks }
+	]
+	entities: [
+		signal Table[TablePort.size] { type: Int }
+		switch Marks[MarksPort.size] {}
+		signal Count { default: 0 type: Int reset: Reset }
+		signal Index { default: 0 type: Int reset: Reset }
+		switch Done { default: off }
+		trigger Reset {}
+	]
+	onExecution: Reset
+	terminateWhen: Done
+	streams: [
+		[ Table[Index], 0 ] >> Equal() >> Marks[Index];
+		Count + 1 >> Count;
+		Index + 1 >> Index;
+		[ Index, TablePort.size ] >> Equal() >> Done;
+	]
+}
+
+constant Values[4] { value: [0, 3, 0, 5] }
+switch Zero[4] { default: off domain: RootDomain }
+
+MarkZeros(table: Values marks: Zero) >> Visited;

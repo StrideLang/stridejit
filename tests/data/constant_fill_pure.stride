@@ -1,0 +1,142 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [ ]
+    outputs: [
+        signal Out { domain: RootDomain type: Int }
+        signal PureOut { domain: RootDomain type: Int }
+    ]
+	domainFunctionCode: ''
+}
+
+module Equal {
+    ports: [
+        mainOutputPort OutputPort {
+            name:       'output'
+            entity: Output
+        },
+        mainInputPort InputPort {
+            name:       'input'
+            entity: Input
+			meta: "A list with the two values to be compared"
+        }
+    ]
+    entities: [
+        signal Input[2] {domain: OutputPort.domain type: Int}
+		switch Output {domain: OutputPort.domain}
+    ]
+    streams: [
+       [Input[0], Input[1]] >> __Equal() >> Output;
+    ]
+    meta: "Compare two input values."
+}
+
+platformModule __Equal@Int_Bool {
+    inputs: [Int, Int]
+	outputs: [Switch]
+#    linkTo: []
+#    declarations: ['']
+    # initializations: ["// CPP Greater Init"]
+    processing: "%%outtokens:0%% = llvm::icmp eq %%intokens:0%%, %%intokens:1%%"
+    inherits: [_Signal]
+}
+
+
+# Twice its input, computed by the host program (the test). Not declared
+# pure, so the compiler must not call it while compiling.
+platformModule __HostTwice {
+    inputs: [Int]
+    outputs: [Int]
+    processing: "%%outtokens:0%% = call i32 @__stride_test_twice(i32 %%intokens:0%%)"
+    inherits: [_Signal]
+}
+
+# The same host function, declared pure
+platformModule __PureHostTwice {
+    inputs: [Int]
+    outputs: [Int]
+    processing: "%%outtokens:0%% = call i32 @__stride_test_twice(i32 %%intokens:0%%)"
+    pure: on
+    inherits: [_Signal]
+}
+
+# Platform modules are called through a module, as the game library does
+module HostTwice {
+    ports: [
+        mainInputPort InputPort { entity: Value }
+        mainOutputPort OutputPort { entity: Result }
+    ]
+    entities: [
+        signal Value { type: Int }
+        signal Result { type: Int }
+    ]
+    streams: [ Value >> __HostTwice() >> Result; ]
+}
+
+module PureHostTwice {
+    ports: [
+        mainInputPort InputPort { entity: Value }
+        mainOutputPort OutputPort { entity: Result }
+    ]
+    entities: [
+        signal Value { type: Int }
+        signal Result { type: Int }
+    ]
+    streams: [ Value >> __PureHostTwice() >> Result; ]
+}
+
+loop FillTwice {
+	ports: [
+		mainOutputPort OutputPort {
+			entity: Output
+		}
+	]
+	entities: [
+		signal Output[OutputPort.size] { type: Int }
+		signal Index { default: 0 type: Int reset: Reset }
+		switch Done { default: off }
+		trigger Reset {}
+	]
+	onExecution: Reset
+	terminateWhen: Done
+	streams: [
+		Index >> HostTwice() >> Output[Index];
+		Index + 1 >> Index;
+		[ Index, OutputPort.size ] >> Equal() >> Done;
+	]
+}
+
+loop FillPureTwice {
+	ports: [
+		mainOutputPort OutputPort {
+			entity: Output
+		}
+	]
+	entities: [
+		signal Output[OutputPort.size] { type: Int }
+		signal Index { default: 0 type: Int reset: Reset }
+		switch Done { default: off }
+		trigger Reset {}
+	]
+	onExecution: Reset
+	terminateWhen: Done
+	streams: [
+		Index >> PureHostTwice() >> Output[Index];
+		Index + 1 >> Index;
+		[ Index, OutputPort.size ] >> Equal() >> Done;
+	]
+}
+
+# Filled at load time: the fill calls a platform module that is not pure
+constant Table[6] { type: Int }
+# Filled while compiling
+constant PureTable[6] { type: Int }
+
+FillTwice() >> Table;
+FillPureTwice() >> PureTable;
+Table[4] >> Out;
+PureTable[4] >> PureOut;

@@ -9,7 +9,10 @@
 #include "stride/utils/astfunctions.h"
 #include "stride/utils/astquery.h"
 
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Module.h"
 #include "llvm/IR/Instructions.h"
 
 namespace {
@@ -214,13 +217,41 @@ TEST(JITControlFlowTest, LoopOutputPortSize) {
   }
 }
 
-// A constant without a value is a writable global: a loop fills it and later
-// code reads it
+// A constant without a value is filled while compiling: the loop that fills
+// it runs at compile time, the table becomes read-only data, and the read
+// with a known index is folded
 TEST(JITControlFlowTest, ConstantFilledByLoop) {
   strd::StrideEnvironment strenv;
 
   ASSERT_TRUE(
       strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "constant_fill.stride"));
+
+  llvm::GlobalVariable *table = nullptr;
+  for (auto &global : strenv.mStrideEnv.TheModule->globals()) {
+    if (global.getName().str().size() >= 5 &&
+        global.getName().str().compare(global.getName().size() - 5, 5,
+                                       "Table") == 0) {
+      table = &global;
+    }
+  }
+  ASSERT_NE(table, nullptr);
+  EXPECT_TRUE(table->isConstant());
+  EXPECT_TRUE(table->hasInternalLinkage());
+  auto *values =
+      llvm::dyn_cast<llvm::ConstantDataArray>(table->getInitializer());
+  ASSERT_NE(values, nullptr);
+  ASSERT_EQ(values->getNumElements(), 6u);
+  for (unsigned i = 0; i < 6; ++i) {
+    EXPECT_EQ(values->getElementAsInteger(i), 3u * i) << "Table[" << i << "]";
+  }
+  // Table[4] is folded to 12, so no code reads the table
+  EXPECT_TRUE(table->use_empty());
+  // Nothing fills the table at run time: the loop is not compiled
+  for (const auto &function : strenv.mStrideEnv.TheModule->functions()) {
+    EXPECT_EQ(function.getName().str().find("Fill"), std::string::npos)
+        << function.getName().str();
+  }
+
   ASSERT_TRUE(strenv.compileInMemory());
 
   auto statePtr = strenv.allocateSharedState("RootDomain");
@@ -232,6 +263,131 @@ TEST(JITControlFlowTest, ConstantFilledByLoop) {
                                   "RootDomain")
           .value_or(-1),
       12);
+}
+
+// A constant sized by an expression over another array's size, filled
+// while compiling: the size is known before the fill runs
+TEST(JITControlFlowTest, ConstantSizedFromArraySize) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                "constant_size_from_array.stride"));
+  auto *table = strenv.mStrideEnv.TheModule->getGlobalVariable("Table", true);
+  ASSERT_NE(table, nullptr);
+  EXPECT_TRUE(table->isConstant());
+  auto *values =
+      llvm::dyn_cast<llvm::ConstantDataArray>(table->getInitializer());
+  ASSERT_NE(values, nullptr);
+  ASSERT_EQ(values->getNumElements(), 11u);
+  EXPECT_EQ(values->getElementAsInteger(10), 30u);
+
+  ASSERT_TRUE(strenv.compileInMemory());
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(strenv
+                .getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                      "RootDomain")
+                .value_or(-1),
+            30);
+}
+
+// A loop that reads an array given as a property and writes one given as a
+// property output (what library loops that share state need)
+TEST(JITControlFlowTest, LoopArrayPropertiesInAndOut) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                "loop_array_properties.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_init", args);
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(strenv
+                .getStateVar<int32_t>(statePtr.get(), "Visited", std::nullopt,
+                                      "RootDomain")
+                .value_or(-1),
+            4);
+  const bool expected[4] = {true, false, true, false};
+  for (int i = 0; i < 4; ++i) {
+    EXPECT_EQ(
+        strenv.getStateVar<bool>(statePtr.get(), "Zero", i, "RootDomain")
+            .value_or(!expected[i]),
+        expected[i])
+        << "Zero[" << i << "]";
+  }
+}
+
+// A host function for constant_fill_pure.stride's platform modules
+#ifdef _WIN32
+#define STRIDE_TEST_EXPORT extern "C" __declspec(dllexport)
+#else
+#define STRIDE_TEST_EXPORT                                                       extern "C" __attribute__((visibility("default")))
+#endif
+STRIDE_TEST_EXPORT int32_t __stride_test_twice(int32_t value) {
+  return 2 * value;
+}
+
+// A fill that calls into the host is evaluated while compiling only when its
+// platform module is declared pure; otherwise it runs at load time
+TEST(JITControlFlowTest, ConstantFillCallsOnlyPureHostFunctions) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                "constant_fill_pure.stride"));
+  auto *table = strenv.mStrideEnv.TheModule->getGlobalVariable("Table", true);
+  auto *pureTable =
+      strenv.mStrideEnv.TheModule->getGlobalVariable("PureTable", true);
+  ASSERT_NE(table, nullptr);
+  ASSERT_NE(pureTable, nullptr);
+  EXPECT_FALSE(table->isConstant());
+  EXPECT_TRUE(pureTable->isConstant());
+  auto *values =
+      llvm::dyn_cast<llvm::ConstantDataArray>(pureTable->getInitializer());
+  ASSERT_NE(values, nullptr);
+  EXPECT_EQ(values->getElementAsInteger(4), 8u);
+
+  ASSERT_TRUE(strenv.compileInMemory());
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_process", args);
+  auto value = [&](const char *name) {
+    return strenv.getStateVar<int32_t>(statePtr.get(), name, std::nullopt,
+                                       "RootDomain")
+        .value_or(-1);
+  };
+  EXPECT_EQ(value("Out"), 8);
+  EXPECT_EQ(value("PureOut"), 8);
+}
+
+// A neighbour table filled while compiling, read in a broadcast: each
+// instance reads a fixed section, the edge reads off, and nothing reads the
+// table at run time (the code the Steps pattern generates by hand)
+TEST(JITControlFlowTest, ConstantNeighbourTableInBroadcast) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                "constant_neighbour_broadcast.stride"));
+  auto *left = strenv.mStrideEnv.TheModule->getGlobalVariable("Left", true);
+  ASSERT_NE(left, nullptr);
+  EXPECT_TRUE(left->isConstant());
+  EXPECT_TRUE(left->use_empty());
+
+  ASSERT_TRUE(strenv.compileInMemory());
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_init", args);
+  strenv.invoke("RootDomain_process", args);
+  const bool expected[4] = {false, true, true, false};
+  for (int i = 0; i < 4; ++i) {
+    EXPECT_EQ(strenv
+                  .getStateVar<bool>(statePtr.get(), "CanMove", i,
+                                     "RootDomain")
+                  .value_or(!expected[i]),
+              expected[i])
+        << "CanMove[" << i << "]";
+  }
 }
 
 // Output port sizes in a loop sized by both ports, into a slice and a
@@ -421,6 +577,8 @@ TEST(JITControlFlowTest, LoopOutputReadsDomainArray) {
 // <Domain>_init calls first: here they fill a constant table the domain reads
 TEST(JITControlFlowTest, DomainOnLoad) {
   strd::StrideEnvironment strenv;
+  // Filled at load time, as when a fill cannot be evaluated while compiling
+  strenv.setConstantEvaluation(false);
   ASSERT_TRUE(
       strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "domain_on_load.stride"));
   // The onLoad streams are in the load function only, not in processing
@@ -462,6 +620,29 @@ TEST(JITControlFlowTest, DomainOnLoad) {
   strenv.invoke("RootDomain_init", secondArgs);
   strenv.invoke("RootDomain_process", secondArgs);
   EXPECT_EQ(strenv.getStateVar<int32_t>(second.get(), "Out", std::nullopt,
+                                        "RootDomain")
+                .value_or(-1),
+            12);
+}
+
+// The same onLoad with constant evaluation on (the default): the table is
+// filled while compiling, so there is nothing left to load
+TEST(JITControlFlowTest, DomainOnLoadFillsConstantsWhileCompiling) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "domain_on_load.stride"));
+  EXPECT_EQ(strenv.mStrideEnv.TheModule->getFunction("__RootDomain_onLoad"),
+            nullptr);
+  auto *table = strenv.mStrideEnv.TheModule->getGlobalVariable("Table", true);
+  ASSERT_NE(table, nullptr);
+  EXPECT_TRUE(table->isConstant());
+  ASSERT_TRUE(strenv.compileInMemory());
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_init", args);
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
                                         "RootDomain")
                 .value_or(-1),
             12);

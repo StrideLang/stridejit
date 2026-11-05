@@ -11,6 +11,7 @@
 
 // stride
 #include "stride/parser/streamnode.h"
+#include "stride/stridegen/codeanalysis.hpp"
 #include "stride/stridegen/coderesolver.hpp"
 #include "stride/stridegen/codevalidator.hpp"
 #include "stride/utils/astfunctions.h"
@@ -498,6 +499,8 @@ bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
   }
   m_trees.push_back(root);
 
+  evaluateConstantFills(root);
+
   initializeJIT();
 
   StrideGenerator::compile(root, globalScope, mStrideEnv);
@@ -509,6 +512,563 @@ bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
     m_moduleOptimized = false;
   }
   return true;
+}
+
+namespace {
+// A root constant declared without a value, which streams can fill
+std::shared_ptr<DeclarationNode> unfilledConstant(const std::string &name,
+                                                  ASTNode root) {
+  for (const auto &child : root->getChildren()) {
+    if (child->getNodeType() != AST::Declaration &&
+        child->getNodeType() != AST::ArrayDeclaration) {
+      continue;
+    }
+    auto decl = std::static_pointer_cast<DeclarationNode>(child);
+    if (decl->getName() != name || decl->getEntityType() != "constant") {
+      continue;
+    }
+    auto value = decl->getPropertyValue("value");
+    if (!value || value->getNodeType() == AST::None) {
+      return decl;
+    }
+  }
+  return nullptr;
+}
+
+// The block a stream writes last: `... >> Table;`
+ASTNode streamDestination(const std::shared_ptr<StreamNode> &stream) {
+  ASTNode right = stream->getRight();
+  while (right && right->getNodeType() == AST::Stream) {
+    right = std::static_pointer_cast<StreamNode>(right)->getRight();
+  }
+  return right;
+}
+
+// The name of a root block the stream reads that is not a constant filled by
+// then (a signal, a switch, an unfilled constant), or empty. written is the
+// block the stream writes, which it does not read.
+std::string runtimeRead(const ASTNode &node, ASTNode root,
+                        const std::set<std::string> &filled,
+                        const ASTNode &written = nullptr) {
+  if (!node || node == written) {
+    return std::string();
+  }
+  if (node->getNodeType() == AST::Entity ||
+      node->getNodeType() == AST::Array) {
+    const std::string name = ASTQuery::getNodeName(node);
+    for (const auto &child : root->getChildren()) {
+      if (child->getNodeType() != AST::Declaration &&
+          child->getNodeType() != AST::ArrayDeclaration) {
+        continue;
+      }
+      auto decl = std::static_pointer_cast<DeclarationNode>(child);
+      if (decl->getName() != name) {
+        continue;
+      }
+      const std::string type = decl->getEntityType();
+      if (type == "signal" || type == "switch" || type == "trigger" ||
+          type == "string" || type == "buffer") {
+        return name;
+      }
+      if (type == "constant" && unfilledConstant(name, root) &&
+          !filled.count(name)) {
+        return name;
+      }
+    }
+  }
+  if (node->getNodeType() == AST::Function) {
+    for (const auto &property :
+         std::static_pointer_cast<FunctionNode>(node)->getProperties()) {
+      auto read = runtimeRead(property->getValue(), root, filled, written);
+      if (!read.empty()) {
+        return read;
+      }
+    }
+  }
+  if (node->getNodeType() == AST::Stream) {
+    auto stream = std::static_pointer_cast<StreamNode>(node);
+    auto read = runtimeRead(stream->getLeft(), root, filled, written);
+    if (read.empty()) {
+      read = runtimeRead(stream->getRight(), root, filled, written);
+    }
+    return read;
+  }
+  for (const auto &child : node->getChildren()) {
+    auto read = runtimeRead(child, root, filled, written);
+    if (!read.empty()) {
+      return read;
+    }
+  }
+  return std::string();
+}
+
+// The first platform module the node calls, directly or through the modules,
+// loops and reactions it calls, that calls into the host (an @function in
+// its processing) without being declared `pure: on`; or empty. Such a module
+// may read state that does not exist while compiling (the game), so it must
+// not run then. Platform modules made only of LLVM instructions are pure by
+// construction, and the framework's own library is part of the compiler.
+std::string impureCall(const ASTNode &node, ASTNode root,
+                       std::set<std::string> &visited,
+                       const std::string &frameworksFolder) {
+  if (!node) {
+    return std::string();
+  }
+  if (node->getNodeType() == AST::Function) {
+    auto function = std::static_pointer_cast<FunctionNode>(node);
+    const std::string name = function->getName();
+    if (visited.insert(name).second) {
+      for (const auto &child : root->getChildren()) {
+        if (child->getNodeType() != AST::Declaration) {
+          continue;
+        }
+        auto decl = std::static_pointer_cast<DeclarationNode>(child);
+        const std::string declName = decl->getName();
+        // Overloads are named Name@Types
+        if (declName != name && declName.rfind(name + "@", 0) != 0) {
+          continue;
+        }
+        if (decl->getEntityType() == "platformModule") {
+          std::string file = decl->getFilename();
+          std::replace(file.begin(), file.end(), '\\', '/');
+          if (!frameworksFolder.empty() &&
+              file.rfind(frameworksFolder, 0) == 0) {
+            continue; // The framework's library
+          }
+          auto processing = decl->getPropertyValue("processing");
+          auto pure = decl->getPropertyValue("pure");
+          const bool callsHost =
+              processing && processing->getNodeType() == AST::String &&
+              std::static_pointer_cast<ValueNode>(processing)
+                      ->getStringValue()
+                      .find('@') != std::string::npos;
+          const bool declaredPure =
+              pure && pure->getNodeType() == AST::Switch &&
+              std::static_pointer_cast<ValueNode>(pure)->getSwitchValue();
+          if (callsHost && !declaredPure) {
+            return declName;
+          }
+        } else {
+          for (const auto &property : decl->getProperties()) {
+            auto called = impureCall(property->getValue(), root, visited,
+                                     frameworksFolder);
+            if (!called.empty()) {
+              return called;
+            }
+          }
+        }
+      }
+    }
+    for (const auto &property : function->getProperties()) {
+      auto called =
+          impureCall(property->getValue(), root, visited, frameworksFolder);
+      if (!called.empty()) {
+        return called;
+      }
+    }
+    return std::string();
+  }
+  if (node->getNodeType() == AST::Stream) {
+    auto stream = std::static_pointer_cast<StreamNode>(node);
+    auto called = impureCall(stream->getLeft(), root, visited,
+                             frameworksFolder);
+    return called.empty() ? impureCall(stream->getRight(), root, visited,
+                                       frameworksFolder)
+                          : called;
+  }
+  for (const auto &child : node->getChildren()) {
+    auto called = impureCall(child, root, visited, frameworksFolder);
+    if (!called.empty()) {
+      return called;
+    }
+  }
+  return std::string();
+}
+
+// Folds reads of the named constants with a known index, everywhere in node:
+// Table[4] becomes the value, and Empty[Table[4]] becomes Empty[value]
+void foldConstantReads(const ASTNode &node, ASTNode root,
+                       const std::set<std::string> &names) {
+  if (!node) {
+    return;
+  }
+  auto fold = [&](const ASTNode &value) -> ASTNode {
+    if (!value || value->getNodeType() != AST::Array) {
+      return nullptr;
+    }
+    foldConstantReads(value, root, names); // The index first
+    if (names.count(ASTQuery::getNodeName(value))) {
+      return ASTFunctions::resolveConstant(value, {}, root);
+    }
+    // An index folded to a negative number reads nothing, as the resolver
+    // reads a written negative index: off for a switch, 0 otherwise.
+    // Neighbour tables hold -1 off the board, so Empty[Squares_SW[4]] at
+    // the board's edge is off.
+    auto index = std::static_pointer_cast<ArrayNode>(value)->index();
+    if (index && index->getChildren().size() == 1 &&
+        index->getChildren()[0]->getNodeType() == AST::Int &&
+        std::static_pointer_cast<ValueNode>(index->getChildren()[0])
+                ->getIntValue() < 0) {
+      auto decl = ASTQuery::findDeclarationByName(
+          ASTQuery::getNodeName(value), {}, root);
+      const bool isSwitch =
+          !decl || decl->getEntityType() == "switch" ||
+          CodeAnalysis::getDataTypeForDeclaration(decl, {}, root) ==
+              DataTypes::Switch;
+      if (isSwitch) {
+        return std::make_shared<ValueNode>(false, value->getFilename().c_str(),
+                                           value->getLine());
+      }
+      return std::make_shared<ValueNode>(
+          static_cast<int64_t>(0), value->getFilename().c_str(),
+          value->getLine());
+    }
+    return nullptr;
+  };
+  switch (node->getNodeType()) {
+  case AST::Stream: {
+    auto stream = std::static_pointer_cast<StreamNode>(node);
+    if (auto value = fold(stream->getLeft())) {
+      stream->setLeft(value);
+    }
+    foldConstantReads(stream->getLeft(), root, names);
+    foldConstantReads(stream->getRight(), root, names);
+    return;
+  }
+  case AST::Function:
+    for (const auto &property :
+         std::static_pointer_cast<FunctionNode>(node)->getProperties()) {
+      if (auto value = fold(property->getValue())) {
+        property->replaceValue(value);
+      }
+      foldConstantReads(property->getValue(), root, names);
+    }
+    return;
+  case AST::Declaration:
+  case AST::ArrayDeclaration:
+    for (const auto &property :
+         std::static_pointer_cast<DeclarationNode>(node)->getProperties()) {
+      foldConstantReads(property->getValue(), root, names);
+    }
+    return;
+  case AST::List: {
+    auto list = std::static_pointer_cast<ListNode>(node);
+    const std::vector<ASTNode> members = list->getChildren();
+    for (const auto &member : members) {
+      if (auto value = fold(member)) {
+        list->replaceMember(value, member);
+      } else {
+        foldConstantReads(member, root, names);
+      }
+    }
+    return;
+  }
+  case AST::Array:
+    foldConstantReads(std::static_pointer_cast<ArrayNode>(node)->index(), root,
+                      names);
+    return;
+  default:
+    for (const auto &child : node->getChildren()) {
+      foldConstantReads(child, root, names);
+    }
+  }
+}
+
+// A filled constant's global in the evaluation's module, described before
+// the module is handed to the JIT (which owns its types from then on)
+struct FilledGlobal {
+  enum class Kind { Switch, Integer, Float, Double, Other };
+  std::string symbol;
+  Kind kind{Kind::Other};
+  size_t elementSize{0}; // Bytes
+  uint64_t count{1};     // Elements, 1 for a scalar
+  bool array{false};
+};
+
+FilledGlobal describeGlobal(llvm::GlobalVariable *global,
+                            const llvm::DataLayout *layout) {
+  FilledGlobal filled;
+  filled.symbol = global->getName().str();
+  llvm::Type *type = global->getValueType();
+  if (type->isArrayTy()) {
+    filled.array = true;
+    filled.count = type->getArrayNumElements();
+    type = type->getArrayElementType();
+  }
+  filled.elementSize = layout ? layout->getTypeAllocSize(type) : 0;
+  if (type->isIntegerTy(1)) {
+    filled.kind = FilledGlobal::Kind::Switch;
+  } else if (type->isIntegerTy(8) || type->isIntegerTy(16) ||
+             type->isIntegerTy(32) || type->isIntegerTy(64)) {
+    filled.kind = FilledGlobal::Kind::Integer;
+  } else if (type->isFloatTy()) {
+    filled.kind = FilledGlobal::Kind::Float;
+  } else if (type->isDoubleTy()) {
+    filled.kind = FilledGlobal::Kind::Double;
+  }
+  return filled;
+}
+
+// Removes node from every list of the tree that holds it
+void removeEverywhere(const ASTNode &tree, const ASTNode &node) {
+  if (!tree) {
+    return;
+  }
+  if (tree->getNodeType() == AST::Declaration ||
+      tree->getNodeType() == AST::ArrayDeclaration) {
+    for (const auto &property :
+         std::static_pointer_cast<DeclarationNode>(tree)->getProperties()) {
+      removeEverywhere(property->getValue(), node);
+    }
+    // A domain's streams grouped by rate, made by preprocessing
+    removeEverywhere(tree->getCompilerProperty("streamStages"), node);
+    return;
+  }
+  if (tree->getNodeType() != AST::List && tree->getNodeType() != AST::None) {
+    return;
+  }
+  std::vector<ASTNode> children = tree->getChildren();
+  const size_t count = children.size();
+  children.erase(std::remove(children.begin(), children.end(), node),
+                 children.end());
+  if (children.size() != count) {
+    tree->setChildren(children);
+  }
+  for (const auto &child : children) {
+    removeEverywhere(child, node);
+  }
+}
+
+// One element of a filled constant, read from the evaluation's memory
+ASTNode constantElement(const FilledGlobal &global, const char *bytes,
+                        const std::shared_ptr<DeclarationNode> &decl) {
+  const char *file = decl->getFilename().c_str();
+  const int line = decl->getLine();
+  switch (global.kind) {
+  case FilledGlobal::Kind::Switch:
+    return std::make_shared<ValueNode>(*bytes != 0, file, line);
+  case FilledGlobal::Kind::Integer: {
+    int64_t value = 0;
+    switch (global.elementSize) {
+    case 1:
+      value = *reinterpret_cast<const int8_t *>(bytes);
+      break;
+    case 2:
+      value = *reinterpret_cast<const int16_t *>(bytes);
+      break;
+    case 4:
+      value = *reinterpret_cast<const int32_t *>(bytes);
+      break;
+    case 8:
+      value = *reinterpret_cast<const int64_t *>(bytes);
+      break;
+    default:
+      return nullptr;
+    }
+    return std::make_shared<ValueNode>(value, file, line);
+  }
+  case FilledGlobal::Kind::Float:
+    return std::make_shared<ValueNode>(
+        static_cast<double>(*reinterpret_cast<const float *>(bytes)), file,
+        line);
+  case FilledGlobal::Kind::Double:
+    return std::make_shared<ValueNode>(*reinterpret_cast<const double *>(bytes),
+                                       file, line);
+  case FilledGlobal::Kind::Other:
+    break;
+  }
+  return nullptr;
+}
+} // namespace
+
+void StrideEnvironment::evaluateConstantFills(ASTNode root) {
+  if (!root || !m_evaluateConstants) {
+    return;
+  }
+  // The streams that fill constants, in order: top-level streams, then each
+  // domain's onLoad
+  struct Fill {
+    ASTNode container;
+    std::shared_ptr<StreamNode> stream;
+    std::shared_ptr<DeclarationNode> constant;
+  };
+  std::vector<Fill> fills;
+  std::set<std::string> filled;
+  std::string frameworksFolder = m_strideRoot + "/frameworks/";
+  std::replace(frameworksFolder.begin(), frameworksFolder.end(), '\\', '/');
+  auto collect = [&](const ASTNode &container,
+                     const std::vector<ASTNode> &nodes) {
+    for (const auto &node : nodes) {
+      if (node->getNodeType() != AST::Stream) {
+        continue;
+      }
+      auto stream = std::static_pointer_cast<StreamNode>(node);
+      auto destination = streamDestination(stream);
+      if (!destination || destination->getNodeType() != AST::Entity) {
+        continue;
+      }
+      const std::string name = ASTQuery::getNodeName(destination);
+      auto constant = unfilledConstant(name, root);
+      if (!constant || filled.count(name)) {
+        continue;
+      }
+      const std::string read =
+          runtimeRead(stream, root, filled, destination);
+      if (!read.empty()) {
+        LOG_INFO() << "Constant " << name << " is filled at load time: its "
+                   << "stream reads " << read << std::endl;
+        continue;
+      }
+      std::set<std::string> visited;
+      const std::string impure =
+          impureCall(stream, root, visited, frameworksFolder);
+      if (!impure.empty()) {
+        LOG_INFO() << "Constant " << name << " is filled at load time: its "
+                   << "stream calls " << impure
+                   << ", a platform module that is not pure: on" << std::endl;
+        continue;
+      }
+      fills.push_back({container, stream, constant});
+      filled.insert(name);
+    }
+  };
+  collect(root, root->getChildren());
+  for (const auto &child : root->getChildren()) {
+    if (child->getNodeType() != AST::Declaration) {
+      continue;
+    }
+    auto decl = std::static_pointer_cast<DeclarationNode>(child);
+    auto onLoad = decl->getPropertyValue("onLoad");
+    if (onLoad && onLoad->getNodeType() == AST::List) {
+      collect(onLoad, onLoad->getChildren());
+    }
+  }
+  if (fills.empty()) {
+    return;
+  }
+
+  // Compile the fill streams alone, with the constants they use as globals
+  StrideEnvironment evaluation(m_strideRoot);
+  evaluation.m_cacheObjectCode = false;
+  evaluation.m_cacheBitcode = false;
+  evaluation.initializeJIT();
+  StrideCompiler &state = evaluation.mStrideEnv;
+  state.m_tree = root;
+  state.registerDataTypes(root);
+  ScopeStack rootScope = {{nullptr, root->getChildren()}};
+  state.m_intanceTree = CodeAnalysis::getStateStructInformation({}, root);
+  state.buildStateStructTypes(state.m_intanceTree, rootScope, root);
+  {
+    std::vector<ASTNode> frameworkScope;
+    for (const auto &member : ASTFunctions::loadAllInDirectory(
+             m_strideRoot + "/frameworks/JIT/1.0/platformlib")) {
+      if (member->getNodeType() == AST::Declaration) {
+        auto decl = std::static_pointer_cast<DeclarationNode>(member);
+        if (decl->getEntityType() == "platformModule") {
+          StrideGenerator::generatePlatformFunctionSignature(
+              decl, frameworkScope, state);
+        }
+      }
+    }
+    for (const auto &child : root->getChildren()) {
+      if (child->getNodeType() == AST::Declaration ||
+          child->getNodeType() == AST::ArrayDeclaration) {
+        auto decl = std::static_pointer_cast<DeclarationNode>(child);
+        if (decl->getEntityType() == "platformModule") {
+          StrideGenerator::generatePlatformFunctionSignature(
+              decl, frameworkScope, state);
+        } else if (decl->getEntityType() == "constant") {
+          state.createGlobal(decl);
+        }
+      }
+    }
+  }
+  std::vector<ASTNode> streams;
+  for (const auto &fill : fills) {
+    streams.push_back(fill.stream);
+  }
+  const std::string functionName = "__constant_fill";
+  if (!StrideGenerator::generateStreamsFunction(functionName, streams, root,
+                                                state, nullptr,
+                                                "constant fill")) {
+    LOG_ERROR() << "The streams that fill constants could not be compiled "
+                   "on their own; they run at load time"
+                << std::endl;
+    return;
+  }
+  // The filled constants must survive optimization and be found by name
+  std::map<std::string, FilledGlobal> globals;
+  for (const auto &fill : fills) {
+    auto global = state.getGlobal(fill.constant->getName()).first;
+    if (auto *variable =
+            llvm::dyn_cast_or_null<llvm::GlobalVariable>(global)) {
+      variable->setLinkage(llvm::GlobalValue::ExternalLinkage);
+      globals[fill.constant->getName()] =
+          describeGlobal(variable, evaluation.getDataLayout());
+    }
+  }
+  if (!evaluation.compileInMemory()) {
+    LOG_ERROR() << "The streams that fill constants could not be compiled; "
+                   "they run at load time"
+                << std::endl;
+    return;
+  }
+  auto function = evaluation.getFunction(functionName);
+  if (!function) {
+    llvm::consumeError(function.takeError());
+    return;
+  }
+  function->toPtr<void (*)()>()();
+
+  // The results become the constants' values; the streams go
+  std::set<std::string> evaluated;
+  for (const auto &fill : fills) {
+    const std::string name = fill.constant->getName();
+    auto found = globals.find(name);
+    if (found == globals.end()) {
+      continue;
+    }
+    const FilledGlobal &global = found->second;
+    const char *bytes = evaluation.getGlobal<char>(global.symbol);
+    if (!bytes || global.elementSize == 0) {
+      continue;
+    }
+    ASTNode value;
+    if (global.array) {
+      auto list = std::make_shared<ListNode>(
+          fill.constant->getFilename().c_str(), fill.constant->getLine());
+      bool complete = true;
+      for (uint64_t i = 0; complete && i < global.count; ++i) {
+        auto item = constantElement(global, bytes + i * global.elementSize,
+                                    fill.constant);
+        if (!item) {
+          complete = false;
+        } else {
+          list->addChild(item);
+        }
+      }
+      if (complete) {
+        value = list;
+      }
+    } else {
+      value = constantElement(global, bytes, fill.constant);
+    }
+    if (!value) {
+      continue;
+    }
+    fill.constant->setPropertyValue("value", value);
+    std::vector<ASTNode> children = fill.container->getChildren();
+    children.erase(std::remove(children.begin(), children.end(),
+                               ASTNode(fill.stream)),
+                   children.end());
+    fill.container->setChildren(children);
+    // Preprocessing also lists top-level streams in their domain's stages
+    removeEverywhere(root, fill.stream);
+    evaluated.insert(name);
+  }
+  if (!evaluated.empty()) {
+    foldConstantReads(root, root, evaluated);
+  }
 }
 
 void StrideEnvironment::optimizeModule() {
@@ -749,6 +1309,51 @@ size_t StrideEnvironment::getStateSize(const std::string &funcName) const {
     return 0;
   }
   return info->allocSize;
+}
+
+std::vector<StrideEnvironment::StateField>
+StrideEnvironment::getStateFields(const std::string &funcName) const {
+  std::vector<StateField> fields;
+  const auto *info = mStrideEnv.getStateStructInfo(funcName);
+  if (!info || !info->structType) {
+    return fields;
+  }
+  const auto *DL = getDataLayout();
+  for (const auto &[name, index] : info->varIndices) {
+    if (index >= info->fieldOffsets.size() ||
+        index >= info->structType->getNumElements()) {
+      continue;
+    }
+    StateField field;
+    field.name = name;
+    field.offset = info->fieldOffsets[index];
+    llvm::Type *type = info->structType->getElementType(index);
+    if (type->isArrayTy()) {
+      field.count = type->getArrayNumElements();
+      type = type->getArrayElementType();
+    }
+    if (type->isIntegerTy(1)) {
+      field.kind = StateField::Kind::Switch;
+    } else if (type->isIntegerTy()) {
+      field.kind = StateField::Kind::Integer;
+    } else if (type->isFloatingPointTy()) {
+      field.kind = StateField::Kind::Real;
+    } else if (type->isStructTy()) {
+      field.kind = StateField::Kind::String;
+    }
+    if (index < info->fieldAllocSizes.size() && field.count > 0) {
+      field.elementSize = info->fieldAllocSizes[index] / field.count;
+    }
+    if (field.elementSize == 0 && DL) {
+      field.elementSize = DL->getTypeAllocSize(type);
+    }
+    fields.push_back(field);
+  }
+  std::sort(fields.begin(), fields.end(),
+            [](const StateField &a, const StateField &b) {
+              return a.offset < b.offset;
+            });
+  return fields;
 }
 
 static const StrideCompiler::StateStructInfo *

@@ -719,35 +719,9 @@ void StrideGenerator::generateLoadFunction(const std::string &domainName,
                 << std::endl;
   } else if (onLoad && onLoad->getNodeType() == AST::List &&
              !onLoad->getChildren().empty()) {
-    ScopeStack scope = {{nullptr, tree->getChildren()}};
-    std::vector<std::unique_ptr<ExprAST>> body;
-    for (const auto &node : onLoad->getChildren()) {
-      if (node->getNodeType() != AST::Stream) {
-        continue;
-      }
-      auto code = createStreamCode(std::static_pointer_cast<StreamNode>(node),
-                                   tree, scope, state);
-      for (auto &domainCode : code) {
-        for (const auto &f : domainCode.second.functions) {
-          f->codegen(state);
-        }
-        for (auto &expr : domainCode.second.expr) {
-          body.push_back(std::move(expr));
-        }
-      }
-    }
-    const std::string bodyName = "__" + domainName + "_onLoad";
-    auto proto = std::make_unique<PrototypeAST>(
-        bodyName, std::vector<PrototypeArg>{}, std::vector<PrototypeArg>{},
-        std::vector<PrototypeArg>{}, std::vector<PrototypeArg>{},
-        std::vector<PrototypeArg>{}, std::vector<PrototypeArg>{});
-    auto bodyFunc =
-        std::make_unique<FunctionAST>(std::move(proto), std::move(body));
-    bodyFunc->callType = CallableType::DomainFunction;
-    bodyFunc->hasState = false;
-    bodyFunc->funcInstance = domainDecl;
-    bodyFunc->displayName = domainName + "::onLoad";
-    bodyFn = bodyFunc->codegen(state);
+    bodyFn = generateStreamsFunction("__" + domainName + "_onLoad",
+                                     onLoad->getChildren(), tree, state,
+                                     domainDecl, domainName + "::onLoad");
     if (!bodyFn) {
       LOG_ERROR() << "onLoad of " << domainName
                   << " could not be compiled. Its streams run once per "
@@ -807,6 +781,40 @@ void StrideGenerator::generateLoadFunction(const std::string &domainName,
   llvm::IRBuilder<> initBuilder(&initFn->getEntryBlock(),
                                 initFn->getEntryBlock().getFirstInsertionPt());
   initBuilder.CreateCall(loadFn);
+}
+
+llvm::Function *StrideGenerator::generateStreamsFunction(
+    const std::string &name, const std::vector<ASTNode> &streams,
+    ASTNode tree, StrideCompiler &state,
+    std::shared_ptr<DeclarationNode> owner, const std::string &displayName) {
+  ScopeStack scope = {{nullptr, tree->getChildren()}};
+  std::vector<std::unique_ptr<ExprAST>> body;
+  for (const auto &node : streams) {
+    if (node->getNodeType() != AST::Stream) {
+      continue;
+    }
+    auto code = createStreamCode(std::static_pointer_cast<StreamNode>(node),
+                                 tree, scope, state);
+    for (auto &domainCode : code) {
+      for (const auto &f : domainCode.second.functions) {
+        f->codegen(state);
+      }
+      for (auto &expr : domainCode.second.expr) {
+        body.push_back(std::move(expr));
+      }
+    }
+  }
+  auto proto = std::make_unique<PrototypeAST>(
+      name, std::vector<PrototypeArg>{}, std::vector<PrototypeArg>{},
+      std::vector<PrototypeArg>{}, std::vector<PrototypeArg>{},
+      std::vector<PrototypeArg>{}, std::vector<PrototypeArg>{});
+  auto bodyFunc =
+      std::make_unique<FunctionAST>(std::move(proto), std::move(body));
+  bodyFunc->callType = CallableType::DomainFunction;
+  bodyFunc->hasState = false;
+  bodyFunc->funcInstance = owner;
+  bodyFunc->displayName = displayName;
+  return bodyFunc->codegen(state);
 }
 
 std::unique_ptr<ExprAST> StrideGenerator::createExpr(ASTNode node) {

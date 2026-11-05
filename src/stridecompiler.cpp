@@ -375,7 +375,8 @@ void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
       size = Type->isArrayTy() ? static_cast<int>(Type->getArrayNumElements())
                                : 0;
     } else {
-      size = ASTQuery::getEntityDeclaredSize(globalDecl, {}, nullptr);
+      // The tree, for sizes that name other declarations (2 * Board.size)
+      size = ASTQuery::getEntityDeclaredSize(globalDecl, {}, m_tree);
     }
     if (size > 0) {
       if (!Type->isArrayTy()) {

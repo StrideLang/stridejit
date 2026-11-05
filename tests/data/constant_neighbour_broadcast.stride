@@ -1,0 +1,77 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [ ]
+    outputs: [ ]
+	domainFunctionCode: ''
+}
+
+module Equal {
+    ports: [
+        mainOutputPort OutputPort {
+            name:       'output'
+            entity: Output
+        },
+        mainInputPort InputPort {
+            name:       'input'
+            entity: Input
+			meta: "A list with the two values to be compared"
+        }
+    ]
+    entities: [
+        signal Input[2] {domain: OutputPort.domain type: Int}
+		switch Output {domain: OutputPort.domain}
+    ]
+    streams: [
+       [Input[0], Input[1]] >> __Equal() >> Output;
+    ]
+    meta: "Compare two input values."
+}
+
+platformModule __Equal@Int_Bool {
+    inputs: [Int, Int]
+	outputs: [Switch]
+#    linkTo: []
+#    declarations: ['']
+    # initializations: ["// CPP Greater Init"]
+    processing: "%%outtokens:0%% = llvm::icmp eq %%intokens:0%%, %%intokens:1%%"
+    inherits: [_Signal]
+}
+
+
+# The section to the left of each, as a neighbour table: -1 off the board
+loop FillLeft {
+	ports: [
+		mainOutputPort OutputPort {
+			entity: Output
+		}
+	]
+	entities: [
+		signal Output[OutputPort.size] { type: Int }
+		signal Index { default: 0 type: Int reset: Reset }
+		switch Done { default: off }
+		trigger Reset {}
+	]
+	onExecution: Reset
+	terminateWhen: Done
+	streams: [
+		Index - 1 >> Output[Index];
+		Index + 1 >> Index;
+		[ Index, OutputPort.size ] >> Equal() >> Done;
+	]
+}
+
+# Filled while compiling: [-1, 0, 1, 2]
+constant Left[4] { type: Int }
+switch Mine[4] { default: on domain: RootDomain }
+switch Empty[4] { default: [on, on, off, on] domain: RootDomain }
+switch CanMove[4] { default: off domain: RootDomain }
+
+FillLeft() >> Left;
+# A piece can move left when the section to its left is empty. Each
+# instance reads Empty at a fixed section, or off at the board's edge.
+[Mine[0:3], Empty[Left[0:3]]] >> And() >> CanMove[0:3];
