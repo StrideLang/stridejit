@@ -88,7 +88,8 @@ Cache keys and tags explicitly partition objects by:
 ### 3. Compiler Build & Commit Invalidation
 When the compiler binary itself changes (e.g., bug fixes to code generation, instruction lowering, or AST preprocessing), existing cached artifacts must be invalidated.
 
-- **Build Hash Embedding**: `CMakeLists.txt` injects the Git commit hash (`GIT_COMMIT_HASH`) as `STRIDE_COMPILER_BUILD_HASH`.
+- **Build Hash Embedding**: on every build, strideutils' `cmake/StrideCompilerVersion.cmake` writes `stride/utils/compilerversion.h` with the commits of the compiler's sources (strideutils, strideparser, stridegen and stridejit, or the work trees listed in `STRIDE_COMPILER_SOURCE_DIRS`). A commit in any of them invalidates the cache.
+- **Experimental Compiler**: a compiler built while any of those sources has uncommitted changes to tracked files is experimental. `CacheManager::isExperimentalCompiler()` is true and the cache is never read or written (`isEnabled()` is false whatever `setEnabled()` was given), because its output can differ from that of the commits that identify it. Tests of the cache use `CacheManager::setExperimentalCompilerOverride(0)`.
 - **Runtime Override**: `CacheManager::setCompilerBuildHashOverride(hash)` and `clearCompilerBuildHashOverride()` allow test suites and runtime environments to dynamically verify invalidation behavior.
 - **Automatic Invalidation**: If the stored build hash does not match the active runtime build hash, the cache entry is treated as a miss and regenerated.
 

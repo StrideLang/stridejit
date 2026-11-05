@@ -30,6 +30,7 @@ private:
     cm.setForceRecompile(true);
     cm.setCacheDirectory({});
     cm.clearCompilerBuildHashOverride();
+    CacheManager::setExperimentalCompilerOverride(-1);
     cm.resetStats();
   }
 };
@@ -38,6 +39,8 @@ class ScopedCacheEnable {
 public:
   explicit ScopedCacheEnable(bool isolateTempDir = true) {
     auto &cm = CacheManager::instance();
+    // Tests of the cache run it even when built with uncommitted changes
+    CacheManager::setExperimentalCompilerOverride(0);
     m_prevEnabled = cm.isEnabled();
     m_prevForceRecompile = cm.isForceRecompile();
     m_prevCacheDir = cm.getCacheDirectory();
@@ -63,6 +66,7 @@ public:
     cm.setCacheDirectory(m_prevCacheDir);
     cm.setForceRecompile(m_prevForceRecompile);
     cm.setEnabled(m_prevEnabled);
+    CacheManager::setExperimentalCompilerOverride(-1);
 
     if (!m_tempDir.empty()) {
       std::error_code ec;
