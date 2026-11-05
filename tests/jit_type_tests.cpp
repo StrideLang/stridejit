@@ -80,6 +80,50 @@ TEST(JITTypeTest, SizedTypes) {
                   .value_or(false));
 }
 
+TEST(JITTypeTest, LiteralTypes) {
+  strd::StrideEnvironment strenv;
+
+  auto ret =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "literal_types.stride");
+  EXPECT_TRUE(ret);
+  ret = strenv.compileInMemory();
+  EXPECT_TRUE(ret);
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_process", args);
+
+  auto get = [&](const std::string &name) {
+    return strenv.getStateVar<int64_t>(statePtr.get(), name, std::nullopt,
+                                       "RootDomain");
+  };
+  EXPECT_EQ(static_cast<uint8_t>(get("ByteSum").value_or(0)), 4);
+  EXPECT_EQ(static_cast<int16_t>(get("SignedByte").value_or(0)), -1);
+  EXPECT_EQ(static_cast<uint64_t>(get("AllBits").value_or(0)), UINT64_MAX);
+  EXPECT_EQ(get("PlatformUnsigned").value_or(0), 4000000000LL);
+  EXPECT_EQ(static_cast<uint8_t>(get("ByteWrap").value_or(-1)), 0);
+  EXPECT_EQ(static_cast<int32_t>(get("Widened").value_or(0)), 256);
+  EXPECT_EQ(static_cast<int32_t>(get("Doubled").value_or(0)), 510);
+  EXPECT_EQ(static_cast<int32_t>(get("NotWrapped").value_or(0)), 555);
+  EXPECT_EQ(static_cast<int32_t>(get("Separated").value_or(0)), 1002);
+  EXPECT_EQ(static_cast<int32_t>(get("BelowZero").value_or(0)), -10);
+
+  auto getReal = [&](const std::string &name) {
+    return strenv
+        .getStateVar<double>(statePtr.get(), name, std::nullopt, "RootDomain")
+        .value_or(-100.0);
+  };
+  EXPECT_DOUBLE_EQ(getReal("SingleTenth"), static_cast<double>(0.1f));
+  EXPECT_DOUBLE_EQ(getReal("DoubleTenth"), 0.1);
+  EXPECT_DOUBLE_EQ(getReal("AllBitsReal"), 18446744073709551615.0);
+  EXPECT_DOUBLE_EQ(getReal("SingleProduct"),
+                   static_cast<double>(3.0f * 0.1f));
+  EXPECT_DOUBLE_EQ(getReal("DoubleProduct"), 3.0 * 0.1);
+  EXPECT_DOUBLE_EQ(getReal("DoubledInReal"), 510.0);
+  EXPECT_DOUBLE_EQ(getReal("QuarterInReal"), 2.0);
+}
+
 TEST(JITTypeTest, DataTypeConversions) {
   strd::StrideCompiler compiler;
   // Aliases share the LLVM type of their target

@@ -42,6 +42,7 @@ using DefaultVariant =
 
 class AST;
 class StrideCompiler;
+class ValueNode;
 
 class ExprAST {
 public:
@@ -80,6 +81,10 @@ public:
   // Data type of the value, e.g. "UInt8". Empty if unknown, in which case
   // integers are treated as signed.
   std::string dataType;
+  // The literal this expression was made from, when it has no type suffix.
+  // Such a literal takes the type of the value it is used with (see
+  // DataTypes::untypedLiteralTakes).
+  std::shared_ptr<ValueNode> untypedLiteral;
 };
 
 class StringExprAST : public ExprAST {

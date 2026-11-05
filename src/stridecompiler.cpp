@@ -525,12 +525,12 @@ StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl) {
     if (auto valProp = decl->getPropertyValue("value")) {
       if (valProp->getNodeType() == strd::AST::String) {
         return typesMap[DataTypes::String];
-      } else if (valProp->getNodeType() == strd::AST::Int) {
-        return typesMap[DataTypes::Int];
+      } else if (valProp->getNodeType() == strd::AST::Int ||
+                 valProp->getNodeType() == strd::AST::Real) {
+        return typesMap[DataTypes::literalType(
+            *std::static_pointer_cast<strd::ValueNode>(valProp))];
       } else if (valProp->getNodeType() == strd::AST::Switch) {
         return typesMap[DataTypes::Switch];
-      } else if (valProp->getNodeType() == strd::AST::Real) {
-        return typesMap[DataTypes::Real];
       } else if (valProp->getNodeType() == strd::AST::List) {
         // A constant array takes the type of its values
         auto listType =
@@ -706,9 +706,9 @@ llvm::Type *StrideCompiler::getConnectedNodeType(ASTNode node,
   }
   switch (node->getNodeType()) {
   case AST::Int:
-    return typesMap[DataTypes::Int];
   case AST::Real:
-    return typesMap[DataTypes::Real];
+    return typesMap[DataTypes::literalType(
+        *std::static_pointer_cast<ValueNode>(node))];
   case AST::Switch:
     return typesMap[DataTypes::Switch];
   case AST::String:

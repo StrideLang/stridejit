@@ -1,0 +1,63 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+    ]
+    outputs: [
+		signal ByteSum {type: UInt8 domain: RootDomain}
+		signal SignedByte {type: Int16 domain: RootDomain}
+		signal AllBits {type: UInt64 domain: RootDomain}
+		signal AllBitsReal {type: Float64 domain: RootDomain}
+		signal PlatformUnsigned {type: Int64 domain: RootDomain}
+		signal SingleTenth {type: Float64 domain: RootDomain}
+		signal DoubleTenth {type: Float64 domain: RootDomain}
+		signal ByteWrap {type: UInt8 domain: RootDomain}
+		signal Widened {type: Int32 domain: RootDomain}
+		signal Doubled {type: Int32 domain: RootDomain}
+		signal NotWrapped {type: Int32 domain: RootDomain}
+		signal SingleProduct {type: Float32 domain: RootDomain}
+		signal DoubleProduct {type: Float64 domain: RootDomain}
+		signal DoubledInReal {type: Float64 domain: RootDomain}
+		signal QuarterInReal {type: Float64 domain: RootDomain}
+		signal BelowZero {type: Int32 domain: RootDomain}
+		signal Separated {type: Int32 domain: RootDomain}
+    ]
+	domainFunctionCode: ''
+}
+
+signal Big { type: UInt8 default: 255 domain: RootDomain }
+signal Three { type: Float32 default: 3 domain: RootDomain }
+signal Small { type: UInt8 default: 10 domain: RootDomain }
+
+# Literals with a suffix have the type it names: UInt8 arithmetic wraps
+250u8 + 10u8 >> ByteSum;
+-1i8 >> SignedByte;
+0xFFFF_FFFF_FFFF_FFFFu64 >> AllBits;
+0xFFFF_FFFF_FFFF_FFFFu64 >> AllBitsReal;
+# UInt is UInt32 in the JIT framework
+4_000_000_000u >> PlatformUnsigned;
+# A Float32 literal keeps Float32 precision in a Float64 signal
+0.1f32 >> SingleTenth;
+0.1 >> DoubleTenth;
+
+# Literals without a suffix take the type of the other operand: Big + 1 is
+# a UInt8, so it wraps in a UInt8 signal
+Big + 1 >> ByteWrap;
+# Arithmetic streamed to a type that holds every UInt8 is done in that type
+Big + 1 >> Widened;
+Big * 2 >> Doubled;
+# 300 is not a UInt8, so it doesn't take the type of Big
+Big + 300 >> NotWrapped;
+# 0.1 is a Float32 here
+Three * 0.1 >> SingleProduct;
+# and a Float64 here, where the product is computed
+Three * 0.1 >> DoubleProduct;
+# Integer arithmetic streamed to a float is done in Int64: it doesn't
+# overflow and keeps integer division
+Big * 2 >> DoubledInReal;
+Small / 4 >> QuarterInReal;
+# -20 is not a UInt8, so this adds Int32 values
+Small + -20 >> BelowZero;
+1_000 + 2 >> Separated;

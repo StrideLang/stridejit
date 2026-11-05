@@ -32,8 +32,21 @@ IntExprAST::codegen(StrideCompiler &state) {
     auto info = state.getDataTypeInfo(typecast);
     if (info.isFloat()) {
       auto *floatType = state.getLLVMTypeForDataType(info);
-      return {llvm::ConstantFP::get(floatType, double(Val)), floatType};
+      // Unsigned literals (0xFFFF_FFFF_FFFF_FFFFu64) keep the bits of the
+      // value in Val
+      double value = Signed ? double(Val) : double(static_cast<uint64_t>(Val));
+      return {llvm::ConstantFP::get(floatType, value), floatType};
     } else if (info.isInteger()) {
+      auto *intType = state.getLLVMTypeForDataType(info);
+      return {llvm::ConstantInt::get(intType, static_cast<uint64_t>(Val),
+                                     info.isSigned),
+              intType};
+    }
+  }
+  if (untypedLiteral) {
+    // Literals without a suffix have the size the framework gives Int
+    auto info = state.getDataTypeInfo(dataType);
+    if (info.isInteger()) {
       auto *intType = state.getLLVMTypeForDataType(info);
       return {llvm::ConstantInt::get(intType, static_cast<uint64_t>(Val),
                                      info.isSigned),

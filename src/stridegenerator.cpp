@@ -835,14 +835,18 @@ std::unique_ptr<ExprAST> StrideGenerator::createExpr(ASTNode node) {
     V = std::make_unique<VariableExprAST>(arrayNode->getName(), indeces);
     setTypeCastMetadata(node, V.get());
   } else if (node->getNodeType() == AST::Real) {
-    // TODO separate float types
-    V = std::make_unique<RealExprAST>(
-        std::static_pointer_cast<ValueNode>(node)->getRealValue());
+    auto literal = std::static_pointer_cast<ValueNode>(node);
+    double value = literal->getRealValue();
+    if (literal->getLiteralType() == "Float32") {
+      // Keeps the precision of 0.1f32 when it is converted to a wider type
+      value = static_cast<float>(value);
+    }
+    V = std::make_unique<RealExprAST>(value);
     setTypeCastMetadata(node, V.get());
   } else if (node->getNodeType() == AST::Int) {
-    // TODO separate int types
-    V = std::make_unique<IntExprAST>(
-        std::static_pointer_cast<ValueNode>(node)->getIntValue());
+    auto literal = std::static_pointer_cast<ValueNode>(node);
+    V = std::make_unique<IntExprAST>(literal->getIntValue(), 32,
+                                     !literal->hasUnsignedSuffix());
     setTypeCastMetadata(node, V.get());
   } else if (node->getNodeType() == AST::Switch) {
     // TODO separate int types
@@ -3735,11 +3739,20 @@ void StrideGenerator::setTypeCastMetadata(ASTNode node, ExprAST *V) {
   }
   switch (node->getNodeType()) {
   case AST::Int:
-    V->dataType = DataTypes::Int;
+  case AST::Real: {
+    auto literal = std::static_pointer_cast<ValueNode>(node);
+    if (literal->getLiteralSuffix().empty()) {
+      V->untypedLiteral = literal;
+    }
+    // A literal is emitted with the type it is cast to, or else the type its
+    // suffix names
+    if (V->typecast.empty() && !literal->getLiteralSuffix().empty()) {
+      V->typecast = literal->getLiteralType();
+    }
+    V->dataType =
+        V->typecast.empty() ? DataTypes::literalType(*literal) : V->typecast;
     break;
-  case AST::Real:
-    V->dataType = DataTypes::Real;
-    break;
+  }
   case AST::Switch:
     V->dataType = DataTypes::Switch;
     break;

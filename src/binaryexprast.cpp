@@ -24,6 +24,41 @@ static bool isUnsignedDataType(StrideCompiler &state,
   return info.isInteger() && !info.isSigned;
 }
 
+// A literal without a suffix takes the data type of the other operand when
+// that type holds its value, so UInt8Signal + 1 stays a UInt8 and
+// Float32Signal * 0.5 a Float32
+static void takeOperandType(StrideCompiler &state, ExprAST &literal,
+                            const ExprAST &other) {
+  if (!literal.untypedLiteral || !literal.typecast.empty()) {
+    return;
+  }
+  // The other operand's value has the type it is converted to, if any
+  const auto &type = other.typecast.empty() ? other.dataType : other.typecast;
+  if (!type.empty() && DataTypes::untypedLiteralTakes(*literal.untypedLiteral,
+                                                      type, state.m_tree)) {
+    literal.dataType = type;
+    literal.typecast = type;
+  }
+}
+
+// Generates the operands. A literal operand is generated after the other
+// one, whose data type it can take. Literals generate no instructions, so
+// this doesn't change the order of evaluation.
+static std::pair<std::pair<llvm::Value *, std::optional<llvm::Type *>>,
+                 std::pair<llvm::Value *, std::optional<llvm::Type *>>>
+generateOperands(StrideCompiler &state, ExprAST &LHS, ExprAST &RHS) {
+  if (LHS.untypedLiteral && !RHS.untypedLiteral) {
+    auto right = RHS.codegen(state);
+    takeOperandType(state, LHS, RHS);
+    auto left = LHS.codegen(state);
+    return {left, right};
+  }
+  auto left = LHS.codegen(state);
+  takeOperandType(state, RHS, LHS);
+  auto right = RHS.codegen(state);
+  return {left, right};
+}
+
 static llvm::Function *getOrCreateFunction(StrideCompiler &state) {
   llvm::BasicBlock *curBB = state.Builder->GetInsertBlock();
   if (curBB && curBB->getParent()) {
@@ -257,8 +292,9 @@ BinaryExprAST::codegen(StrideCompiler &state) {
     return {Val, std::nullopt};
   } else {
 
-    auto [L, LType] = LHS->codegen(state);
-    auto [R, RType] = RHS->codegen(state);
+    auto operands = generateOperands(state, *LHS, *RHS);
+    auto [L, LType] = operands.first;
+    auto [R, RType] = operands.second;
     if (!L || !R)
       return {nullptr, std::nullopt};
     if (Logger::isDebugEnabled()) {
@@ -377,6 +413,14 @@ BinaryExprAST::codegen(StrideCompiler &state) {
     std::string promoted;
     if (!LHS->dataType.empty() && !RHS->dataType.empty()) {
       promoted = DataTypes::promote(LHS->dataType, RHS->dataType, state.m_tree);
+      // Operands the resolver converts (e.g. to the wider type of the
+      // stream's destination) take part with the type they are converted to
+      for (const auto *operand : {LHS.get(), RHS.get()}) {
+        if (!promoted.empty() && !operand->typecast.empty()) {
+          promoted =
+              DataTypes::promote(promoted, operand->typecast, state.m_tree);
+        }
+      }
     }
     auto promotedInfo = state.getDataTypeInfo(promoted);
     bool numericOperands =

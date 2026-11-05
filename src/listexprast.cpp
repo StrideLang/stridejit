@@ -90,9 +90,7 @@ ListExprAST::codegen(StrideCompiler &state) {
     auto value = std::static_pointer_cast<strd::ValueNode>(elem);
     auto info = state.getDataTypeInfo(elemType);
     if (!info.isNumeric()) {
-      info = state.getDataTypeInfo(elem->getNodeType() == strd::AST::Real
-                                       ? DataTypes::Real
-                                       : DataTypes::Int);
+      info = state.getDataTypeInfo(DataTypes::literalType(*value));
     }
     llvm::Type *elemLLVMType = state.getLLVMTypeForDataType(info);
     llvm::Constant *constant = nullptr;
