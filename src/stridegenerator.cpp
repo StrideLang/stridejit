@@ -2667,9 +2667,12 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                                                  args.MainIn.argTypes);
         }
       } else {
+        // Nothing follows the call at the end of a stream; looking up the
+        // empty name would find any anonymous declaration
         std::shared_ptr<DeclarationNode> nextDecl =
-            ASTQuery::findDeclarationByName(ASTQuery::getNodeName(next), scope,
-                                            tree);
+            next ? ASTQuery::findDeclarationByName(ASTQuery::getNodeName(next),
+                                                   scope, tree)
+                 : nullptr;
 
         retType = state.getLLVMType(nextDecl);
         if (retType->isVoidTy() &&
