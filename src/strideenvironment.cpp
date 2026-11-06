@@ -146,7 +146,8 @@ static bool validateDataTypes(std::shared_ptr<DeclarationNode> decl,
   }
   visited.insert(decl.get());
   bool valid = true;
-  if (decl->getEntityType() == "transition") {
+  // Transitions and the types that inherit _TransitionType
+  if (ASTQuery::isTransitionNode(decl, {}, tree)) {
     valid &= validateTransitionTrigger(decl, tree);
   }
   auto unresolvedType = decl->getCompilerProperty("unresolvedType");
