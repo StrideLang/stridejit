@@ -572,7 +572,7 @@ TEST(JITStateMachineTest, TransitionTriggerOnRisingEdge) {
         .value_or(0);
   };
   auto activeState = [&]() {
-    return strenv.getActiveStateId(statePtr, "", "RootDomain");
+    return strenv.getActiveStateId(statePtr, "", "RootDomain").value_or(-1);
   };
   auto tick = [&](int input) {
     setVar("Input", input);
