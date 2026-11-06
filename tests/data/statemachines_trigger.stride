@@ -1,0 +1,52 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    stateMachines: [MyStateMachine]
+    inputs: []
+    outputs: []
+	domainFunctionCode: ''
+}
+
+signal Input { domain: RootDomain type: Int default: 0 }
+signal Counter { domain: RootDomain type: Int default: 0 }
+signal GuardSignal { domain: RootDomain type: Int default: 1 }
+switch Go { domain: RootDomain default: off }
+
+# Go is on while Input > 0, so it rises when Input goes from 0 to positive.
+[Input, 0] >> Greater() >> Go;
+
+# Fires on the rising edge of Go, with the guard on.
+state State1 {
+    transitions: [
+        transition ToState2 {
+            targetState: State2
+            trigger: Go
+            guard: GuardSignal
+            onTransition: [
+                1 >> Counter;
+            ]
+        }
+    ]
+}
+
+# Go is still on when State2 is entered: that is no new edge.
+state State2 {
+    transitions: [
+        transition ToState3 {
+            targetState: State3
+            trigger: Go
+            onTransition: [
+                2 >> Counter;
+            ]
+        }
+    ]
+}
+
+state State3 {}
+
+state MyStateMachine {
+    initialState: State1
+    states: [State1, State2, State3]
+}

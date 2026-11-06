@@ -182,6 +182,30 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         Val = state.Builder->CreateLoad(Type, Val);
       }
     }
+    // A switch that triggers transitions: remember its value to catch the
+    // rising edge once this write has happened.
+    std::vector<llvm::Value *> latchPtrs;
+    llvm::Value *previousSwitchVal = nullptr;
+    auto latchesIt = state.triggerLatches.find(LHSE->getName());
+    if (latchesIt != state.triggerLatches.end() &&
+        Variable->getType()->isPointerTy() && VariableType.has_value() &&
+        VariableType.value()->isIntegerTy(1) && LHSE->getIndices().empty()) {
+      for (const auto &latchName : latchesIt->second) {
+        auto namedIt = state.NamedValues.find(latchName);
+        llvm::Value *latchPtr =
+            namedIt != state.NamedValues.end()
+                ? namedIt->second.first
+                : state.TheModule->getNamedGlobal(latchName);
+        if (latchPtr) {
+          latchPtrs.push_back(latchPtr);
+        }
+      }
+      if (!latchPtrs.empty()) {
+        previousSwitchVal =
+            state.Builder->CreateLoad(state.Builder->getInt1Ty(), Variable);
+      }
+    }
+
     // Assigning
     if (Variable->getType()->isPointerTy()) {
       llvm::Type *Type;
@@ -272,6 +296,19 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       } else {
         // GLobal
         state.Builder->CreateStore(Val, Variable);
+      }
+    }
+
+    if (previousSwitchVal) {
+      auto *currentSwitchVal =
+          state.Builder->CreateLoad(state.Builder->getInt1Ty(), Variable);
+      auto *rose = state.Builder->CreateAnd(
+          state.Builder->CreateNot(previousSwitchVal), currentSwitchVal);
+      for (auto *latchPtr : latchPtrs) {
+        auto *latched =
+            state.Builder->CreateLoad(state.Builder->getInt1Ty(), latchPtr);
+        state.Builder->CreateStore(state.Builder->CreateOr(latched, rose),
+                                   latchPtr);
       }
     }
 

@@ -313,8 +313,13 @@ public:
     std::map<std::string, int32_t> transitionIdsByName;
     std::map<std::pair<std::string, std::string>, int32_t>
         transitionIdsByStateAndName;
+    std::vector<std::string> triggerLatchVars;
   };
   std::vector<StateMachineInfo> stateMachineInfos;
+
+  // Switch name -> latch variables of the transitions it triggers. A write
+  // that turns the switch on sets them (see BinaryExprAST '=').
+  std::map<std::string, std::vector<std::string>> triggerLatches;
 
   std::map<ASTNode, StateStructInfo> stateStructMap;
   llvm::Value *currentFunctionStatePtr{nullptr};

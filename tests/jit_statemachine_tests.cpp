@@ -1,5 +1,9 @@
 #include "gtest/gtest.h"
 
+#include <cstdio>
+#include <fstream>
+#include <string>
+
 // stridejit
 #include "stride/stridegen/coderesolver.hpp"
 #include "stride/stridejit/strideenvironment.hpp"
@@ -544,6 +548,114 @@ TEST(JITStateMachineTest, TransitionGuardBlocking) {
   strenv.invoke("RootDomain_process", args);
   EXPECT_EQ(strenv.getActiveStateId(statePtr, "", "RootDomain"), 3); // State2 is 3
   EXPECT_EQ(counter(), 1); // onTransition stream executed
+}
+
+TEST(JITStateMachineTest, TransitionTriggerOnRisingEdge) {
+  strd::ASTNode tree;
+  tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                              "statemachines_trigger.stride");
+  ASSERT_NE(tree, nullptr);
+
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+  ASSERT_TRUE(strenv.generateIr(tree));
+  ASSERT_TRUE(strenv.compileInMemory());
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  void *args[] = {statePtr.get()};
+  auto setVar = [&](const char *name, int value) {
+    strenv.setStateVar(statePtr.get(), name, value, std::nullopt, "RootDomain");
+  };
+  auto counter = [&]() {
+    return strenv.getStateVar(statePtr.get(), "Counter", std::nullopt,
+                              "RootDomain")
+        .value_or(0);
+  };
+  auto activeState = [&]() {
+    return strenv.getActiveStateId(statePtr, "", "RootDomain");
+  };
+  auto tick = [&](int input) {
+    setVar("Input", input);
+    strenv.invoke("RootDomain_process", args);
+  };
+
+  strenv.invoke("RootDomain_init", args);
+  const int state1 = activeState();
+  tick(0);
+  EXPECT_EQ(activeState(), state1);
+
+  // A rising edge while the guard is off is discarded: it does not fire later
+  // when the guard turns on, and the level alone does not fire either.
+  setVar("GuardSignal", 0);
+  tick(1);
+  EXPECT_EQ(activeState(), state1);
+  setVar("GuardSignal", 1);
+  tick(1);
+  EXPECT_EQ(activeState(), state1);
+  tick(0);
+  EXPECT_EQ(activeState(), state1);
+
+  // A new rising edge with the guard on fires the transition.
+  tick(1);
+  const int state2 = activeState();
+  EXPECT_NE(state2, state1);
+  EXPECT_EQ(counter(), 1);
+
+  // The switch staying on is not an edge, so State2's transition holds.
+  tick(1);
+  EXPECT_EQ(activeState(), state2);
+  EXPECT_EQ(counter(), 1);
+
+  // Off and on again is an edge.
+  tick(0);
+  EXPECT_EQ(activeState(), state2);
+  tick(1);
+  EXPECT_NE(activeState(), state2);
+  EXPECT_EQ(counter(), 2);
+}
+
+// A trigger that isn't a single switch is an error, not something to ignore.
+TEST(JITStateMachineTest, TransitionTriggerMustBeASwitch) {
+  const std::string header = R"(
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    stateMachines: [MyStateMachine]
+    inputs: []
+    outputs: []
+	domainFunctionCode: ''
+}
+signal Level { domain: RootDomain type: Int default: 0 }
+switch Go { domain: RootDomain default: off }
+switch Many[2] { domain: RootDomain default: off }
+)";
+  auto machine = [](const std::string &trigger) {
+    return "state State1 { transitions: [ transition ToState2 { targetState: "
+           "State2 trigger: " +
+           trigger +
+           " } ] }\nstate State2 {}\nstate MyStateMachine { initialState: "
+           "State1 states: [State1, State2] }\n";
+  };
+  auto generates = [&](const std::string &trigger) {
+    const char *path = "transition_trigger_type.stride";
+    {
+      std::ofstream out(path);
+      out << header << machine(trigger);
+    }
+    strd::StrideEnvironment strenv;
+    bool ok = strenv.generateIr(path);
+    std::remove(path);
+    return ok;
+  };
+
+  EXPECT_TRUE(generates("Go"));
+  EXPECT_TRUE(generates("none"));
+  EXPECT_FALSE(generates("Level"));    // a signal
+  EXPECT_FALSE(generates("Many"));     // a bundle of switches
+  EXPECT_FALSE(generates("Missing"));  // not declared
+  EXPECT_FALSE(generates("on"));       // a literal
 }
 
 TEST(JITStateMachineTest, UpdateGuardParentBeforeChild) {

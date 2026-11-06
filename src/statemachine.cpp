@@ -88,6 +88,8 @@ std::string StateMachine::getFieldSuffix(StateMachineField field) {
     return "_is_entered";
   case StateMachineField::HistoryStateId:
     return "_history_state_id";
+  case StateMachineField::TriggerLatch:
+    return "_trigger_latch";
   }
   return "";
 }
@@ -219,6 +221,29 @@ StateMachine::processStateMachine(std::shared_ptr<EntityNode> child,
                   if (valNode->getSwitchValue()) {
                     t.triggerOnGuard = true;
                   }
+                }
+
+                auto triggerProp = tDecl->getPropertyValue("trigger");
+                if (triggerProp && triggerProp->getNodeType() == AST::Entity) {
+                  auto switchName =
+                      std::static_pointer_cast<EntityNode>(triggerProp)
+                          ->getName();
+                  auto switchDecl =
+                      ASTQuery::findDeclarationByName(switchName, scope, tree);
+                  if (switchDecl && (switchDecl->getEntityType() == "switch" ||
+                                     switchDecl->getEntityType() == "trigger")) {
+                    t.triggerSwitch = switchName;
+                    t.triggerLatchVarName = StateMachine::getVariableName(
+                        StateMachineField::TriggerLatch, prefix,
+                        smName + "_" + std::to_string(t.id));
+                  } else {
+                    LOG_ERROR() << "Transition trigger must be a switch: "
+                                << switchName << std::endl;
+                  }
+                } else if (triggerProp &&
+                           triggerProp->getNodeType() != AST::None) {
+                  LOG_ERROR() << "Unsupported transition trigger: "
+                              << triggerProp->toText() << std::endl;
                 }
 
                 auto isGenProp = tDecl->getCompilerProperty("_isGenerator");
@@ -523,7 +548,18 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
       state.Builder->SetInsertPoint(transCondBB);
 
       llvm::Value *guardVal = state.Builder->getInt1(true);
-      if (reqVal && !t.triggerOnGuard) {
+      llvm::Value *latchPtr = nullptr;
+      if (!t.triggerLatchVarName.empty()) {
+        auto latchIt = state.NamedValues.find(t.triggerLatchVarName);
+        latchPtr = latchIt != state.NamedValues.end()
+                       ? latchIt->second.first
+                       : state.TheModule->getNamedGlobal(t.triggerLatchVarName);
+      }
+      if (latchPtr) {
+        // Fires on the rising edge the switch's write sites latched.
+        guardVal =
+            state.Builder->CreateLoad(state.Builder->getInt1Ty(), latchPtr);
+      } else if (reqVal && !t.triggerOnGuard) {
         auto *idVal = state.Builder->getInt32(t.id);
         guardVal = state.Builder->CreateICmpEQ(reqVal, idVal);
       }
@@ -823,6 +859,24 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
 
   // Restore insertion point to endBB
   state.Builder->SetInsertPoint(endBB);
+
+  // A trigger edge is only good for this evaluation: clear the latches whether
+  // or not their transition was taken.
+  for (const auto &fs : smContext.flattenedStates) {
+    for (const auto &t : fs.transitions) {
+      if (t.triggerLatchVarName.empty()) {
+        continue;
+      }
+      auto latchIt = state.NamedValues.find(t.triggerLatchVarName);
+      llvm::Value *latchPtr =
+          latchIt != state.NamedValues.end()
+              ? latchIt->second.first
+              : state.TheModule->getNamedGlobal(t.triggerLatchVarName);
+      if (latchPtr) {
+        state.Builder->CreateStore(state.Builder->getInt1(false), latchPtr);
+      }
+    }
+  }
 
   return {nullptr, std::nullopt};
 }

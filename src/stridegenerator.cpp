@@ -203,6 +203,11 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
                       stateName, t.transitionDecl->getName()}] = t.id;
                 }
               }
+              if (!t.triggerLatchVarName.empty()) {
+                state.triggerLatches[t.triggerSwitch].push_back(
+                    t.triggerLatchVarName);
+                smInfo.triggerLatchVars.push_back(t.triggerLatchVarName);
+              }
               auto labelProp = t.transitionDecl->getPropertyValue("label");
               if (labelProp && labelProp->getNodeType() == AST::String) {
                 std::string labelStr =
@@ -410,6 +415,16 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
             '=', std::make_unique<VariableExprAST>(smCtx.isEnteredVarName),
             std::make_unique<BoolExprAST>(false));
         resetBody.push_back(std::move(enteredInit));
+      }
+    }
+    for (const auto &smInfo : state.stateMachineInfos) {
+      if (smInfo.domainName != domainName) {
+        continue;
+      }
+      for (const auto &latchName : smInfo.triggerLatchVars) {
+        resetBody.push_back(std::make_unique<BinaryExprAST>(
+            '=', std::make_unique<VariableExprAST>(latchName),
+            std::make_unique<BoolExprAST>(false)));
       }
     }
 
@@ -1134,6 +1149,15 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
               llvm::ConstantInt::get(llvm::Type::getInt1Ty(*state.TheContext),
                                      0));
           for (const auto &fs : smCtx.flattenedStates) {
+            for (const auto &t : fs.transitions) {
+              if (!t.triggerLatchVarName.empty()) {
+                state.addDynamicDomainField(
+                    node, t.triggerLatchVarName,
+                    llvm::Type::getInt1Ty(*state.TheContext),
+                    llvm::ConstantInt::get(
+                        llvm::Type::getInt1Ty(*state.TheContext), 0));
+              }
+            }
             if (fs.resumeLastState && !fs.historyStateVarName.empty()) {
               state.addDynamicDomainField(
                   node, fs.historyStateVarName,

@@ -49,6 +49,10 @@ struct Transition {
   std::shared_ptr<DeclarationNode> transitionDecl;
   int targetStateId;
   bool triggerOnGuard = false;
+  // `trigger: <switch>`: fires on a rising edge of the switch. Writes to the
+  // switch set triggerLatchVarName; the state machine consumes it.
+  std::string triggerSwitch;
+  std::string triggerLatchVarName;
 
   bool isGenerator = false;
   std::string generatorVar;
@@ -89,7 +93,8 @@ enum class StateMachineField {
   TransitionRequestId,
   TransitionRequestArg,
   IsEntered,
-  HistoryStateId
+  HistoryStateId,
+  TriggerLatch
 };
 
 class StateMachine {

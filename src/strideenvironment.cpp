@@ -101,6 +101,42 @@ void StrideEnvironment::initializeJIT() {
   }
 }
 
+// A transition's trigger is the switch whose rising edge fires it
+static bool validateTransitionTrigger(std::shared_ptr<DeclarationNode> decl,
+                                      ASTNode tree) {
+  auto trigger = decl->getPropertyValue("trigger");
+  if (!trigger || trigger->getNodeType() == AST::None) {
+    return true;
+  }
+  std::string where = decl->getFilename() + ":" +
+                      std::to_string(decl->getLine()) + " transition '" +
+                      decl->getName() + "'";
+  if (trigger->getNodeType() != AST::Entity) {
+    LOG_ERROR() << where << ": trigger must be the name of a switch, got "
+                << trigger->toText() << std::endl;
+    return false;
+  }
+  auto name = ASTQuery::getNodeName(trigger);
+  auto switchDecl = ASTQuery::findDeclarationByName(name, {}, tree);
+  if (!switchDecl) {
+    LOG_ERROR() << where << ": trigger '" << name << "' is not declared"
+                << std::endl;
+    return false;
+  }
+  if (switchDecl->getNodeType() == AST::ArrayDeclaration ||
+      (switchDecl->getEntityType() != "switch" &&
+       switchDecl->getEntityType() != "trigger")) {
+    LOG_ERROR() << where << ": trigger '" << name
+                << "' must be a single switch, but it is "
+                << (switchDecl->getNodeType() == AST::ArrayDeclaration
+                        ? "a bundle of "
+                        : "a ")
+                << switchDecl->getEntityType() << std::endl;
+    return false;
+  }
+  return true;
+}
+
 // Typed declarations (e.g. signal) only accept members of their typeClass.
 // Switch and string data are declared with switch and string, not signal.
 static bool validateDataTypes(std::shared_ptr<DeclarationNode> decl,
@@ -110,6 +146,9 @@ static bool validateDataTypes(std::shared_ptr<DeclarationNode> decl,
   }
   visited.insert(decl.get());
   bool valid = true;
+  if (decl->getEntityType() == "transition") {
+    valid &= validateTransitionTrigger(decl, tree);
+  }
   auto unresolvedType = decl->getCompilerProperty("unresolvedType");
   if (unresolvedType && unresolvedType->getNodeType() == AST::String) {
     LOG_ERROR() << decl->getFilename() << ":" << decl->getLine()
