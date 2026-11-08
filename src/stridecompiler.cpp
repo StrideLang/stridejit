@@ -879,9 +879,91 @@ llvm::Constant *StrideCompiler::makeDefaultConstant(ASTNode defaultNode,
         llvm::Constant *c = getScalarConst(child);
         initVals.push_back(c ? c : llvm::Constant::getNullValue(scalarType));
       }
+      if (scalarType->isIntegerTy(32)) {
+        std::vector<uint32_t> rawVals;
+        rawVals.reserve(numElems);
+        bool allOk = true;
+        for (auto *c : initVals) {
+          if (auto *ci = llvm::dyn_cast<llvm::ConstantInt>(c)) {
+            rawVals.push_back(static_cast<uint32_t>(ci->getZExtValue()));
+          } else {
+            allOk = false;
+            break;
+          }
+        }
+        if (allOk) {
+          return llvm::ConstantDataArray::get(*TheContext, rawVals);
+        }
+      } else if (scalarType->isIntegerTy(64)) {
+        std::vector<uint64_t> rawVals;
+        rawVals.reserve(numElems);
+        bool allOk = true;
+        for (auto *c : initVals) {
+          if (auto *ci = llvm::dyn_cast<llvm::ConstantInt>(c)) {
+            rawVals.push_back(ci->getZExtValue());
+          } else {
+            allOk = false;
+            break;
+          }
+        }
+        if (allOk) {
+          return llvm::ConstantDataArray::get(*TheContext, rawVals);
+        }
+      } else if (scalarType->isDoubleTy()) {
+        std::vector<double> rawVals;
+        rawVals.reserve(numElems);
+        bool allOk = true;
+        for (auto *c : initVals) {
+          if (auto *cfp = llvm::dyn_cast<llvm::ConstantFP>(c)) {
+            rawVals.push_back(cfp->getValueAPF().convertToDouble());
+          } else {
+            allOk = false;
+            break;
+          }
+        }
+        if (allOk) {
+          return llvm::ConstantDataArray::get(*TheContext, rawVals);
+        }
+      } else if (scalarType->isFloatTy()) {
+        std::vector<float> rawVals;
+        rawVals.reserve(numElems);
+        bool allOk = true;
+        for (auto *c : initVals) {
+          if (auto *cfp = llvm::dyn_cast<llvm::ConstantFP>(c)) {
+            rawVals.push_back(cfp->getValueAPF().convertToFloat());
+          } else {
+            allOk = false;
+            break;
+          }
+        }
+        if (allOk) {
+          return llvm::ConstantDataArray::get(*TheContext, rawVals);
+        }
+      }
       return llvm::ConstantArray::get(arrayType, initVals);
     }
     if (llvm::Constant *scalar = getScalarConst(defaultNode)) {
+      if (scalarType->isIntegerTy(32)) {
+        if (auto *ci = llvm::dyn_cast<llvm::ConstantInt>(scalar)) {
+          std::vector<uint32_t> rawVals(numElems, static_cast<uint32_t>(ci->getZExtValue()));
+          return llvm::ConstantDataArray::get(*TheContext, rawVals);
+        }
+      } else if (scalarType->isIntegerTy(64)) {
+        if (auto *ci = llvm::dyn_cast<llvm::ConstantInt>(scalar)) {
+          std::vector<uint64_t> rawVals(numElems, ci->getZExtValue());
+          return llvm::ConstantDataArray::get(*TheContext, rawVals);
+        }
+      } else if (scalarType->isDoubleTy()) {
+        if (auto *cfp = llvm::dyn_cast<llvm::ConstantFP>(scalar)) {
+          std::vector<double> rawVals(numElems, cfp->getValueAPF().convertToDouble());
+          return llvm::ConstantDataArray::get(*TheContext, rawVals);
+        }
+      } else if (scalarType->isFloatTy()) {
+        if (auto *cfp = llvm::dyn_cast<llvm::ConstantFP>(scalar)) {
+          std::vector<float> rawVals(numElems, cfp->getValueAPF().convertToFloat());
+          return llvm::ConstantDataArray::get(*TheContext, rawVals);
+        }
+      }
       std::vector<llvm::Constant *> initVals(numElems, scalar);
       return llvm::ConstantArray::get(arrayType, initVals);
     }

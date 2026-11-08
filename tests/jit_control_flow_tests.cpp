@@ -274,11 +274,20 @@ TEST(JITControlFlowTest, ConstantSizedFromArraySize) {
   auto *table = strenv.mStrideEnv.TheModule->getGlobalVariable("Table", true);
   ASSERT_NE(table, nullptr);
   EXPECT_TRUE(table->isConstant());
-  auto *values =
-      llvm::dyn_cast<llvm::ConstantDataArray>(table->getInitializer());
-  ASSERT_NE(values, nullptr);
-  ASSERT_EQ(values->getNumElements(), 11u);
-  EXPECT_EQ(values->getElementAsInteger(10), 30u);
+  auto *init = table->getInitializer();
+  ASSERT_NE(init, nullptr);
+  auto *values = llvm::dyn_cast<llvm::ConstantDataArray>(init);
+  auto *ca = llvm::dyn_cast<llvm::ConstantArray>(init);
+  ASSERT_TRUE(values != nullptr || ca != nullptr);
+  if (values) {
+    ASSERT_EQ(values->getNumElements(), 11u);
+    EXPECT_EQ(values->getElementAsInteger(10), 30u);
+  } else {
+    ASSERT_EQ(ca->getNumOperands(), 11u);
+    auto *elem = llvm::dyn_cast<llvm::ConstantInt>(ca->getOperand(10));
+    ASSERT_NE(elem, nullptr);
+    EXPECT_EQ(elem->getZExtValue(), 30u);
+  }
 
   ASSERT_TRUE(strenv.compileInMemory());
   auto statePtr = strenv.allocateSharedState("RootDomain");
