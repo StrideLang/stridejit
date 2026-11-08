@@ -14,6 +14,7 @@
 #include "stride/stridegen/codeanalysis.hpp"
 #include "stride/stridegen/coderesolver.hpp"
 #include "stride/stridegen/codevalidator.hpp"
+#include "stride/stridegen/featureresolver.hpp"
 #include "stride/utils/astfunctions.h"
 #include "stride/utils/astquery.h"
 
@@ -312,12 +313,25 @@ static bool validateDataTypes(ASTNode tree) {
   return valid;
 }
 
-void StrideEnvironment::prepareTree(ASTNode tree) {
-  if (!tree || tree->getCompilerProperty("isPrepared")) {
-    return;
+bool StrideEnvironment::prepareTree(ASTNode tree) {
+  if (!tree) {
+    return false;
+  }
+  if (tree->getCompilerProperty("isPrepared")) {
+    return true;
   }
   tree->setCompilerProperty("isPrepared",
                             std::make_shared<ValueNode>(true, "", 0));
+
+  FeatureConfig featConfig{m_enabledFeatures, m_disabledFeatures,
+                           m_exclusiveChoices, m_useDefaultFeatures};
+  FeatureResolver featResolver(tree, featConfig);
+  if (!featResolver.process()) {
+    for (auto err : featResolver.getErrors()) {
+      LOG_ERROR() << err.getErrorText() << std::endl;
+    }
+    return false;
+  }
 
   auto systemNodes = ASTQuery::getSystemNodes(tree);
   if (systemNodes.size() == 0) {
@@ -332,6 +346,7 @@ void StrideEnvironment::prepareTree(ASTNode tree) {
                             : ASTFunctions::getDefaultStrideRoot(),
                         SystemConfiguration());
   resolver.process();
+  return true;
 }
 
 bool StrideEnvironment::generateAllRootFunctions(ASTNode root) {
@@ -402,7 +417,9 @@ bool StrideEnvironment::generateIr(std::string path, bool emitAllFunctions) {
       }
       return false;
     }
-    prepareTree(tree);
+    if (!prepareTree(tree)) {
+      return false;
+    }
   }
   return generateIr(tree, emitAllFunctions);
 }
@@ -439,7 +456,9 @@ bool StrideEnvironment::generateIr(const std::vector<std::string> &paths,
         }
         return false;
       }
-      prepareTree(tree);
+      if (!prepareTree(tree)) {
+        return false;
+      }
     }
     if (!validateDataTypes(tree)) {
       return false;
@@ -503,7 +522,9 @@ bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
     mStrideEnv.initializeDebugInfo(relFile, absFile);
   }
 
-  prepareTree(root);
+  if (!prepareTree(root)) {
+    return false;
+  }
   if (!validateDataTypes(root)) {
     return false;
   }
@@ -3395,4 +3416,161 @@ bool StrideEnvironment::emitCHeader(const std::string &outputPath,
   outFile << content;
   outFile.close();
   return true;
+}
+
+// -----------------------------------------------------------------------------
+// Feature Toggle API
+// -----------------------------------------------------------------------------
+
+llvm::Error StrideEnvironment::setFeatureChoice(const std::string &group,
+                                                const std::string &variant) {
+  if (group.empty() || variant.empty()) {
+    return llvm::createStringError(llvm::inconvertibleErrorCode(),
+                                   "Feature group or variant cannot be empty.");
+  }
+  auto it = m_exclusiveChoices.find(group);
+  if (it != m_exclusiveChoices.end()) {
+    if (it->second == variant) {
+      return llvm::Error::success();
+    }
+    return llvm::createStringError(
+        llvm::inconvertibleErrorCode(),
+        "Feature conflict: variant '%s' is already active for feature group '%s'. "
+        "Must call unsetFeatureChoice(\"%s\") first.",
+        it->second.c_str(), group.c_str(), group.c_str());
+  }
+  m_exclusiveChoices[group] = variant;
+  std::string qualified = group + "::" + variant;
+  m_enabledFeatures.insert(qualified);
+  m_enabledFeatures.insert(group);
+  m_disabledFeatures.erase(qualified);
+  m_disabledFeatures.erase(group);
+  return llvm::Error::success();
+}
+
+llvm::Error StrideEnvironment::enableFeature(const std::string &featureName) {
+  if (featureName.empty()) {
+    return llvm::createStringError(llvm::inconvertibleErrorCode(),
+                                   "Feature name cannot be empty.");
+  }
+  auto pos = featureName.find("::");
+  if (pos != std::string::npos) {
+    std::string group = featureName.substr(0, pos);
+    std::string variant = featureName.substr(pos + 2);
+    if (group.empty() || variant.empty() ||
+        variant.find("::") != std::string::npos) {
+      return llvm::createStringError(
+          llvm::inconvertibleErrorCode(),
+          "Invalid scoped feature '%s': expected 'Group::Variant'.",
+          featureName.c_str());
+    }
+    return setFeatureChoice(group, variant);
+  }
+  m_enabledFeatures.insert(featureName);
+  m_disabledFeatures.erase(featureName);
+  return llvm::Error::success();
+}
+
+void StrideEnvironment::unsetFeature(const std::string &featureName) {
+  auto pos = featureName.find("::");
+  if (pos != std::string::npos) {
+    std::string group = featureName.substr(0, pos);
+    std::string variant = featureName.substr(pos + 2);
+    auto it = m_exclusiveChoices.find(group);
+    if (it != m_exclusiveChoices.end() && it->second == variant) {
+      m_exclusiveChoices.erase(it);
+      m_enabledFeatures.erase(group);
+    }
+    m_enabledFeatures.erase(featureName);
+    m_disabledFeatures.erase(featureName);
+    return;
+  }
+  m_enabledFeatures.erase(featureName);
+  m_disabledFeatures.erase(featureName);
+}
+
+void StrideEnvironment::unsetFeatureChoice(const std::string &group) {
+  auto it = m_exclusiveChoices.find(group);
+  if (it != m_exclusiveChoices.end()) {
+    std::string qualified = group + "::" + it->second;
+    m_enabledFeatures.erase(qualified);
+    m_enabledFeatures.erase(group);
+    m_exclusiveChoices.erase(it);
+  }
+}
+
+void StrideEnvironment::disableFeature(const std::string &featureName) {
+  auto pos = featureName.find("::");
+  if (pos != std::string::npos) {
+    std::string group = featureName.substr(0, pos);
+    std::string variant = featureName.substr(pos + 2);
+    auto it = m_exclusiveChoices.find(group);
+    if (it != m_exclusiveChoices.end() && it->second == variant) {
+      m_exclusiveChoices.erase(it);
+      m_enabledFeatures.erase(group);
+    }
+    m_enabledFeatures.erase(featureName);
+    m_disabledFeatures.insert(featureName);
+    return;
+  }
+  m_enabledFeatures.erase(featureName);
+  m_disabledFeatures.insert(featureName);
+}
+
+llvm::Error
+StrideEnvironment::setFeatures(const std::vector<std::string> &features) {
+  for (const auto &f : features) {
+    if (f.empty())
+      continue;
+    if (f.rfind("--no-", 0) == 0) {
+      disableFeature(f.substr(5));
+    } else if (f.rfind("!", 0) == 0) {
+      disableFeature(f.substr(1));
+    } else {
+      if (auto err = enableFeature(f)) {
+        return err;
+      }
+    }
+  }
+  return llvm::Error::success();
+}
+
+void StrideEnvironment::clearFeatures() {
+  m_enabledFeatures.clear();
+  m_disabledFeatures.clear();
+  m_exclusiveChoices.clear();
+  m_useDefaultFeatures = true;
+}
+
+bool StrideEnvironment::isFeatureEnabled(const std::string &featureName) const {
+  if (m_disabledFeatures.count(featureName)) {
+    return false;
+  }
+  if (m_enabledFeatures.count(featureName)) {
+    return true;
+  }
+  auto pos = featureName.find("::");
+  if (pos != std::string::npos) {
+    std::string group = featureName.substr(0, pos);
+    std::string variant = featureName.substr(pos + 2);
+    auto it = m_exclusiveChoices.find(group);
+    if (it != m_exclusiveChoices.end()) {
+      return it->second == variant;
+    }
+  } else {
+    auto it = m_exclusiveChoices.find(featureName);
+    if (it != m_exclusiveChoices.end()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::string
+StrideEnvironment::getActiveVariant(const std::string &group) const {
+  auto it = m_exclusiveChoices.find(group);
+  if (it != m_exclusiveChoices.end()) {
+    return it->second;
+  }
+  return "";
 }
