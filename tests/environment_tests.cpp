@@ -483,7 +483,7 @@ TEST(StrideEnvironmentTest, FeatureToggleEndToEndASTPreparation) {
         if (d->getName() == "BufferSize") {
           count++;
           auto val = std::static_pointer_cast<ValueNode>(d->getPropertyValue("default"));
-          EXPECT_EQ(val->getValue(), 256.0);
+          EXPECT_EQ(val->toReal(), 256.0);
         }
       }
     }
@@ -503,7 +503,7 @@ TEST(StrideEnvironmentTest, FeatureToggleEndToEndASTPreparation) {
         if (d->getName() == "BufferSize") {
           count++;
           auto val = std::static_pointer_cast<ValueNode>(d->getPropertyValue("default"));
-          EXPECT_EQ(val->getValue(), 1024.0);
+          EXPECT_EQ(val->toReal(), 1024.0);
         }
       }
     }
@@ -543,7 +543,7 @@ TEST(StrideEnvironmentTest, FeatureToggleCompoundExpressionsEndToEnd) {
         if (d->getName() == "Rate") {
           count++;
           auto val = std::static_pointer_cast<ValueNode>(d->getPropertyValue("default"));
-          EXPECT_EQ(val->getValue(), 400.0);
+          EXPECT_EQ(val->toReal(), 400.0);
         }
       }
     }
@@ -564,7 +564,7 @@ TEST(StrideEnvironmentTest, FeatureToggleCompoundExpressionsEndToEnd) {
         if (d->getName() == "Rate") {
           count++;
           auto val = std::static_pointer_cast<ValueNode>(d->getPropertyValue("default"));
-          EXPECT_EQ(val->getValue(), 100.0);
+          EXPECT_EQ(val->toReal(), 100.0);
         }
       }
     }
@@ -583,7 +583,7 @@ TEST(StrideEnvironmentTest, FeatureToggleCompoundExpressionsEndToEnd) {
         if (d->getName() == "Rate") {
           count++;
           auto val = std::static_pointer_cast<ValueNode>(d->getPropertyValue("default"));
-          EXPECT_EQ(val->getValue(), 10.0);
+          EXPECT_EQ(val->toReal(), 10.0);
         }
       }
     }
