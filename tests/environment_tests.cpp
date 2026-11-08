@@ -373,6 +373,122 @@ TEST(StrideEnvironmentTest, CompiledObjectAndBitcodeCaching) {
             << std::endl;
 }
 
+TEST(StrideEnvironmentTest, MultiVersionJitBinaryCoexistence) {
+  strd::test::ScopedCacheEnable cacheGuard;
+
+  std::filesystem::path tempDir = cacheGuard.tempDir() / "multi_version_test";
+  std::filesystem::create_directories(tempDir);
+  std::filesystem::path sourceFile = tempDir / "Compute.stride";
+
+  {
+    std::ofstream out(sourceFile);
+    out << "_domainDefinition TestDomain {\n"
+        << "  framework: _JitFramework\n"
+        << "  rate: -1\n"
+        << "  outputs: [\n"
+        << "    signal Out { domain: TestDomain type: Real }\n"
+        << "  ]\n"
+        << "  domainFunctionCode: ''\n"
+        << "}\n\n"
+        << "20.0 + 22.0 >> Out;\n";
+  }
+
+  uint64_t hashV1 = 0xA1A1B2B2C3C3D4D4ULL;
+  uint64_t hashV2 = 0xE5E5F6F607071818ULL;
+
+  // 1. Compile under Compiler Version 1
+  CacheManager::TestAccess::setCompilerBuildHashOverride(hashV1);
+  {
+    strd::StrideEnvironment envV1;
+    ASSERT_TRUE(envV1.generateIr(sourceFile.generic_string()));
+    ASSERT_TRUE(envV1.compileInMemory());
+
+    auto sym = envV1.getFunction("TestDomain_process");
+    ASSERT_TRUE((bool)sym);
+    auto *func = sym->toPtr<void (*)(double *)>();
+    double outVal = 0.0;
+    func(&outVal);
+    EXPECT_DOUBLE_EQ(outVal, 42.0);
+  }
+
+  // Verify .obj file was written to V1's version partition
+  auto cacheDirV1 =
+      strd::CacheManager::instance().resolveCacheDirForSource(sourceFile);
+  EXPECT_NE(cacheDirV1.string().find("b_a1a1b2b2c3c3d4d4"), std::string::npos);
+  bool foundObjV1 = false;
+  for (const auto &entry : std::filesystem::directory_iterator(cacheDirV1)) {
+    if (entry.path().extension() == ".obj") {
+      foundObjV1 = true;
+    }
+  }
+  EXPECT_TRUE(foundObjV1);
+
+  // 2. Compile under Compiler Version 2
+  CacheManager::TestAccess::setCompilerBuildHashOverride(hashV2);
+  {
+    strd::StrideEnvironment envV2;
+    ASSERT_TRUE(envV2.generateIr(sourceFile.generic_string()));
+    ASSERT_TRUE(envV2.compileInMemory());
+
+    auto sym = envV2.getFunction("TestDomain_process");
+    ASSERT_TRUE((bool)sym);
+    auto *func = sym->toPtr<void (*)(double *)>();
+    double outVal = 0.0;
+    func(&outVal);
+    EXPECT_DOUBLE_EQ(outVal, 42.0);
+  }
+
+  // Verify .obj file was written to V2's version partition
+  auto cacheDirV2 =
+      strd::CacheManager::instance().resolveCacheDirForSource(sourceFile);
+  EXPECT_NE(cacheDirV2.string().find("b_e5e5f6f607071818"), std::string::npos);
+  bool foundObjV2 = false;
+  for (const auto &entry : std::filesystem::directory_iterator(cacheDirV2)) {
+    if (entry.path().extension() == ".obj") {
+      foundObjV2 = true;
+    }
+  }
+  EXPECT_TRUE(foundObjV2);
+
+  // 3. Switch BACK to Compiler Version 1: verify V1's cache is still intact and hits!
+  CacheManager::TestAccess::setCompilerBuildHashOverride(hashV1);
+  size_t hitsBefore = CacheManager::instance().getStats().hits;
+  {
+    strd::StrideEnvironment envV1Again;
+    ASSERT_TRUE(envV1Again.generateIr(sourceFile.generic_string()));
+    ASSERT_TRUE(envV1Again.compileInMemory());
+
+    auto sym = envV1Again.getFunction("TestDomain_process");
+    ASSERT_TRUE((bool)sym);
+    auto *func = sym->toPtr<void (*)(double *)>();
+    double outVal = 0.0;
+    func(&outVal);
+    EXPECT_DOUBLE_EQ(outVal, 42.0);
+  }
+  size_t hitsAfter = CacheManager::instance().getStats().hits;
+  EXPECT_GT(hitsAfter, hitsBefore);
+
+  // 4. Switch back to Compiler Version 2: verify V2's cache is also still intact and hits!
+  CacheManager::TestAccess::setCompilerBuildHashOverride(hashV2);
+  size_t hitsBeforeV2 = CacheManager::instance().getStats().hits;
+  {
+    strd::StrideEnvironment envV2Again;
+    ASSERT_TRUE(envV2Again.generateIr(sourceFile.generic_string()));
+    ASSERT_TRUE(envV2Again.compileInMemory());
+
+    auto sym = envV2Again.getFunction("TestDomain_process");
+    ASSERT_TRUE((bool)sym);
+    auto *func = sym->toPtr<void (*)(double *)>();
+    double outVal = 0.0;
+    func(&outVal);
+    EXPECT_DOUBLE_EQ(outVal, 42.0);
+  }
+  size_t hitsAfterV2 = CacheManager::instance().getStats().hits;
+  EXPECT_GT(hitsAfterV2, hitsBeforeV2);
+
+  CacheManager::TestAccess::clearCompilerBuildHashOverride();
+}
+
 // ============================================================================
 // Feature Toggle API Tests
 // ============================================================================

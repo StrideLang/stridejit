@@ -89,20 +89,42 @@ Cache keys and tags explicitly partition objects by:
 When the compiler binary itself changes (e.g., bug fixes to code generation, instruction lowering, or AST preprocessing), existing cached artifacts must be invalidated.
 
 - **Build Hash Embedding**: on every build, strideutils' `cmake/StrideCompilerVersion.cmake` writes `stride/utils/compilerversion.h` with the commits of the compiler's sources (strideutils, strideparser, stridegen and stridejit, or the work trees listed in `STRIDE_COMPILER_SOURCE_DIRS`). A commit in any of them invalidates the cache.
-- **Experimental Compiler**: a compiler built while any of those sources has uncommitted changes to tracked files is experimental. `CacheManager::isExperimentalCompiler()` is true and the cache is never read or written (`isEnabled()` is false whatever `setEnabled()` was given), because its output can differ from that of the commits that identify it. Tests of the cache use `CacheManager::setExperimentalCompilerOverride(0)`.
-- **Runtime Override**: `CacheManager::setCompilerBuildHashOverride(hash)` and `clearCompilerBuildHashOverride()` allow test suites and runtime environments to dynamically verify invalidation behavior.
+- **Experimental Compiler**: a compiler built while any of those sources has uncommitted changes to tracked files is experimental. `CacheManager::isExperimentalCompiler()` is true and the cache is never read or written (`isEnabled()` is false whatever `setEnabled()` was given), because its output can differ from that of the commits that identify it. Tests of the cache use `CacheManager::TestAccess::setExperimentalCompilerOverride(0)`.
+- **Runtime Override for Testing**: `CacheManager::TestAccess::setCompilerBuildHashOverride(hash)` and `CacheManager::TestAccess::clearCompilerBuildHashOverride()` allow test suites and test guards to dynamically verify invalidation and version coexistence without exposing mutation hooks to production code.
 - **Automatic Invalidation**: If the stored build hash does not match the active runtime build hash, the cache entry is treated as a miss and regenerated.
 
 ---
 
-## 4. Cache Storage & Directory Resolution
+## 4. Cache Storage, Partitioning & Lifecycle Management
 
+### Directory Resolution & Version Partitioning
 The cache directory is resolved dynamically by `CacheManager::resolveCacheDirForSource(sourcePath)`:
 
 1. **Explicit Directory Override**: Configured programmatically via `CacheManager::instance().setCacheDirectory(customPath)`.
 2. **Environment Variable Override**: If `STRIDE_CACHE_DIR` is set in the environment, all caches are redirected to that directory.
-3. **Local Project Cache (Default)**: A `.strdcache/` folder created adjacent to the source `.stride` file.
+3. **Local Project Cache (Default)**: A `.strdcache/` folder created adjacent to the source `.stride` file (or `%LOCALAPPDATA%/stride/.strdcache/<dirHash>` fallback).
    - Both `.strdcache/` and `*.scache` are excluded in `.gitignore` to prevent committing cached binaries.
+
+#### Multi-Version Partitioning
+To allow multiple installed Stride compiler versions to coexist without thrashing or overwriting each other's cached artifacts, all resolved cache directories are partitioned into version-specific subfolders:
+```
+<project>/.strdcache/
+├── b_1111222233334444/       <-- Compiler build hash partition A
+│   ├── Game.stride.gamereader_JIT.scache
+│   └── Game.stride.jit_obj_x86_64-pc-windows-msvc_O2.obj
+└── b_5555666677778888/       <-- Compiler build hash partition B
+    ├── Game.stride.gamereader_JIT.scache
+    └── Game.stride.jit_obj_x86_64-pc-windows-msvc_O2.obj
+```
+The partition folder name is obtained via `CacheManager::getCompilerVersionPartition()`.
+
+### Cache Maintenance & Automated Cleanup
+Cache growth is governed by `CacheManager::pruneCache(options, targetCacheDir)`:
+
+* **LRU Quota Eviction**: Enforces a soft disk budget (`maxSizeBytes`, default 1 GB). When cache files exceed the quota, the oldest files by access/modification time are pruned down to `pruneToFraction` (default 80%).
+* **Orphan Sweeping**: Detects cached entries whose corresponding `.stride` source file has been deleted or renamed from the workspace and deletes them.
+* **Stale Version Pruning**: Cleans up partition directories from older, uninstalled compiler builds when `pruneStaleVersions` is enabled.
+* **Inline Auto-Prune**: Can be triggered every $N$ cache writes via `STRIDE_AUTO_PRUNE=1` or `setAutoPruneEnabled(true)`.
 
 ---
 
@@ -117,7 +139,7 @@ Located in [`tests/testcacheguard.hpp`](file:///c:/Users/Andres/source/repos/boa
 - On every `OnTestStart` and `OnTestEnd`:
   - Enforces `CacheManager::instance().setEnabled(false)`.
   - Clears any custom cache directory overrides.
-  - Clears compiler build hash overrides.
+  - Clears compiler build hash overrides via `CacheManager::TestAccess::clearCompilerBuildHashOverride()`.
   - Resets cache statistics counters (`resetStats()`).
 
 ### `ScopedCacheEnable` (RAII)
