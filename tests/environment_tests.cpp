@@ -369,4 +369,223 @@ TEST(StrideEnvironmentTest, CompiledObjectAndBitcodeCaching) {
             << std::endl;
 }
 
+// ============================================================================
+// Feature Toggle API Tests
+// ============================================================================
+
+TEST(StrideEnvironmentTest, FeatureToggleStandalone) {
+  strd::StrideEnvironment env;
+  EXPECT_FALSE(env.isFeatureEnabled("AudioEffects"));
+
+  auto err = env.enableFeature("AudioEffects");
+  EXPECT_FALSE((bool)err);
+  EXPECT_TRUE(env.isFeatureEnabled("AudioEffects"));
+
+  env.disableFeature("AudioEffects");
+  EXPECT_FALSE(env.isFeatureEnabled("AudioEffects"));
+
+  env.unsetFeature("AudioEffects");
+  EXPECT_FALSE(env.isFeatureEnabled("AudioEffects"));
+}
+
+TEST(StrideEnvironmentTest, FeatureToggleExclusiveChoice) {
+  strd::StrideEnvironment env;
+
+  // Initially none enabled
+  EXPECT_FALSE(env.isFeatureEnabled("Pico"));
+  EXPECT_FALSE(env.isFeatureEnabled("Pico::RT2030"));
+  EXPECT_FALSE(env.isFeatureEnabled("Pico::RT2250"));
+  EXPECT_EQ(env.getActiveVariant("Pico"), "");
+
+  // Set RT2030
+  auto err = env.setFeatureChoice("Pico", "RT2030");
+  EXPECT_FALSE((bool)err);
+  EXPECT_TRUE(env.isFeatureEnabled("Pico"));
+  EXPECT_TRUE(env.isFeatureEnabled("Pico::RT2030"));
+  EXPECT_FALSE(env.isFeatureEnabled("Pico::RT2250"));
+  EXPECT_EQ(env.getActiveVariant("Pico"), "RT2030");
+
+  // Attempting to overwrite with RT2250 without unset must fail with error
+  auto conflictErr = env.setFeatureChoice("Pico", "RT2250");
+  EXPECT_TRUE((bool)conflictErr);
+  std::string errMsg = llvm::toString(std::move(conflictErr));
+  EXPECT_NE(errMsg.find("Feature conflict"), std::string::npos);
+  EXPECT_EQ(env.getActiveVariant("Pico"), "RT2030");
+
+  // Setting the same active variant is idempotent
+  auto sameErr = env.setFeatureChoice("Pico", "RT2030");
+  EXPECT_FALSE((bool)sameErr);
+
+  // After unsetting choice, setting RT2250 succeeds
+  env.unsetFeatureChoice("Pico");
+  EXPECT_FALSE(env.isFeatureEnabled("Pico"));
+  EXPECT_EQ(env.getActiveVariant("Pico"), "");
+
+  auto newErr = env.enableFeature("Pico::RT2250");
+  EXPECT_FALSE((bool)newErr);
+  EXPECT_TRUE(env.isFeatureEnabled("Pico"));
+  EXPECT_TRUE(env.isFeatureEnabled("Pico::RT2250"));
+  EXPECT_FALSE(env.isFeatureEnabled("Pico::RT2030"));
+  EXPECT_EQ(env.getActiveVariant("Pico"), "RT2250");
+}
+
+TEST(StrideEnvironmentTest, FeatureToggleBulkConfiguration) {
+  strd::StrideEnvironment env;
+
+  std::vector<std::string> featureList = {
+      "AudioEffects",
+      "Pico::RT2030",
+      "!Profiling"
+  };
+
+  auto err = env.setFeatures(featureList);
+  EXPECT_FALSE((bool)err);
+
+  EXPECT_TRUE(env.isFeatureEnabled("AudioEffects"));
+  EXPECT_TRUE(env.isFeatureEnabled("Pico"));
+  EXPECT_TRUE(env.isFeatureEnabled("Pico::RT2030"));
+  EXPECT_FALSE(env.isFeatureEnabled("Profiling"));
+
+  env.clearFeatures();
+  EXPECT_FALSE(env.isFeatureEnabled("AudioEffects"));
+  EXPECT_FALSE(env.isFeatureEnabled("Pico"));
+  EXPECT_EQ(env.getActiveVariant("Pico"), "");
+}
+
+TEST(StrideEnvironmentTest, FeatureToggleEndToEndASTPreparation) {
+  strd::StrideEnvironment env;
+  std::string source =
+      "feature Pico {\n"
+      "  variants: [ RT2030, RT2250 ]\n"
+      "  default: RT2030\n"
+      "}\n"
+      "@with(Pico::RT2030)\n"
+      "signal BufferSize { default: 256 }\n"
+      "@with(Pico::RT2250)\n"
+      "signal BufferSize { default: 1024 }\n";
+  auto tempPath = std::filesystem::temp_directory_path() / "test_features_jit.stride";
+  {
+    std::ofstream ofs(tempPath);
+    ofs << source;
+  }
+  {
+    auto tree = AST::parseFile(tempPath.string().c_str());
+    ASSERT_TRUE(tree != nullptr);
+    ASSERT_TRUE(env.prepareTree(tree));
+    int count = 0;
+    for (const auto &c : tree->getChildren()) {
+      if (c && c->getNodeType() == AST::Declaration) {
+        auto d = std::static_pointer_cast<DeclarationNode>(c);
+        if (d->getName() == "BufferSize") {
+          count++;
+          auto val = std::static_pointer_cast<ValueNode>(d->getPropertyValue("default"));
+          EXPECT_EQ(val->getValue(), 256.0);
+        }
+      }
+    }
+    EXPECT_EQ(count, 1);
+  }
+  {
+    env.clearFeatures();
+    auto err = env.enableFeature("Pico::RT2250");
+    ASSERT_FALSE((bool)err);
+    auto tree = AST::parseFile(tempPath.string().c_str());
+    ASSERT_TRUE(tree != nullptr);
+    ASSERT_TRUE(env.prepareTree(tree));
+    int count = 0;
+    for (const auto &c : tree->getChildren()) {
+      if (c && c->getNodeType() == AST::Declaration) {
+        auto d = std::static_pointer_cast<DeclarationNode>(c);
+        if (d->getName() == "BufferSize") {
+          count++;
+          auto val = std::static_pointer_cast<ValueNode>(d->getPropertyValue("default"));
+          EXPECT_EQ(val->getValue(), 1024.0);
+        }
+      }
+    }
+    EXPECT_EQ(count, 1);
+  }
+  std::filesystem::remove(tempPath);
+}
+
+TEST(StrideEnvironmentTest, FeatureToggleCompoundExpressionsEndToEnd) {
+  strd::StrideEnvironment env;
+  std::string source =
+      "feature HardwareSPI\n"
+      "feature FastClock\n"
+      "@with(HardwareSPI && !FastClock)\n"
+      "signal Rate { default: 100 }\n"
+      "@with(HardwareSPI && FastClock)\n"
+      "signal Rate { default: 400 }\n"
+      "@with(!HardwareSPI)\n"
+      "signal Rate { default: 10 }\n";
+  auto tempPath = std::filesystem::temp_directory_path() / "test_expr_jit.stride";
+  {
+    std::ofstream ofs(tempPath);
+    ofs << source;
+  }
+  // 1. HardwareSPI && FastClock => 400
+  {
+    env.clearFeatures();
+    auto err = env.setFeatures({"HardwareSPI", "FastClock"});
+    ASSERT_FALSE((bool)err);
+    auto tree = AST::parseFile(tempPath.string().c_str());
+    ASSERT_TRUE(tree != nullptr);
+    ASSERT_TRUE(env.prepareTree(tree));
+    int count = 0;
+    for (const auto &c : tree->getChildren()) {
+      if (c && c->getNodeType() == AST::Declaration) {
+        auto d = std::static_pointer_cast<DeclarationNode>(c);
+        if (d->getName() == "Rate") {
+          count++;
+          auto val = std::static_pointer_cast<ValueNode>(d->getPropertyValue("default"));
+          EXPECT_EQ(val->getValue(), 400.0);
+        }
+      }
+    }
+    EXPECT_EQ(count, 1);
+  }
+  // 2. HardwareSPI only => 100
+  {
+    env.clearFeatures();
+    auto err = env.setFeatures({"HardwareSPI"});
+    ASSERT_FALSE((bool)err);
+    auto tree = AST::parseFile(tempPath.string().c_str());
+    ASSERT_TRUE(tree != nullptr);
+    ASSERT_TRUE(env.prepareTree(tree));
+    int count = 0;
+    for (const auto &c : tree->getChildren()) {
+      if (c && c->getNodeType() == AST::Declaration) {
+        auto d = std::static_pointer_cast<DeclarationNode>(c);
+        if (d->getName() == "Rate") {
+          count++;
+          auto val = std::static_pointer_cast<ValueNode>(d->getPropertyValue("default"));
+          EXPECT_EQ(val->getValue(), 100.0);
+        }
+      }
+    }
+    EXPECT_EQ(count, 1);
+  }
+  // 3. No features => 10
+  {
+    env.clearFeatures();
+    auto tree = AST::parseFile(tempPath.string().c_str());
+    ASSERT_TRUE(tree != nullptr);
+    ASSERT_TRUE(env.prepareTree(tree));
+    int count = 0;
+    for (const auto &c : tree->getChildren()) {
+      if (c && c->getNodeType() == AST::Declaration) {
+        auto d = std::static_pointer_cast<DeclarationNode>(c);
+        if (d->getName() == "Rate") {
+          count++;
+          auto val = std::static_pointer_cast<ValueNode>(d->getPropertyValue("default"));
+          EXPECT_EQ(val->getValue(), 10.0);
+        }
+      }
+    }
+    EXPECT_EQ(count, 1);
+  }
+  std::filesystem::remove(tempPath);
+}
+
 } // namespace

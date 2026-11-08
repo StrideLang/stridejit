@@ -196,6 +196,31 @@ public:
   }
   DebugInfoLevel getDebugInfoLevel() const { return m_debugInfoLevel; }
 
+  // Feature Toggle API
+  llvm::Error enableFeature(const std::string &featureName);
+  void unsetFeature(const std::string &featureName);
+  void unsetFeatureChoice(const std::string &group);
+  void disableFeature(const std::string &featureName);
+  llvm::Error setFeatureChoice(const std::string &group,
+                               const std::string &variant);
+  llvm::Error setFeatures(const std::vector<std::string> &features);
+  void clearFeatures();
+
+  void setUseDefaultFeatures(bool enable) { m_useDefaultFeatures = enable; }
+  bool usesDefaultFeatures() const { return m_useDefaultFeatures; }
+
+  bool isFeatureEnabled(const std::string &featureName) const;
+  std::string getActiveVariant(const std::string &group) const;
+  const std::set<std::string> &getEnabledFeatures() const {
+    return m_enabledFeatures;
+  }
+  const std::set<std::string> &getDisabledFeatures() const {
+    return m_disabledFeatures;
+  }
+  const std::map<std::string, std::string> &getExclusiveChoices() const {
+    return m_exclusiveChoices;
+  }
+
   void setOptimizationLevel(int level) {
     m_optimizationLevel = level;
     m_optimizeCode = (level > 0);
@@ -313,7 +338,7 @@ public:
   int32_t stepTick(const std::string &domainOrFuncName, void *statePtr = nullptr,
                    const std::vector<void *> &inOutArgs = {});
 
-  void prepareTree(ASTNode tree);
+  bool prepareTree(ASTNode tree);
 
   // JIT
   void initializeJIT();
@@ -364,6 +389,12 @@ private:
   BuildType m_buildType{BuildType::Release};
   DebugInfoLevel m_debugInfoLevel{DebugInfoLevel::None};
   int m_optimizationLevel{2};
+
+  // Features
+  std::set<std::string> m_enabledFeatures;
+  std::set<std::string> m_disabledFeatures;
+  std::map<std::string, std::string> m_exclusiveChoices;
+  bool m_useDefaultFeatures{true};
 };
 
 template <typename T> T *StrideEnvironment::getGlobal(std::string varName) {
