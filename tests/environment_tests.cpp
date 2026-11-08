@@ -5,6 +5,8 @@
 #include <iostream>
 
 #include "stride/parser/ast.h"
+#include "stride/parser/declarationnode.h"
+#include "stride/parser/valuenode.h"
 #include "stride/stridejit/numberexprast.hpp"
 #include "stride/stridejit/stridecompiler.hpp"
 #include "stride/stridejit/strideenvironment.hpp"
@@ -15,6 +17,8 @@
 #include "llvm/Support/TargetSelect.h"
 
 namespace {
+
+using namespace strd;
 
 // ============================================================================
 // StrideEnvironment Initialization Tests
