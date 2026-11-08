@@ -53,6 +53,7 @@ if (STRIDEJIT_BUILD_TESTS)
     set_target_properties(stridejit_tests PROPERTIES
       CXX_STANDARD 17
       CXX_STANDARD_REQUIRED ON
+      ENABLE_EXPORTS ON
     )
     add_test(NAME stridejit_tests COMMAND stridejit_tests)
 

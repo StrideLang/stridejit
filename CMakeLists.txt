@@ -238,6 +238,7 @@ if (STRIDEJIT_BUILD_TESTING)
   target_link_libraries(StrideTesting PUBLIC StrideParser StrideUtils StrideJit gtest)
 
   add_executable(stridetest src/testing/main.cpp)
+  set_target_properties(stridetest PROPERTIES ENABLE_EXPORTS ON)
   target_include_directories(stridetest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(stridetest PRIVATE StrideTesting StrideJit StrideParser StrideUtils)
 endif()
