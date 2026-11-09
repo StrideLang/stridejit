@@ -344,7 +344,8 @@ bool StrideEnvironment::prepareTree(ASTNode tree) {
                         !m_strideRoot.empty()
                             ? m_strideRoot
                             : ASTFunctions::getDefaultStrideRoot(),
-                        SystemConfiguration());
+                        SystemConfiguration(),
+                        featConfig);
   resolver.process();
   return true;
 }
