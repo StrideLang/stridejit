@@ -10,6 +10,7 @@
 #include "stride/stridejit/numberexprast.hpp"
 #include "stride/stridejit/stridecompiler.hpp"
 #include "stride/stridejit/strideenvironment.hpp"
+#include "stride/stridegen/codevalidator.hpp"
 #include "stride/utils/astfunctions.h"
 #include "stride/utils/cachemanager.h"
 #include "testcacheguard.hpp"
@@ -706,6 +707,99 @@ TEST(StrideEnvironmentTest, FeatureToggleCompoundExpressionsEndToEnd) {
     EXPECT_EQ(count, 1);
   }
   std::filesystem::remove(tempPath);
+}
+
+// ============================================================================
+// Multi-Domain Tests
+// ============================================================================
+
+TEST(MultiDomainTest, DisjointDomainsCrossAccessRejected) {
+  strd::StrideEnvironment env;
+  auto tree = AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "domain_cross_disjoint.stride");
+  ASSERT_TRUE(tree != nullptr);
+
+  CodeValidator validator(tree);
+  auto errors = validator.getErrors();
+  bool foundInvalidAccess = false;
+  for (const auto &err : errors) {
+    if (err.type == LangError::InvalidCrossDomainAccess) {
+      foundInvalidAccess = true;
+      EXPECT_EQ(err.errorTokens.size(), 3);
+      if (err.errorTokens.size() >= 3) {
+        EXPECT_EQ(err.errorTokens[0], "SigA");
+        EXPECT_EQ(err.errorTokens[1], "DomA");
+        EXPECT_EQ(err.errorTokens[2], "DomB");
+      }
+    }
+  }
+  EXPECT_TRUE(foundInvalidAccess);
+}
+
+TEST(MultiDomainTest, CrossDomainSignalReadSharedMemory) {
+  strd::StrideEnvironment env;
+  auto tree = AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR "domain_cross_read.stride");
+  ASSERT_TRUE(tree != nullptr);
+
+  // Validate that cross-domain read with common ancestor is accepted
+  CodeValidator validator(tree);
+  for (const auto &err : validator.getErrors()) {
+    EXPECT_NE(err.type, LangError::InvalidCrossDomainAccess);
+  }
+
+  // Generate IR and compile
+  ASSERT_TRUE(env.generateIr(tree));
+  ASSERT_TRUE(env.compileInMemory());
+
+  // Global shared memory pointers
+  auto *produceVal = env.getGlobal<int32_t>("ProduceVal");
+  auto *consumeVal = env.getGlobal<int32_t>("ConsumeVal");
+  ASSERT_TRUE(produceVal != nullptr);
+  ASSERT_TRUE(consumeVal != nullptr);
+
+  // Initialize domains
+  auto initProduceSym = env.getFunction("ProduceDomain_init");
+  auto initConsumeSym = env.getFunction("ConsumeDomain_init");
+  ASSERT_TRUE((bool)initProduceSym);
+  ASSERT_TRUE((bool)initConsumeSym);
+  auto *initProduce = initProduceSym->toPtr<void (*)()>();
+  auto *initConsume = initConsumeSym->toPtr<void (*)()>();
+  initProduce();
+  initConsume();
+
+  EXPECT_EQ(*produceVal, 10);
+  EXPECT_EQ(*consumeVal, 0);
+
+  // Get process functions
+  auto procProduceSym = env.getFunction("ProduceDomain_process");
+  auto procConsumeSym = env.getFunction("ConsumeDomain_process");
+  ASSERT_TRUE((bool)procProduceSym);
+  ASSERT_TRUE((bool)procConsumeSym);
+  auto *procProduce = procProduceSym->toPtr<void (*)()>();
+  auto *procConsume = procConsumeSym->toPtr<void (*)()>();
+
+  // Process ConsumeDomain: should read ProduceVal (10) + 5 => ConsumeVal becomes 15
+  procConsume();
+  EXPECT_EQ(*consumeVal, 15);
+  EXPECT_EQ(*produceVal, 10);
+
+  // Process ProduceDomain: ProduceVal + 1 => ProduceVal becomes 11
+  procProduce();
+  EXPECT_EQ(*produceVal, 11);
+  EXPECT_EQ(*consumeVal, 15);
+
+  // Process ConsumeDomain again: reads updated ProduceVal (11) + 5 => ConsumeVal becomes 16
+  procConsume();
+  EXPECT_EQ(*consumeVal, 16);
+  EXPECT_EQ(*produceVal, 11);
+
+  // Process ProduceDomain two more times: 11 -> 12 -> 13
+  procProduce();
+  procProduce();
+  EXPECT_EQ(*produceVal, 13);
+
+  // Process ConsumeDomain: 13 + 5 => 18
+  procConsume();
+  EXPECT_EQ(*consumeVal, 18);
 }
 
 } // namespace

@@ -1458,8 +1458,12 @@ StrideEnvironment::getStateVar(const void *statePtr, const std::string &varName,
   size_t arrayIdx = index.has_value() ? static_cast<size_t>(index.value()) : 0;
 
   const auto *info = findStructInfo(mStrideEnv, domainName);
-  if (!info || !info->structType)
+  if (!info || !info->structType) {
+    if (auto *ptr = const_cast<StrideEnvironment *>(this)->getGlobal<T>(varName)) {
+      return *ptr;
+    }
     return std::nullopt;
+  }
 
   unsigned fieldIdx = 0;
   auto it = info->varIndices.find(baseName);
@@ -1478,8 +1482,12 @@ StrideEnvironment::getStateVar(const void *statePtr, const std::string &varName,
           break;
         }
       }
-      if (!found)
+      if (!found) {
+        if (auto *ptr = const_cast<StrideEnvironment *>(this)->getGlobal<T>(varName)) {
+          return *ptr;
+        }
         return std::nullopt;
+      }
     }
   }
 

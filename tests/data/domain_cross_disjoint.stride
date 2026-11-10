@@ -1,0 +1,7 @@
+_domainDefinition DomA { framework: _JitFramework rate: none }
+_domainDefinition DomB { framework: _JitFramework rate: none }
+
+signal SigA { domain: DomA default: 10 type: Int }
+signal SigB { domain: DomB default: 0 type: Int }
+
+SigA + 5 >> SigB;

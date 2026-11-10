@@ -1202,7 +1202,30 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
                 belongsToDomain = true;
               }
 
-              if (belongsToDomain) {
+              bool isSharedMemorySignal = false;
+              if (domainProp && domainProp->getNodeType() == AST::Entity) {
+                std::string dName = ASTQuery::getNodeName(domainProp);
+                if (!CodeAnalysis::getParentDomain(dName, tree).empty()) {
+                  isSharedMemorySignal = true;
+                } else {
+                  for (const auto &n : tree->getChildren()) {
+                    if (n->getNodeType() == AST::Declaration) {
+                      auto otherDecl =
+                          std::static_pointer_cast<DeclarationNode>(n);
+                      if (otherDecl->getEntityType() == "_domainDefinition" ||
+                          otherDecl->getEntityType() == "gameDefinition") {
+                        if (CodeAnalysis::getParentDomain(otherDecl->getName(),
+                                                          tree) == dName) {
+                          isSharedMemorySignal = true;
+                          break;
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+
+              if (belongsToDomain && !isSharedMemorySignal) {
                 registerVarDeclAsDynamicField(varDecl);
               }
             }
@@ -2283,6 +2306,29 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       }
       if (domainName.empty()) {
         domainName = "RootDomain";
+      }
+    }
+    if (isTopLevelDomainStream && prev == nullptr && next != nullptr) {
+      std::string nextDomain = CodeAnalysis::getNodeDomainName(next, scope, tree);
+      if (nextDomain.empty()) {
+        StreamNodeIterator lookahead(stream);
+        while (auto n = lookahead.next()) {
+          if (n == next) {
+            break;
+          }
+        }
+        while (auto downstream = lookahead.next()) {
+          auto d = CodeAnalysis::getNodeDomainName(downstream, scope, tree);
+          if (!d.empty()) {
+            nextDomain = d;
+            break;
+          }
+        }
+      }
+      if (!nextDomain.empty() && !domainName.empty() && domainName != nextDomain) {
+        if (!CodeAnalysis::getCommonAncestorDomain(domainName, nextDomain, tree).empty()) {
+          domainName = nextDomain;
+        }
       }
     }
     // A stream inside a module, loop or reaction runs in its caller's

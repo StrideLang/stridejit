@@ -1,0 +1,9 @@
+_domainDefinition RootDomain { framework: _JitFramework rate: none }
+_domainDefinition ProduceDomain { framework: _JitFramework rate: none parentDomain: RootDomain }
+_domainDefinition ConsumeDomain { framework: _JitFramework rate: none parentDomain: RootDomain }
+
+signal ProduceVal { domain: ProduceDomain default: 10 type: Int }
+signal ConsumeVal { domain: ConsumeDomain default: 0 type: Int }
+
+ProduceVal + 5 >> ConsumeVal;
+ProduceVal + 1 >> ProduceVal;
