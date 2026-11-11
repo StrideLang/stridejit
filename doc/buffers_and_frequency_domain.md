@@ -194,7 +194,7 @@ constant HannCoeffs[1024] { type: Real ... }
 InBuffer * HannCoeffs >> Windowed;
 ```
 
-Vectorization is a **general** codegen property of array/bundle arithmetic (`+ - * /`), lowered to SIMD (AVX/NEON/MVE) or CMSIS-DSP. It is not specific to windows.
+Vectorization is a **general** codegen property of array arithmetic (`+ - * /`), lowered to SIMD (AVX/NEON/MVE) or CMSIS-DSP. It is not specific to windows.
 
 **Window tables (decided).** Window shapes are written as **compile-time generator functions** (`Hann(N)`, `Hamming(N)`, `Blackman(N)`), which the compiler evaluates into **precomputed read-only constant arrays**. Source stays short and size-generic (`Hann(InBuffer.frameSize)`). The emitted code is the same as a hand-written constant table: no runtime computation, foldable lookups, and placement in flash/ROM on embedded targets. Explicit constant arrays stay supported for custom windows.
 
@@ -331,7 +331,7 @@ The view is in bounds and in order on every tick, not only when `ready` is on.
 - [ ] Generic vectorized array arithmetic in codegen (verify LLVM vectorizes, or emit vector IR explicitly).
 - [ ] Window generators (`Hann(N)`, …) evaluated at compile time into constant arrays (2.7).
 - [ ] `FFT` / `IFFT` reactions that read size and type from the buffer property; host backend (e.g. KissFFT) and CMSIS-DSP backend via `platformModule`.
-- [ ] Spectral representation (polar bundles first; `Complex` type later).
+- [ ] Spectral representation (polar arrays first; `Complex` type later).
 
 ### Phase 4: Platform and toolchain
 - [ ] `system ... { bind <Buffer>: {...} }` syntax and plumbing (section, alignment, DMA channel, cache policy, `mirror: off`).

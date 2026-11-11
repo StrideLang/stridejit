@@ -31,7 +31,7 @@ This document outlines critical architectural patterns, code generation invarian
   - Only signals/switches declared at the root/domain level outside of `inputs`/`outputs` are globals accessible via `strenv.getGlobal<T>("Name")`.
   - A `constant` with a `value` is a read-only internal global. A `constant` without one (`constant Table[8] { type: Int }`) is a **writable** internal global, written once at run time; stridegen's `CodeValidator::findConstantRewrites` rejects a second write.
   - A standalone function called from C++ (an action, no caller instance) takes no parameters for module globals; its body reads and writes them directly. Called from another function, the caller still passes them in.
-- **Output port sizes**: `signal Output[OutputPort.size]` in a loop or module takes the size of what the call writes to (the call's `outputEntity`), as `InputPort.size` takes the size of what feeds it. An array is written in place; a slice or bundle (`>> T[2:4]`) goes through a temporary array copied to each member after the call (`CallExprAST::codegen`, `scatterOuts`). Array outputs are never prefilled with their `default`. A sized port with nothing to size it is an `UnsizedPort` error from stridegen's `CodeValidator::findUnsizedPorts`. Fixtures: `loop_output_size.stride`, `loop_output_cases.stride`, `loop_output_chained.stride`, `loop_output_unwritten.stride`, `loop_input_unfed.stride`, `constant_fill.stride`. The language-level description is strideroot's `library/1.0/doc/CodeGenerators.md`.
+- **Output port sizes**: `signal Output[OutputPort.size]` in a loop or module takes the size of what the call writes to (the call's `outputEntity`), as `InputPort.size` takes the size of what feeds it. An array is written in place; a slice (`>> T[2:4]`) goes through a temporary array copied to each member after the call (`CallExprAST::codegen`, `scatterOuts`). Array outputs are never prefilled with their `default`. A sized port with nothing to size it is an `UnsizedPort` error from stridegen's `CodeValidator::findUnsizedPorts`. Fixtures: `loop_output_size.stride`, `loop_output_cases.stride`, `loop_output_chained.stride`, `loop_output_unwritten.stride`, `loop_input_unfed.stride`, `constant_fill.stride`. The language-level description is strideroot's `library/1.0/doc/CodeGenerators.md`.
 
 ---
 
@@ -58,9 +58,9 @@ This document outlines critical architectural patterns, code generation invarian
 
 ---
 
-## 4. Bundles & Dynamic Variable Indexing
+## 4. Arrays & Dynamic Variable Indexing
 
-- When indexing bundles dynamically using a variable (`Bundle[Index]`):
+- When indexing arrays dynamically using a variable (`Array[Index]`):
   - Check whether the index `llvm::Value*` is a pointer.
   - If it is an alloca/stack pointer, emit `builder->CreateLoad` to obtain the integer scalar *before* passing it to `builder->CreateGEP`.
   - Passing an un-dereferenced pointer directly to GEP produces LLVM verification failures or C++ compiler errors (`illegal indirection`).
@@ -108,10 +108,10 @@ This document outlines critical architectural patterns, code generation invarian
 
 ---
 
-## 9. Bundled Arguments in Module & Loop Calls
+## 9. Array Arguments in Module & Loop Calls
 
 - **Offset by `outArgCount`**:
-  - When bundling multiple input arguments into an intermediate array (`CallArgs.size() > outArgCount + 1`), the inputs in `CallArgs` start at index `outArgCount + i`. Never index directly from `0`, which points to output arguments.
+  - When grouping multiple input arguments into an intermediate array (`CallArgs.size() > outArgCount + 1`), the inputs in `CallArgs` start at index `outArgCount + i`. Never index directly from `0`, which points to output arguments.
 - **Pass Alloca Pointer Directly**:
   - Pass the alloca pointer itself (`arrayAlloc`) directly as the argument to the callee. Never call `builder->CreateLoad` on the buffer memory.
 - **Single-Offset GEP**:
