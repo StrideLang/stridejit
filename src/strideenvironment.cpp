@@ -23,6 +23,7 @@
 #include "stride/stridejit/statemachine.hpp"
 #include "stride/stridejit/strideenvironment.hpp"
 #include "stride/stridejit/stridegenerator.hpp"
+#include "stride/stridejit/strideruntime_random.h"
 #include "stride/stridejit/strideruntime_string.h"
 
 // llvm
@@ -2390,6 +2391,7 @@ bool StrideEnvironment::compileInMemory() {
   regSym("cos", static_cast<double (*)(double)>(&std::cos));
   regSym("tan", static_cast<double (*)(double)>(&std::tan));
   regSym("__stride_Greater_d_dd", &__stride_Greater_d_dd);
+  regSym("__stride_jit_random_int", &__stride_jit_random_int);
   regSym("__stride_string_substring", &__stride_string_substring);
   regSym("__stride_string_trim", &__stride_string_trim);
   regSym("__stride_string_trim_left", &__stride_string_trim_left);

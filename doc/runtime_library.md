@@ -179,3 +179,13 @@ For host C++ callers and unit tests that prefer passing `StrideStringView` by va
 - `StrideStringView __stride_string_repeat(StrideStringView str, int64_t count)`
 - `void __stride_string_print(StrideStringView str)`
 - `void __stride_string_println(StrideStringView str)`
+
+## 5. Random Numbers
+
+Header: `include/stride/stridejit/strideruntime_random.h`. Used by `RandomInt` and `RandomChance` (strideroot `library/1.0/Random.stride`, through the JIT platform module `_RandomInt` in `frameworks/JIT/1.0/platformlib/Random.stride`).
+
+- `int32_t __stride_jit_random_int(int32_t min, int32_t max)`: a number from `min` to `max`, both included (swapped if given the wrong way round). Unbiased, and the same on every platform: it does not use `std::uniform_int_distribution`.
+- `void stride_random_seed(uint64_t seed)`: seeds the built-in generator (splitmix64).
+- `void stride_random_set_source(const StrideRandomSource *source)`: hands every call to the host instead, or back to the built-in generator with `nullptr`. A host that saves and restores its state (a game engine taking snapshots) keeps the generator itself; libgame installs its `Game`'s generator this way.
+
+The platform module is not `pure`, so a call is never folded or run while compiling.
