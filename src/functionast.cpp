@@ -551,7 +551,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
         loopDecl = std::static_pointer_cast<DeclarationNode>(funcInstance);
       } else if (state.m_tree) {
         loopDecl = ASTQuery::findDeclarationByName(P.getName(), {},
-                                                   state.m_tree);
+                                                   state.m_tree, {});
       }
       auto blocksNode = loopDecl ? loopDecl->getPropertyValue("entities")
                                  : nullptr;

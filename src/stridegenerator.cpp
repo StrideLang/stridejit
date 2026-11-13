@@ -1669,8 +1669,7 @@ bool StrideGenerator::processPreviousFunction(
     std::unique_ptr<ExprAST> currentExpr,
     StrideGenerator::GeneratedCode &generated, std::string domainName,
     const ScopeStack &scope, ASTNode tree, StrideCompiler &state) {
-  auto funcDecl = ASTQuery::findDeclarationByName(
-      ASTQuery::getNodeName(prevFuncCall), scope, tree);
+  auto funcDecl = ASTQuery::findDeclarationForNode(prevFuncCall, scope, tree);
   if (!funcDecl) {
     LOG_ERROR() << "ERROR: no function declaration for "
                 << ASTQuery::getNodeName(prevFuncCall) << std::endl;
@@ -1848,8 +1847,7 @@ void StrideGenerator::collectInputArgs(
               if (auto blocks = funcDecl->getPropertyValue("entities")) {
                 localScope.push_back({funcDecl, blocks->getChildren()});
               }
-              auto inDecl = ASTQuery::findDeclarationByName(
-                  ASTQuery::getNodeName(inBlock), localScope, tree);
+              auto inDecl = ASTQuery::findDeclarationForNode(inBlock, localScope, tree);
               if (inDecl) {
                 inArgType =
                     state.getLLVMTypeForCodegenEntity(inDecl, funcDecl, func);
@@ -1873,8 +1871,7 @@ void StrideGenerator::collectInputArgs(
         }
         // 4. Check function prototype
         if (!inArgType) {
-          auto prevDecls = ASTQuery::findAllDeclarations(
-              ASTQuery::getNodeName(prevFunc), scope, tree);
+          auto prevDecls = ASTQuery::findAllDeclarationsForNode(prevFunc, scope, tree);
           auto prevDecl = CodeAnalysis::matchDefinitionToTypes(
               prevDecls, prevFunc, scope, tree);
           if (prevDecl) {
@@ -1946,8 +1943,7 @@ void StrideGenerator::collectInputArgs(
             args.MainIn.argTypes.push_back(state.typesMap[DataTypes::Real]);
           }
         } else if (currentChildNode) {
-          auto elemDecl = ASTQuery::findDeclarationByName(
-              ASTQuery::getNodeName(currentChildNode), scope, tree);
+          auto elemDecl = ASTQuery::findDeclarationForNode(currentChildNode, scope, tree);
 
           if (elemDecl) {
             args.MainIn.argTypes.push_back(
@@ -2075,8 +2071,7 @@ void StrideGenerator::collectPropertyArgs(
     for (const auto &propNode : props) {
       auto value = propNode->getValue();
       if (value && value->getNodeType() == AST::Entity) {
-        auto valueDecl = ASTQuery::findDeclarationByName(
-            ASTQuery::getNodeName(value), scope, tree);
+        auto valueDecl = ASTQuery::findDeclarationForNode(value, scope, tree);
         if (valueDecl && valueDecl->getEntityType() == "buffer") {
           // Zero-copy: the reaction reads the current frame in place
           auto spec = BufferSpec::fromDeclaration(valueDecl, tree);
@@ -2102,8 +2097,7 @@ void StrideGenerator::collectPropertyArgs(
           propType = state.typesMap[DataTypes::String];
         } else if (value->getNodeType() == AST::Entity ||
                    value->getNodeType() == AST::Array) {
-          auto valueDecl = ASTQuery::findDeclarationByName(
-              ASTQuery::getNodeName(value), scope, tree);
+          auto valueDecl = ASTQuery::findDeclarationForNode(value, scope, tree);
           if (valueDecl) {
             propType =
                 state.getLLVMTypeForCodegenEntity(valueDecl, funcDecl, func);
@@ -2141,8 +2135,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         isLeftSwitch = true;
       }
     } else {
-      leftDecl = ASTQuery::findDeclarationByName(
-          ASTQuery::getNodeName(leftNode), scope, tree);
+      leftDecl = ASTQuery::findDeclarationForNode(leftNode, scope, tree);
       if (leftDecl && (leftDecl->getEntityType() == "switch" ||
                        leftDecl->getEntityType() == "trigger")) {
         isLeftSwitch = true;
@@ -2154,8 +2147,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
     while (auto n = checkIt.next()) {
       if (n->getNodeType() == AST::Function) {
         auto funcNode = std::static_pointer_cast<FunctionNode>(n);
-        auto funcDecls = ASTQuery::findAllDeclarations(
-            ASTQuery::getNodeName(funcNode), scope, tree);
+        auto funcDecls = ASTQuery::findAllDeclarationsForNode(funcNode, scope, tree);
         decltype(funcDecls) callableDecls;
         for (const auto &d : funcDecls) {
           if (isCallable(d, scope, tree)) {
@@ -2365,15 +2357,13 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       // -------------------------------------------------------------
       // Entity / Array
       auto entityExpr = createExpr(current);
-      auto decl = ASTQuery::findDeclarationByName(
-          ASTQuery::getNodeName(current), scope, tree);
+      auto decl = ASTQuery::findDeclarationForNode(current, scope, tree);
       if (current->getNodeType() == AST::Array) {
         auto indexNode = std::static_pointer_cast<ArrayNode>(current)->index();
         if (indexNode->getNodeType() == AST::List) {
           for (const auto &elem : indexNode->getChildren()) {
             if (elem->getNodeType() == AST::Entity) {
-              auto indexDecl = ASTQuery::findDeclarationByName(
-                  ASTQuery::getNodeName(elem), scope, tree);
+              auto indexDecl = ASTQuery::findDeclarationForNode(elem, scope, tree);
               if (indexDecl) {
                 generated[domainName].readVariables.push_back(elem);
               } else {
@@ -2507,7 +2497,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       }
       auto func = std::static_pointer_cast<FunctionNode>(current);
       auto decls =
-          ASTQuery::findAllDeclarations(ASTQuery::getNodeName(func), scope, tree);
+          ASTQuery::findAllDeclarationsForNode(func, scope, tree);
       {
         // A function call can only resolve to a callable declaration. Other
         // declarations may share the name (e.g. a named generator transition
@@ -2572,8 +2562,8 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       bool nextIsReaction = false;
       if (next && next->getNodeType() == AST::Function) {
         auto nextFunc = std::static_pointer_cast<FunctionNode>(next);
-        auto nextDecls =
-            ASTQuery::findAllDeclarations(nextFunc->getName(), scope, tree);
+        auto nextDecls = ASTQuery::findAllDeclarations(
+            nextFunc->getName(), scope, tree, nextFunc->getNamespaceList());
         decltype(nextDecls) callableDecls;
         for (const auto &d : nextDecls) {
           if (isCallable(d, scope, tree)) {
@@ -2621,8 +2611,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               if (auto blocksNode = funcDecl->getPropertyValue("entities")) {
                 localScope.push_back({funcDecl, blocksNode->getChildren()});
               }
-              auto outDecl = ASTQuery::findDeclarationByName(
-                  ASTQuery::getNodeName(outBlock), localScope, tree);
+              auto outDecl = ASTQuery::findDeclarationForNode(outBlock, localScope, tree);
               if (outDecl) {
                 outType =
                     state.getLLVMTypeForCodegenEntity(outDecl, funcDecl, func);
@@ -2653,8 +2642,8 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         // 2. Resolve expected input type of downstream nextFunc
         llvm::Type *inType = nullptr;
         std::string inTypeStr;
-        auto nextDecls =
-            ASTQuery::findAllDeclarations(nextFunc->getName(), scope, tree);
+        auto nextDecls = ASTQuery::findAllDeclarations(
+            nextFunc->getName(), scope, tree, nextFunc->getNamespaceList());
         auto nextDecl =
             CodeAnalysis::matchDefinitionToTypes(nextDecls, nextFunc, scope, tree);
         if (!nextDecl && !nextDecls.empty()) {
@@ -2684,8 +2673,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                 if (auto blocksNode = nextDecl->getPropertyValue("entities")) {
                   nextScope.push_back({nextDecl, blocksNode->getChildren()});
                 }
-                auto inDecl = ASTQuery::findDeclarationByName(
-                    ASTQuery::getNodeName(inBlock), nextScope, tree);
+                auto inDecl = ASTQuery::findDeclarationForNode(inBlock, nextScope, tree);
                 if (inDecl) {
                   inType =
                       state.getLLVMTypeForCodegenEntity(inDecl, nextDecl, nextFunc);
@@ -2740,8 +2728,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         // Nothing follows the call at the end of a stream; looking up the
         // empty name would find any anonymous declaration
         std::shared_ptr<DeclarationNode> nextDecl =
-            next ? ASTQuery::findDeclarationByName(ASTQuery::getNodeName(next),
-                                                   scope, tree)
+            next ? ASTQuery::findDeclarationForNode(next, scope, tree)
                  : nullptr;
 
         retType = state.getLLVMType(nextDecl);

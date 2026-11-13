@@ -265,8 +265,7 @@ static bool validateBufferAccess(ASTNode node, ASTNode tree) {
         const auto &next = members[i + 1];
         if (bufferDecl && access->getPropertyName() == "frame" && next &&
             next->getNodeType() == AST::Entity) {
-          auto blockDecl = ASTQuery::findDeclarationByName(
-              ASTQuery::getNodeName(next), {}, tree);
+          auto blockDecl = ASTQuery::findDeclarationForNode(next, {}, tree);
           if (blockDecl && blockDecl->getNodeType() == AST::ArrayDeclaration) {
             std::vector<LangError> errors;
             int blockSize =
@@ -772,8 +771,7 @@ void foldConstantReads(const ASTNode &node, ASTNode root,
         index->getChildren()[0]->getNodeType() == AST::Int &&
         std::static_pointer_cast<ValueNode>(index->getChildren()[0])
                 ->getIntValue() < 0) {
-      auto decl = ASTQuery::findDeclarationByName(
-          ASTQuery::getNodeName(value), {}, root);
+      auto decl = ASTQuery::findDeclarationForNode(value, {}, root);
       const bool isSwitch =
           !decl || decl->getEntityType() == "switch" ||
           CodeAnalysis::getDataTypeForDeclaration(decl, {}, root) ==

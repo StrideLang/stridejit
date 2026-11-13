@@ -690,8 +690,7 @@ StrideCompiler::findConnectedDeclaration(ASTNode node) const {
   if (!decl && !connectionScopes.empty()) {
     const auto &context = connectionScopes.back();
     if (context.scope) {
-      decl = ASTQuery::findDeclarationByName(ASTQuery::getNodeName(node),
-                                             *context.scope, context.tree);
+      decl = ASTQuery::findDeclarationForNode(node, *context.scope, context.tree);
     }
   }
   if (decl && decl->getEntityType() == "platformModule") {
