@@ -319,7 +319,7 @@ StrideCompiler::CreateEntryBlockAlloca(llvm::Function *TheFunction,
                                        llvm::StringRef VarName,
                                        llvm::Type *dataType) {
   if (!dataType || dataType->isVoidTy()) {
-    dataType = llvm::Type::getDoubleTy(*TheContext);
+    dataType = realType();
   }
   llvm::IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
                          TheFunction->getEntryBlock().begin());
@@ -333,7 +333,7 @@ StrideCompiler::CreateEntryBlockAllocaArray(llvm::Function *TheFunction,
                                             llvm::StringRef VarName,
                                             llvm::Type *dataType, size_t size) {
   if (!dataType || dataType->isVoidTy()) {
-    dataType = llvm::Type::getDoubleTy(*TheContext);
+    dataType = realType();
   }
   llvm::ArrayType *arrayTy = llvm::ArrayType::get(dataType, size);
   llvm::IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
@@ -348,7 +348,7 @@ llvm::AllocaInst *StrideCompiler::CreateEntryBlockAllocaArrayConst(
     llvm::Function *TheFunction, llvm::StringRef VarName, llvm::Type *dataType,
     size_t size) {
   if (!dataType || dataType->isVoidTy()) {
-    dataType = llvm::Type::getDoubleTy(*TheContext);
+    dataType = realType();
   }
   llvm::ArrayType *arrayTy = llvm::ArrayType::get(dataType, size);
   llvm::IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
@@ -1045,7 +1045,7 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
             getLLVMType(std::static_pointer_cast<DeclarationNode>(var.first));
       }
       if (!varType || varType->isVoidTy()) {
-        varType = llvm::Type::getDoubleTy(*TheContext);
+        varType = realType();
       }
       info.varIndices[varName] = static_cast<unsigned>(fieldTypes.size());
       fieldTypes.push_back(varType);
@@ -1117,8 +1117,8 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
         LOG_ERROR() << "buildNodeState: fieldType at index " << i
                     << " in struct." << name
                     << "_state is invalid or unsized! Type ptr: "
-                    << fieldTypes[i] << " Replacing with double." << std::endl;
-        fieldTypes[i] = llvm::Type::getDoubleTy(*TheContext);
+                    << fieldTypes[i] << " Replacing with Real." << std::endl;
+        fieldTypes[i] = realType();
         defaultFieldValues[i] = llvm::Constant::getNullValue(fieldTypes[i]);
       }
     }

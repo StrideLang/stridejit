@@ -129,6 +129,11 @@ public:
   // The LLVM type for a data type: integers by bits, Float32 and Float64,
   // Switch is i1 and String is the {ptr, i32} string view.
   llvm::Type *getLLVMTypeForDataType(const DataTypes::Info &info);
+  // The framework's Real and Int: double and i32 for JIT, float and i16 on
+  // AVR. Use these, never a fixed LLVM type, wherever code means the
+  // language's default real or integer type.
+  llvm::Type *realType() { return typesMap.at("Real"); }
+  llvm::Type *intType() { return typesMap.at("Int"); }
   // The description of a data type name. Not valid() for unknown names.
   DataTypes::Info getDataTypeInfo(const std::string &name);
   // Name of the data type of decl, e.g. "Int" for signal X { type: Int }.

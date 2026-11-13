@@ -1087,7 +1087,7 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
             [&](const std::shared_ptr<DeclarationNode> &varDecl) {
               llvm::Type *varType = state.getLLVMType(varDecl);
               if (!varType || varType->isVoidTy() || !varType->isSized()) {
-                varType = llvm::Type::getDoubleTy(*state.TheContext);
+                varType = state.realType();
               }
               if (varDecl->getNodeType() == AST::ArrayDeclaration) {
                 int size =
@@ -1292,7 +1292,7 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
                         ? llvm::Type::getInt32Ty(*state.TheContext)
                         : (spec.useInt64Phase
                                ? llvm::Type::getInt64Ty(*state.TheContext)
-                               : llvm::Type::getDoubleTy(*state.TheContext));
+                               : state.realType());
                 llvm::Constant *zeroConst =
                     llvm::Constant::getNullValue(phaseTy);
                 state.addDynamicDomainField(decl, fieldName, phaseTy,
@@ -1362,7 +1362,7 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
                   ? llvm::Type::getInt32Ty(*state.TheContext)
                   : (spec.useInt64Phase
                          ? llvm::Type::getInt64Ty(*state.TheContext)
-                         : llvm::Type::getDoubleTy(*state.TheContext));
+                         : state.realType());
           llvm::Constant *zeroConst = llvm::Constant::getNullValue(phaseTy);
           state.addDynamicDomainField(seg.domainDecl, fieldName, phaseTy, zeroConst);
           phaseFieldsList->addChild(std::make_shared<ValueNode>(fieldName, __FILE__, __LINE__));
@@ -1884,7 +1884,7 @@ void StrideGenerator::collectInputArgs(
           }
         }
         if (!inArgType || inArgType->isVoidTy()) {
-          inArgType = llvm::Type::getDoubleTy(*state.TheContext);
+          inArgType = state.realType();
         }
         args.MainIn.argTypes.push_back(inArgType);
       } else {
@@ -1893,7 +1893,7 @@ void StrideGenerator::collectInputArgs(
           exprs.pop_back();
           // FIXME do automatic type casting int ->float
           args.MainIn.argTypes.push_back(
-              llvm::Type::getDoubleTy(*state.TheContext));
+              state.realType());
         } else {
           LOG_ERROR() << "ERROR: exprs is empty when collecting function input argument"
                       << std::endl;
@@ -1951,10 +1951,10 @@ void StrideGenerator::collectInputArgs(
           } else if (currentChildNode->getNodeType() == AST::Int) {
             // TODO get types from framework
             args.MainIn.argTypes.push_back(
-                llvm::Type::getInt32Ty(*state.TheContext));
+                state.intType());
           } else if (currentChildNode->getNodeType() == AST::Real) {
             args.MainIn.argTypes.push_back(
-                llvm::Type::getDoubleTy(*state.TheContext));
+                state.realType());
           } else if (currentChildNode->getNodeType() == AST::String) {
             args.MainIn.argTypes.push_back(
                 state.typesMap[DataTypes::String]);
@@ -1963,16 +1963,16 @@ void StrideGenerator::collectInputArgs(
                 std::static_pointer_cast<MemberAccessNode>(currentChildNode);
             if (pp->getPropertyName() == "size") {
               args.MainIn.argTypes.push_back(
-                  llvm::Type::getInt32Ty(*state.TheContext));
+                  state.intType());
             } else if (pp->getPropertyName() == "rate") {
               args.MainIn.argTypes.push_back(
-                  llvm::Type::getDoubleTy(*state.TheContext));
+                  state.realType());
             } else {
               LOG_ERROR()
                   << ":Port property not supported: " << pp->getPropertyName()
                   << std::endl;
               args.MainIn.argTypes.push_back(
-                  llvm::Type::getDoubleTy(*state.TheContext));
+                  state.realType());
             }
           } else {
             // Fallback. We shouldn't get here when things are fully
@@ -1984,7 +1984,7 @@ void StrideGenerator::collectInputArgs(
           }
         } else {
           args.MainIn.argTypes.push_back(
-              llvm::Type::getDoubleTy(*state.TheContext));
+              state.realType());
         }
       }
       exprs.pop_back();
@@ -2088,9 +2088,9 @@ void StrideGenerator::collectPropertyArgs(
       llvm::Type *propType = nullptr;
       if (value) {
         if (value->getNodeType() == AST::Int) {
-          propType = llvm::Type::getInt32Ty(*state.TheContext);
+          propType = state.intType();
         } else if (value->getNodeType() == AST::Real) {
-          propType = llvm::Type::getDoubleTy(*state.TheContext);
+          propType = state.realType();
         } else if (value->getNodeType() == AST::Switch) {
           propType = state.typesMap[DataTypes::Switch];
         } else if (value->getNodeType() == AST::String) {
@@ -2105,7 +2105,7 @@ void StrideGenerator::collectPropertyArgs(
         }
       }
       if (!propType) {
-        propType = llvm::Type::getDoubleTy(*state.TheContext);
+        propType = state.realType();
       }
       args.Properties.argTypes.push_back(propType);
     }
@@ -3504,10 +3504,10 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
     // defintion.
     if (pp->getPropertyName() == "size") {
       UsedPortProperties.push_back(
-          PrototypeArg{name, llvm::Type::getInt32Ty(*state.TheContext)});
+          PrototypeArg{name, state.intType()});
     } else if (pp->getPropertyName() == "rate") {
       UsedPortProperties.push_back(
-          PrototypeArg{name, llvm::Type::getDoubleTy(*state.TheContext)});
+          PrototypeArg{name, state.realType()});
     }
   }
 

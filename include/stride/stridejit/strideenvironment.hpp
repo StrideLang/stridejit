@@ -402,6 +402,23 @@ private:
   // evaluated are left to run at load time.
   void evaluateConstantFills(ASTNode root);
 
+  // The platformlib members whose platformModule signatures the program is
+  // compiled against. They come from the framework of the program's system
+  // (`use AVR version 1.0`) when its _frameworkDescription says
+  // `codegen: "llvm"`, followed by the LLVM frameworks it inherits from; a
+  // platformModule name a framework declares hides the inherited overloads
+  // of that name. Any other framework, or no system at all, gives the JIT
+  // framework.
+  std::vector<ASTNode> frameworkPlatformMembers(const ASTNode &tree) const;
+  // The JIT framework's platformlib members. Constant fills always run on the
+  // host, so they use these whatever the target.
+  std::vector<ASTNode> hostPlatformMembers() const;
+  // Declares the platformModules among `members` in `frameworkScope`.
+  // Overloads share a name, so all of them are declared.
+  static void declarePlatformModules(const std::vector<ASTNode> &members,
+                                     std::vector<ASTNode> &frameworkScope,
+                                     StrideCompiler &state);
+
   // Configuration
   std::string m_strideRoot;
   std::string m_primarySourcePath;

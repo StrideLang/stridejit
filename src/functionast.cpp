@@ -658,27 +658,24 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
                 LOG_ERROR()
                     << "Unsupported type. Falling back on double" << std::endl;
                 assert(0 == 1);
-                type = llvm::Type::getDoubleTy(*state.TheContext);
-                defaultValue = llvm::ConstantFP::get(
-                    llvm::Type::getDoubleTy(*state.TheContext),
-                    llvm::APFloat(0.0));
+                type = state.realType();
+                defaultValue = llvm::ConstantFP::get(type, 0.0);
               }
             } else {
               LOG_ERROR() << "Unsupported type. Falling back on double"
                           << std::endl;
               assert(0 == 1);
-              // type = llvm::Type::getDoubleTy(*state.TheContext);
+              // type = state.realType();
               // defaultValue = llvm::ConstantFP::get(
-              //     llvm::Type::getDoubleTy(*state.TheContext),
+              //     state.realType(),
               //     llvm::APFloat(0.0));
             }
           } else {
             LOG_ERROR() << "Unsupported type. Falling back on double"
                         << std::endl;
             assert(0 == 1);
-            type = llvm::Type::getDoubleTy(*state.TheContext);
-            defaultValue = llvm::ConstantFP::get(
-                llvm::Type::getDoubleTy(*state.TheContext), llvm::APFloat(0.0));
+            type = state.realType();
+            defaultValue = llvm::ConstantFP::get(type, 0.0);
           }
           assert(defaultValue);
         } else if (decl->getEntityType() == "switch" ||
@@ -813,10 +810,9 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
             condVal = state.Builder->CreateICmpNE(
                 condVal, llvm::ConstantInt::get(condVal->getType(), 0),
                 "term_bool");
-          } else if (condVal->getType()->isDoubleTy()) {
+          } else if (condVal->getType()->isFloatingPointTy()) {
             condVal = state.Builder->CreateFCmpONE(
-                condVal,
-                llvm::ConstantFP::get(*state.TheContext, llvm::APFloat(0.0)),
+                condVal, llvm::ConstantFP::get(condVal->getType(), 0.0),
                 "term_bool");
           }
           llvm::BasicBlock *ContBB = llvm::BasicBlock::Create(
@@ -856,10 +852,9 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
           EndCond = state.Builder->CreateICmpNE(
               EndCond, llvm::ConstantInt::get(EndCond->getType(), 0),
               "term_bool");
-        } else if (EndCond->getType()->isDoubleTy()) {
+        } else if (EndCond->getType()->isFloatingPointTy()) {
           EndCond = state.Builder->CreateFCmpONE(
-              EndCond,
-              llvm::ConstantFP::get(*state.TheContext, llvm::APFloat(0.0)),
+              EndCond, llvm::ConstantFP::get(EndCond->getType(), 0.0),
               "term_bool");
         }
       } else {
@@ -1080,7 +1075,7 @@ llvm::Value *func(llvm::Value *value, std::optional<llvm::Type *> type,
   if (!value->getType()->isPointerTy() && arg->getType()->isPointerTy()) {
     llvm::Type *allocTy = value->getType();
     if (!allocTy || allocTy->isVoidTy()) {
-      allocTy = llvm::Type::getDoubleTy(*state.TheContext);
+      allocTy = state.realType();
     }
     llvm::Function *TheFunction = state.Builder->GetInsertBlock()->getParent();
     ArgsV = state.CreateEntryBlockAlloca(TheFunction, "LiteralValTemp", allocTy);
@@ -1255,7 +1250,7 @@ void processArgGroup(
             }
             if (!idxList.empty()) {
               llvm::Type *gepElemType =
-                  elemType.value_or(llvm::Type::getDoubleTy(*state.TheContext));
+                  elemType.value_or(state.realType());
               if (gepElemType->isArrayTy()) {
                 gepElemType = static_cast<llvm::ArrayType *>(gepElemType)
                                   ->getElementType();
@@ -1283,7 +1278,7 @@ void processArgGroup(
           CallArgs.back() =
               std::pair<llvm::Value *, std::optional<llvm::Type *>>{
                   state.Builder->CreateLoad(
-                      llvm::Type::getDoubleTy(*state.TheContext),
+                      state.realType(),
                       CallArgs.back().first, ""),
                   std::nullopt};
         }
@@ -1379,7 +1374,7 @@ void processArgGroup(
                                  ? type.value()
                                  : state.pointerElementTypes[newArgVal];
         if (!loadTy)
-          loadTy = llvm::Type::getDoubleTy(*state.TheContext);
+          loadTy = state.realType();
         newArgVal = state.Builder->CreateLoad(loadTy, newArgVal, "");
       }
 
@@ -1566,7 +1561,7 @@ CallExprAST::codegen(StrideCompiler &state) {
       llvm::Type *i32Ty = llvm::Type::getInt32Ty(*state.TheContext);
 
       if (CalleeF->hasFnAttribute("stride.variadic_heterogeneous")) {
-        llvm::Type *doubleTy = llvm::Type::getDoubleTy(*state.TheContext);
+        llvm::Type *doubleTy = state.realType();
         llvm::Type *strTy = state.typesMap[DataTypes::String];
         llvm::StructType *fmtArgTy = llvm::StructType::get(
             *state.TheContext, {i32Ty, i32Ty, doubleTy, strTy});
@@ -1857,9 +1852,9 @@ CallExprAST::codegen(StrideCompiler &state) {
           llvm::Type::getInt1Ty(*state.TheContext), CondV, "cond");
     }
     // Convert condition to a bool by comparing non-equal to 0.0 or 0.
-    if (CondV->getType()->isDoubleTy()) {
+    if (CondV->getType()->isFloatingPointTy()) {
       CondV = state.Builder->CreateFCmpONE(
-          CondV, llvm::ConstantFP::get(*state.TheContext, llvm::APFloat(0.0)),
+          CondV, llvm::ConstantFP::get(CondV->getType(), 0.0),
           "ifcond");
     } else if (CondV->getType()->isIntegerTy() &&
                !CondV->getType()->isIntegerTy(1)) {
@@ -2038,7 +2033,7 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
         }
         if (!idxList.empty()) {
           llvm::Type *gepElemType =
-              elemType.value_or(llvm::Type::getDoubleTy(*state.TheContext));
+              elemType.value_or(state.realType());
           if (gepElemType->isArrayTy()) {
             gepElemType =
                 static_cast<llvm::ArrayType *>(gepElemType)->getElementType();
@@ -2052,7 +2047,7 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
       llvm::Type *loadTy = (elemType.has_value() && elemType.value() &&
                             !elemType.value()->isVoidTy())
                                ? elemType.value()
-                               : llvm::Type::getDoubleTy(*state.TheContext);
+                               : state.realType();
       val = state.Builder->CreateLoad(loadTy, val, "");
     }
     return {val, elemType};
@@ -2285,20 +2280,20 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
         if (cond->getType()->isIntegerTy() && !cond->getType()->isIntegerTy(1)) {
           cond = state.Builder->CreateICmpNE(
               cond, llvm::ConstantInt::get(cond->getType(), 0), "tobool");
-        } else if (cond->getType()->isDoubleTy()) {
+        } else if (cond->getType()->isFloatingPointTy()) {
           cond = state.Builder->CreateFCmpONE(
               cond, llvm::ConstantFP::get(cond->getType(), 0.0), "tobool");
         }
 
         if (trueVal->getType() != falseVal->getType()) {
-          if (trueVal->getType()->isDoubleTy() &&
+          if (trueVal->getType()->isFloatingPointTy() &&
               falseVal->getType()->isIntegerTy()) {
             falseVal = state.Builder->CreateSIToFP(
-                falseVal, llvm::Type::getDoubleTy(*state.TheContext), "sitofp");
+                falseVal, trueVal->getType(), "sitofp");
           } else if (trueVal->getType()->isIntegerTy() &&
-                     falseVal->getType()->isDoubleTy()) {
+                     falseVal->getType()->isFloatingPointTy()) {
             trueVal = state.Builder->CreateSIToFP(
-                trueVal, llvm::Type::getDoubleTy(*state.TheContext), "sitofp");
+                trueVal, falseVal->getType(), "sitofp");
           } else if (trueVal->getType()->isIntegerTy() &&
                      falseVal->getType()->isIntegerTy()) {
             unsigned tBits = trueVal->getType()->getIntegerBitWidth();

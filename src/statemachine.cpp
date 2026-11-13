@@ -643,10 +643,9 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
           } else if (CondV->getType()->isIntegerTy()) {
             CondV = state.Builder->CreateICmpNE(
                 CondV, llvm::ConstantInt::get(CondV->getType(), 0), "ifcond");
-          } else if (CondV->getType()->isDoubleTy()) {
+          } else if (CondV->getType()->isFloatingPointTy()) {
             CondV = state.Builder->CreateFCmpONE(
-                CondV,
-                llvm::ConstantFP::get(*state.TheContext, llvm::APFloat(0.0)),
+                CondV, llvm::ConstantFP::get(CondV->getType(), 0.0),
                 "ifcond");
           }
           guardVal = state.Builder->CreateAnd(guardVal, CondV);

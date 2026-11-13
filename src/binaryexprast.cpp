@@ -616,7 +616,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         }
         L = state.Builder->CreateCall(eqFunc, {allocA, allocB}, "streq");
         Val = state.Builder->CreateUIToFP(
-            L, llvm::Type::getDoubleTy(*state.TheContext), "booltmp");
+            L, state.realType(), "booltmp");
         Type = llvm::Type::getInt1Ty(*state.TheContext);
         break;
       }
@@ -627,7 +627,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       }
       // Convert bool 0/1 to double 0.0 or 1.0
       Val = state.Builder->CreateUIToFP(
-          L, llvm::Type::getDoubleTy(*state.TheContext), "booltmp");
+          L, state.realType(), "booltmp");
       Type = llvm::Type::getInt1Ty(*state.TheContext);
 
       break;
@@ -659,7 +659,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
             state.Builder->CreateCall(eqFunc, {allocA, allocB}, "streq");
         L = state.Builder->CreateNot(eqVal, "strne");
         Val = state.Builder->CreateUIToFP(
-            L, llvm::Type::getDoubleTy(*state.TheContext), "booltmp");
+            L, state.realType(), "booltmp");
         Type = llvm::Type::getInt1Ty(*state.TheContext);
         break;
       }
@@ -670,7 +670,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       }
       // Convert bool 0/1 to double 0.0 or 1.0
       Val = state.Builder->CreateUIToFP(
-          L, llvm::Type::getDoubleTy(*state.TheContext), "booltmp");
+          L, state.realType(), "booltmp");
       Type = llvm::Type::getInt1Ty(*state.TheContext);
 
       break;
@@ -704,7 +704,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
             cmpVal, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*state.TheContext), 0),
             "cmptmp");
         Val = state.Builder->CreateUIToFP(
-            L, llvm::Type::getDoubleTy(*state.TheContext), "booltmp");
+            L, state.realType(), "booltmp");
         Type = llvm::Type::getInt1Ty(*state.TheContext);
         break;
       }
@@ -716,7 +716,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       }
       // Convert bool 0/1 to double 0.0 or 1.0
       Val = state.Builder->CreateUIToFP(
-          L, llvm::Type::getDoubleTy(*state.TheContext), "booltmp");
+          L, state.realType(), "booltmp");
       Type = llvm::Type::getInt1Ty(*state.TheContext);
 
       break;
@@ -750,7 +750,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
             cmpVal, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*state.TheContext), 0),
             "cmptmp");
         Val = state.Builder->CreateUIToFP(
-            L, llvm::Type::getDoubleTy(*state.TheContext), "booltmp");
+            L, state.realType(), "booltmp");
         Type = llvm::Type::getInt1Ty(*state.TheContext);
         break;
       }
@@ -762,7 +762,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
       }
       // Convert bool 0/1 to double 0.0 or 1.0
       Val = state.Builder->CreateUIToFP(
-          L, llvm::Type::getDoubleTy(*state.TheContext), "booltmp");
+          L, state.realType(), "booltmp");
       Type = llvm::Type::getInt1Ty(*state.TheContext);
 
       break;
@@ -1021,7 +1021,7 @@ void DownsampleExprAST::emitTickAdvance(StrideCompiler &state,
     state.Builder->CreateStore(nextPhase, phasePtr);
   } else {
     // Floating-point phase accumulator (double):
-    llvm::Type *dblTy = llvm::Type::getDoubleTy(*state.TheContext);
+    llvm::Type *dblTy = state.realType();
     state.Builder->SetInsertPoint(execEndBB);
     llvm::Value *stepDVal = llvm::ConstantFP::get(dblTy, Schedule.domainRate);
     llvm::Value *phaseAfterExec =
@@ -1063,7 +1063,7 @@ DownsampleExprAST::codegen(StrideCompiler &state) {
           ? llvm::Type::getInt32Ty(*state.TheContext)
           : (Schedule.useInt64Phase
                  ? llvm::Type::getInt64Ty(*state.TheContext)
-                 : llvm::Type::getDoubleTy(*state.TheContext));
+                 : state.realType());
 
   llvm::BasicBlock *entryBB = state.Builder->GetInsertBlock();
   llvm::Function *TheFunction = entryBB->getParent();
@@ -1219,7 +1219,7 @@ UpsampleExprAST::codegen(StrideCompiler &state) {
           state.Builder->CreateSub(phasePhi, stepCVal, "us.phase.rem");
       state.Builder->CreateStore(remPhase, phasePtr);
     } else {
-      llvm::Type *dblTy = llvm::Type::getDoubleTy(*state.TheContext);
+      llvm::Type *dblTy = state.realType();
       llvm::Value *initPhase =
           state.Builder->CreateLoad(dblTy, phasePtr, "us.phase.init");
       llvm::Value *stepCVal =

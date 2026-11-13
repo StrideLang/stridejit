@@ -15,6 +15,7 @@
 #include "stride/stridegen/coderesolver.hpp"
 #include "stride/stridegen/codevalidator.hpp"
 #include "stride/stridegen/featureresolver.hpp"
+#include "stride/stridegen/stridesystem.hpp"
 #include "stride/utils/astfunctions.h"
 #include "stride/utils/astquery.h"
 
@@ -350,6 +351,115 @@ bool StrideEnvironment::prepareTree(ASTNode tree) {
   return true;
 }
 
+namespace {
+
+std::shared_ptr<DeclarationNode>
+findFrameworkDescription(const std::vector<ASTNode> &members) {
+  for (const auto &member : members) {
+    if (member->getNodeType() == AST::Declaration) {
+      auto decl = std::static_pointer_cast<DeclarationNode>(member);
+      if (decl->getEntityType() == "_frameworkDescription") {
+        return decl;
+      }
+    }
+  }
+  return nullptr;
+}
+
+std::string stringProperty(const std::shared_ptr<DeclarationNode> &decl,
+                           const std::string &name) {
+  auto value = decl ? decl->getPropertyValue(name) : nullptr;
+  if (value && value->getNodeType() == AST::String) {
+    return std::static_pointer_cast<ValueNode>(value)->getStringValue();
+  }
+  return {};
+}
+
+} // namespace
+
+std::vector<ASTNode> StrideEnvironment::hostPlatformMembers() const {
+  return ASTFunctions::loadAllInDirectory(m_strideRoot +
+                                          "/frameworks/JIT/1.0/platformlib");
+}
+
+std::vector<ASTNode>
+StrideEnvironment::frameworkPlatformMembers(const ASTNode &tree) const {
+  auto systems = tree ? ASTQuery::getSystemNodes(tree)
+                      : std::vector<std::shared_ptr<SystemNode>>{};
+  if (systems.empty() || systems.front()->platformName() == "JIT") {
+    return hostPlatformMembers();
+  }
+
+  const auto &systemNode = systems.front();
+  FeatureConfig featConfig{m_enabledFeatures, m_disabledFeatures,
+                           m_exclusiveChoices, m_useDefaultFeatures};
+  StrideSystem system(m_strideRoot, systemNode->platformName(),
+                      systemNode->majorVersion(), systemNode->minorVersion(),
+                      {}, featConfig);
+  auto frameworks = system.getFrameworks();
+  if (frameworks.empty()) {
+    return hostPlatformMembers();
+  }
+
+  // Follow `inherits` while the frameworks generate LLVM IR. A platformModule
+  // name declared by a framework hides every inherited overload of that name.
+  auto moduleName = [](const ASTNode &member) -> std::string {
+    if (member->getNodeType() != AST::Declaration &&
+        member->getNodeType() != AST::ArrayDeclaration) {
+      return {};
+    }
+    auto decl = std::static_pointer_cast<DeclarationNode>(member);
+    return decl->getEntityType() == "platformModule" ? decl->getName()
+                                                     : std::string();
+  };
+  std::vector<ASTNode> members;
+  std::set<std::string> overridden;
+  std::set<std::string> visited;
+  std::string framework = frameworks.front()->getFramework();
+  std::string version = frameworks.front()->getFrameworkVersion();
+  while (!framework.empty() && visited.insert(framework).second) {
+    auto loaded = ASTFunctions::loadAllInDirectory(
+        m_strideRoot + "/frameworks/" + framework + "/" + version +
+        "/platformlib");
+    auto description = findFrameworkDescription(loaded);
+    if (stringProperty(description, "codegen") != "llvm" &&
+        framework != "JIT") {
+      break; // a C++ template framework: nothing usable for LLVM
+    }
+    std::set<std::string> declaredHere;
+    for (const auto &member : loaded) {
+      auto name = moduleName(member);
+      if (!name.empty() && overridden.count(name)) {
+        continue;
+      }
+      if (!name.empty()) {
+        declaredHere.insert(name);
+      }
+      members.push_back(member);
+    }
+    overridden.insert(declaredHere.begin(), declaredHere.end());
+    framework = stringProperty(description, "inherits");
+    version = stringProperty(description, "inheritsVersion");
+  }
+  return members.empty() ? hostPlatformMembers() : members;
+}
+
+void StrideEnvironment::declarePlatformModules(
+    const std::vector<ASTNode> &members, std::vector<ASTNode> &frameworkScope,
+    StrideCompiler &state) {
+  for (const auto &member : members) {
+    if (member->getNodeType() != AST::Declaration &&
+        member->getNodeType() != AST::ArrayDeclaration) {
+      continue;
+    }
+    auto decl = std::static_pointer_cast<DeclarationNode>(member);
+    if (decl->getEntityType() == "platformModule") {
+      StrideGenerator::generatePlatformFunctionSignature(decl, frameworkScope,
+                                                         state);
+    }
+  }
+}
+
 bool StrideEnvironment::generateAllRootFunctions(ASTNode root) {
   if (!root)
     return false;
@@ -469,23 +579,9 @@ bool StrideEnvironment::generateIr(const std::vector<std::string> &paths,
 
     // Each file is compiled in its isolated scope into the shared LLVM Module
     ScopeStack globalScope;
-    {
-      globalScope.push_back({nullptr, {}});
-      std::vector<ASTNode> platformlib = ASTFunctions::loadAllInDirectory(
-          m_strideRoot + "/frameworks/JIT/1.0/platformlib");
-      auto &frameworkScope = globalScope.back().second;
-
-      for (const auto &member : platformlib) {
-        if (member->getNodeType() == AST::Declaration ||
-            member->getNodeType() == AST::ArrayDeclaration) {
-          auto decl = std::static_pointer_cast<DeclarationNode>(member);
-          if (decl->getEntityType() == "platformModule") {
-            StrideGenerator::generatePlatformFunctionSignature(
-                decl, frameworkScope, mStrideEnv);
-          }
-        }
-      }
-    }
+    globalScope.push_back({nullptr, {}});
+    declarePlatformModules(frameworkPlatformMembers(tree),
+                           globalScope.back().second, mStrideEnv);
 
     bool wasPreprocessed = tree->getCompilerProperty("preprocessed") != nullptr;
     if (!ASTFunctions::preprocess(tree, &globalScope)) {
@@ -531,24 +627,9 @@ bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
   }
 
   ScopeStack globalScope;
-  {
-    globalScope.push_back({nullptr, {}});
-    // FIXME don't hardcode library version
-    std::vector<ASTNode> platformlib = ASTFunctions::loadAllInDirectory(
-        m_strideRoot + "/frameworks/JIT/1.0/platformlib");
-    auto &frameworkScope = globalScope.back().second;
-
-    for (const auto &member : platformlib) {
-      if (member->getNodeType() == AST::Declaration ||
-          member->getNodeType() == AST::ArrayDeclaration) {
-        auto decl = std::static_pointer_cast<DeclarationNode>(member);
-        if (decl->getEntityType() == "platformModule") {
-          StrideGenerator::generatePlatformFunctionSignature(
-              decl, frameworkScope, mStrideEnv);
-        }
-      }
-    }
-  }
+  globalScope.push_back({nullptr, {}});
+  declarePlatformModules(frameworkPlatformMembers(root),
+                         globalScope.back().second, mStrideEnv);
 
   bool wasPreprocessed = root->getCompilerProperty("preprocessed") != nullptr;
   if (!ASTFunctions::preprocess(root, &globalScope)) {
@@ -1020,17 +1101,9 @@ void StrideEnvironment::evaluateConstantFills(ASTNode root) {
   state.m_intanceTree = CodeAnalysis::getStateStructInformation({}, root);
   state.buildStateStructTypes(state.m_intanceTree, rootScope, root);
   {
+    // Fills are computed now, on the host, whatever the program targets.
     std::vector<ASTNode> frameworkScope;
-    for (const auto &member : ASTFunctions::loadAllInDirectory(
-             m_strideRoot + "/frameworks/JIT/1.0/platformlib")) {
-      if (member->getNodeType() == AST::Declaration) {
-        auto decl = std::static_pointer_cast<DeclarationNode>(member);
-        if (decl->getEntityType() == "platformModule") {
-          StrideGenerator::generatePlatformFunctionSignature(
-              decl, frameworkScope, state);
-        }
-      }
-    }
+    declarePlatformModules(hostPlatformMembers(), frameworkScope, state);
     for (const auto &child : root->getChildren()) {
       if (child->getNodeType() == AST::Declaration ||
           child->getNodeType() == AST::ArrayDeclaration) {
