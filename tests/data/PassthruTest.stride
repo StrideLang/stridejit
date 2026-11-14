@@ -1,3 +1,5 @@
+import Testing as Testing
+
 _domainDefinition Passthru {
     framework: _JitFramework
     rate: -1
@@ -20,6 +22,6 @@ functionTest PassthruTest {
     ]
     
     validate: [
-        [ Out, [ 1.0, 2.0, 3.0, 4.0, 5.0 ] ] >> ExpectEqual();
+        [ Out, [ 1.0, 2.0, 3.0, 4.0, 5.0 ] ] >> Testing::ExpectEqual();
     ]
 }

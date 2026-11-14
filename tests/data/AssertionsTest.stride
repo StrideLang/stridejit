@@ -1,5 +1,7 @@
 # AssertionsTest.stride
 
+import Testing as Testing
+
 _domainDefinition TestDomain {
     framework: _JitFramework
     rate: -1
@@ -22,7 +24,7 @@ functionTest TestNear {
         [ 1.000001, 2.000002 ] >> In;
     ]
     validate: [
-        [ Out, [ 1.0, 2.0 ] ] >> ExpectNear(epsilon: 0.01);
+        [ Out, [ 1.0, 2.0 ] ] >> Testing::ExpectNear(epsilon: 0.01);
     ]
 }
 
@@ -32,7 +34,7 @@ functionTest TestGtLt {
         [ 5.0, 10.0 ] >> In;
     ]
     validate: [
-        [ Out, [ 4.0, 9.0 ] ] >> ExpectGt();
-        [ Out, [ 6.0, 11.0 ] ] >> ExpectLt();
+        [ Out, [ 4.0, 9.0 ] ] >> Testing::ExpectGt();
+        [ Out, [ 6.0, 11.0 ] ] >> Testing::ExpectLt();
     ]
 }
