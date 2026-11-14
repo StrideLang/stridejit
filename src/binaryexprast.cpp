@@ -298,6 +298,11 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         state.Builder->CreateStore(Val, Variable);
       }
     }
+    // A String keeps its characters in its own buffer
+    if (state.isStringType(Val->getType()) ||
+        (TypePtr.has_value() && state.isStringType(TypePtr.value()))) {
+      state.commitStringWrite(LHSE->getName(), LHSE->getIndices());
+    }
 
     if (previousSwitchVal) {
       auto *currentSwitchVal =

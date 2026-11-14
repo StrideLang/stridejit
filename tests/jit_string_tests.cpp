@@ -1,96 +1,212 @@
 #include "gtest/gtest.h"
+#include <clocale>
+#include <cstring>
 #include <filesystem>
+#include <vector>
 
 #include "stride/stridejit/strideenvironment.hpp"
 #include "stride/stridejit/strideruntime_string.h"
 
 using namespace strd;
 
+namespace {
+StrideStringView sv(const char *text) {
+  return StrideStringView{text, static_cast<int32_t>(std::strlen(text))};
+}
+std::string substring(const char *text, int32_t start, int32_t len) {
+  StrideStringView src = sv(text), out{};
+  __stride_jit_string_substring(&src, start, len, &out);
+  return out.toString();
+}
+std::string trim(const char *text, const char *chars) {
+  StrideStringView src = sv(text), set = sv(chars), out{};
+  __stride_jit_string_trim(&src, &set, &out);
+  return out.toString();
+}
+std::string tokenAt(const char *text, const char *delim, int32_t index) {
+  StrideStringView src = sv(text), d = sv(delim), out{};
+  __stride_jit_string_token_at(&src, &d, index, &out);
+  return out.toString();
+}
+int32_t tokenCount(const char *text, const char *delim) {
+  StrideStringView src = sv(text), d = sv(delim);
+  return __stride_jit_string_token_count(&src, &d);
+}
+int32_t parseInt(const char *text, int32_t defaultVal) {
+  StrideStringView s = sv(text);
+  return __stride_jit_string_parse_int(&s, defaultVal);
+}
+double parseReal(const char *text, double defaultVal) {
+  StrideStringView s = sv(text);
+  return __stride_jit_string_parse_real(&s, defaultVal);
+}
+std::string format(const char *tpl, std::vector<StrideFormatArg> args) {
+  StrideStringView t = sv(tpl), out{};
+  __stride_jit_string_format(&t, args.data(),
+                             static_cast<int32_t>(args.size()), &out);
+  return out.toString();
+}
+StrideFormatArg realArg(double value) {
+  StrideFormatArg arg{};
+  arg.typeTag = STRIDE_FMT_ARG_REAL;
+  arg.realVal = value;
+  return arg;
+}
+StrideFormatArg intArg(int32_t value) {
+  StrideFormatArg arg{};
+  arg.typeTag = STRIDE_FMT_ARG_INT;
+  arg.intVal = value;
+  return arg;
+}
+} // namespace
+
 TEST(JITStringTest, RuntimeHelpersDirect) {
-  // Substring
-  StrideStringView src{"Hello World", 11};
-  auto sub1 = __stride_string_substring(src, 0, 5);
-  EXPECT_EQ(sub1.toString(), "Hello");
+  StrideStringView src = sv("Hello World");
 
-  auto sub2 = __stride_string_substring(src, 6, -1);
-  EXPECT_EQ(sub2.toString(), "World");
+  EXPECT_EQ(substring("Hello World", 0, 5), "Hello");
+  EXPECT_EQ(substring("Hello World", 6, -1), "World");
+  EXPECT_EQ(substring("Hello World", 20, 5), "");
 
-  auto subOutOfBounds = __stride_string_substring(src, 20, 5);
-  EXPECT_EQ(subOutOfBounds.length, 0);
+  EXPECT_EQ(trim("  \tfoo bar \r\n", " \t\r\n"), "foo bar");
+  EXPECT_EQ(trim("   ", " "), "");
 
-  // Trim
-  StrideStringView padded{"  \tfoo bar \r\n", 13};
-  auto trimmed = __stride_string_trim(padded, StrideStringView{" \t\r\n", 4});
-  EXPECT_EQ(trimmed.toString(), "foo bar");
+  StrideStringView world = sv("World"), xyz = sv("XYZ");
+  EXPECT_EQ(__stride_jit_string_find(&src, &world, 0), 6);
+  EXPECT_EQ(__stride_jit_string_find(&src, &xyz, 0), -1);
+  EXPECT_EQ(__stride_jit_string_find(&src, &world, 7), -1);
 
-  // Find
-  EXPECT_EQ(__stride_string_find(src, StrideStringView{"World", 5}, 0), 6);
-  EXPECT_EQ(__stride_string_find(src, StrideStringView{"XYZ", 3}, 0), -1);
+  StrideStringView path = sv("/path/to/file.stride"), dot = sv(".");
+  EXPECT_EQ(__stride_jit_string_find_last(&path, &dot), 13);
 
-  // FindLast
-  StrideStringView path{"/path/to/file.stride", 20};
-  EXPECT_EQ(__stride_string_find_last(path, StrideStringView{".", 1}), 13);
+  StrideStringView loWo = sv("lo Wo"), hello = sv("Hello");
+  EXPECT_TRUE(__stride_jit_string_contains(&src, &loWo));
+  EXPECT_FALSE(__stride_jit_string_contains(&src, &xyz));
+  EXPECT_TRUE(__stride_jit_string_starts_with(&src, &hello));
+  EXPECT_FALSE(__stride_jit_string_starts_with(&src, &world));
+  EXPECT_TRUE(__stride_jit_string_ends_with(&src, &world));
+  EXPECT_FALSE(__stride_jit_string_ends_with(&src, &hello));
 
-  // Contains
-  EXPECT_TRUE(__stride_string_contains(src, StrideStringView{"lo Wo", 5}));
-  EXPECT_FALSE(__stride_string_contains(src, StrideStringView{"xyz", 3}));
+  StrideStringView same = sv("Hello World"), abc = sv("abc"), def = sv("def");
+  EXPECT_TRUE(__stride_jit_string_equal(&src, &same));
+  EXPECT_FALSE(__stride_jit_string_equal(&src, &hello));
+  EXPECT_EQ(__stride_jit_string_compare(&src, &same), 0);
+  EXPECT_LT(__stride_jit_string_compare(&abc, &def), 0);
+  EXPECT_GT(__stride_jit_string_compare(&src, &hello), 0);
 
-  // StartsWith / EndsWith
-  EXPECT_TRUE(__stride_string_starts_with(src, StrideStringView{"Hello", 5}));
-  EXPECT_FALSE(__stride_string_starts_with(src, StrideStringView{"World", 5}));
-  EXPECT_TRUE(__stride_string_ends_with(src, StrideStringView{"World", 5}));
-  EXPECT_FALSE(__stride_string_ends_with(src, StrideStringView{"Hello", 5}));
+  StrideStringView empty = sv("");
+  EXPECT_EQ(__stride_jit_string_length(&src), 11);
+  EXPECT_FALSE(__stride_jit_string_is_empty(&src));
+  EXPECT_TRUE(__stride_jit_string_is_empty(&empty));
 
-  // Equal / Compare
-  EXPECT_TRUE(__stride_string_equal(src, StrideStringView{"Hello World", 11}));
-  EXPECT_FALSE(__stride_string_equal(src, StrideStringView{"Hello", 5}));
-  EXPECT_EQ(__stride_string_compare(src, StrideStringView{"Hello World", 11}), 0);
-  EXPECT_LT(__stride_string_compare(StrideStringView{"abc", 3}, StrideStringView{"def", 3}), 0);
+  EXPECT_EQ(tokenCount("one,two,three", ","), 3);
+  EXPECT_EQ(tokenAt("one,two,three", ",", 0), "one");
+  EXPECT_EQ(tokenAt("one,two,three", ",", 1), "two");
+  EXPECT_EQ(tokenAt("one,two,three", ",", 2), "three");
+  EXPECT_EQ(tokenAt("one,two,three", ",", 3), "");
+  EXPECT_EQ(tokenAt("one,two,three", ",", -1), "");
+  // A delimiter at the start gives an empty first token.
+  EXPECT_EQ(tokenCount(",a,b", ","), 3);
+  EXPECT_EQ(tokenAt(",a,b", ",", 1), "a");
+  EXPECT_EQ(tokenCount("", ","), 0);
 
-  // Length & IsEmpty
-  EXPECT_EQ(__stride_string_length(src), 11);
-  EXPECT_FALSE(__stride_string_is_empty(src));
-  EXPECT_TRUE(__stride_string_is_empty(StrideStringView{"", 0}));
-
-  // ParseInt / ParseReal
-  EXPECT_EQ(__stride_string_parse_int(StrideStringView{"12345", 5}, 0), 12345);
-  EXPECT_EQ(__stride_string_parse_int(StrideStringView{"invalid", 7}, 99), 99);
-  EXPECT_DOUBLE_EQ(__stride_string_parse_real(StrideStringView{"3.14159", 7}, 0.0), 3.14159);
-
-  // TokenAt & TokenCount
-  StrideStringView tokSrc{"one,two,three", 13};
-  StrideStringView tokDelim{",", 1};
-  EXPECT_EQ(__stride_string_token_count(tokSrc, tokDelim), 3);
-  EXPECT_EQ(__stride_string_token_at(tokSrc, tokDelim, 0).toString(), "one");
-  EXPECT_EQ(__stride_string_token_at(tokSrc, tokDelim, 1).toString(), "two");
-  EXPECT_EQ(__stride_string_token_at(tokSrc, tokDelim, 2).toString(), "three");
-  EXPECT_EQ(__stride_string_token_at(tokSrc, tokDelim, 3).length, 0);
-  EXPECT_EQ(__stride_string_token_at(tokSrc, tokDelim, -1).length, 0);
-
-  // Repeat
-  auto rep = __stride_string_repeat(StrideStringView{"abc", 3}, 3);
+  StrideStringView abcRep = sv("abc"), rep{}, repZero{};
+  __stride_jit_string_repeat(&abcRep, 3, &rep);
   EXPECT_EQ(rep.toString(), "abcabcabc");
-  auto repZero = __stride_string_repeat(StrideStringView{"abc", 3}, 0);
+  __stride_jit_string_repeat(&abcRep, 0, &repZero);
   EXPECT_EQ(repZero.length, 0);
 }
 
+TEST(JITStringTest, ParseNumbers) {
+  EXPECT_EQ(parseInt("12345", 0), 12345);
+  EXPECT_EQ(parseInt("  -42", 0), -42);
+  EXPECT_EQ(parseInt("+7", 0), 7);
+  EXPECT_EQ(parseInt("12abc", 0), 12);
+  EXPECT_EQ(parseInt("invalid", 99), 99);
+  EXPECT_EQ(parseInt("-", 99), 99);
+  EXPECT_EQ(parseInt("2147483647", 0), 2147483647);
+  EXPECT_EQ(parseInt("-2147483648", 0), INT32_MIN);
+  EXPECT_EQ(parseInt("2147483648", 99), 99); // does not fit in Int32
+
+  EXPECT_DOUBLE_EQ(parseReal("3.14159", 0.0), 3.14159);
+  EXPECT_DOUBLE_EQ(parseReal(" -2.5e3", 0.0), -2500.0);
+  EXPECT_DOUBLE_EQ(parseReal("1.5kg", 0.0), 1.5);
+  EXPECT_DOUBLE_EQ(parseReal("abc", 7.0), 7.0);
+}
+
+// Stride numbers always use '.', whatever locale the host program sets.
+TEST(JITStringTest, NumbersIgnoreHostLocale) {
+  const char *commaLocales[] = {"de_DE.UTF-8", "de_DE", "German_Germany.1252",
+                                "de-DE", "fr_FR.UTF-8"};
+  std::string previous = std::setlocale(LC_NUMERIC, nullptr);
+  const char *set = nullptr;
+  for (const char *name : commaLocales) {
+    if (std::setlocale(LC_NUMERIC, name)) {
+      set = name;
+      break;
+    }
+  }
+  if (!set) {
+    GTEST_SKIP() << "no locale with a decimal comma is installed";
+  }
+  double parsed = parseReal("1.5", 0.0);
+  std::string fixed = format("{:.2f}", {realArg(2.25)});
+  std::string shortest = format("{}", {realArg(0.5)});
+  std::setlocale(LC_NUMERIC, previous.c_str());
+  EXPECT_DOUBLE_EQ(parsed, 1.5);
+  EXPECT_EQ(fixed, "2.25");
+  EXPECT_EQ(shortest, "0.5");
+}
+
+TEST(JITStringTest, FormatSpecs) {
+  EXPECT_EQ(format("{:04d}", {intArg(42)}), "0042");
+  EXPECT_EQ(format("{:05d}", {intArg(-42)}), "-0042");
+  EXPECT_EQ(format("{:4d}", {intArg(7)}), "   7");
+  EXPECT_EQ(format("{:x} {:X}", {intArg(255), intArg(255)}), "ff FF");
+  EXPECT_EQ(format("{:08x}", {intArg(-1)}), "ffffffff");
+  EXPECT_EQ(format("{:.1f}", {realArg(98.6)}), "98.6");
+  EXPECT_EQ(format("{:e}", {realArg(1500.0)}), "1.500000e+03");
+  EXPECT_EQ(format("{{}} {}", {intArg(1)}), "{} 1");
+  EXPECT_EQ(format("{} {}", {intArg(1)}), "1 ");
+  EXPECT_EQ(format("open {", {}), "open {");
+}
+
+TEST(JITStringTest, PrintGoesToWriter) {
+  std::string captured;
+  stride_runtime_set_writer(
+      [](void *context, const char *data, int32_t length, bool endOfLine) {
+        auto *text = static_cast<std::string *>(context);
+        text->append(data, static_cast<size_t>(length));
+        if (endOfLine) {
+          text->push_back('\n');
+        }
+      },
+      &captured);
+  StrideStringView a = sv("abc"), b = sv("def");
+  __stride_jit_string_print(&a);
+  __stride_jit_string_println(&b);
+  __stride_jit_string_println(nullptr);
+  stride_runtime_set_writer(nullptr, nullptr);
+  EXPECT_EQ(captured, "abcdef\n\n");
+}
+
 TEST(JITStringTest, TokenizeWithOverflow) {
-  StrideStringView src{"alpha,beta,gamma,delta,epsilon", 30};
-  StrideStringView delim{",", 1};
+  StrideStringView src = sv("alpha,beta,gamma,delta,epsilon");
+  StrideStringView delim = sv(",");
   StrideStringView tokens[3];
+  int32_t count = 0;
   bool overflow = false;
 
-  int64_t count = __stride_string_tokenize(src, delim, tokens, 3, &overflow);
+  __stride_jit_string_tokenize(&src, &delim, tokens, 3, &count, &overflow);
   EXPECT_EQ(count, 5);
   EXPECT_TRUE(overflow);
   EXPECT_EQ(tokens[0].toString(), "alpha");
   EXPECT_EQ(tokens[1].toString(), "beta");
   EXPECT_EQ(tokens[2].toString(), "gamma");
 
-  // Non-overflow case
   StrideStringView tokensFull[10];
   overflow = false;
-  count = __stride_string_tokenize(src, delim, tokensFull, 10, &overflow);
+  __stride_jit_string_tokenize(&src, &delim, tokensFull, 10, &count,
+                               &overflow);
   EXPECT_EQ(count, 5);
   EXPECT_FALSE(overflow);
   EXPECT_EQ(tokensFull[0].toString(), "alpha");
@@ -255,6 +371,42 @@ TEST(JITStringTest, JITCompilationAndExecution) {
   EXPECT_EQ(str("OutConstStr"), "Greetings");
   EXPECT_EQ(str("OutConstCat"), "Greetings, Hello World");
   EXPECT_EQ(str("OutConstFmt"), "Greetings #7!");
+  // 22. maxSize cuts longer values off
+  EXPECT_EQ(str("OutShort"), "Hello");
+  EXPECT_EQ(str("OutShortSub"), "Hello, H");
+
+  // Stored strings own their characters: filling the runtime's result arena
+  // (where Concat and Format put theirs) does not change them.
+  StrideStringView fill = sv("x"), filled{};
+  for (int i = 0; i < 4; ++i) {
+    __stride_jit_string_repeat(&fill, 40000, &filled);
+  }
+  EXPECT_EQ(str("OutConcat"), "Hello, World!");
+  EXPECT_EQ(str("OutFmt1"), "Player Hero: Score 0042, HP 98.6%, Alive on");
+  EXPECT_EQ(str("OutArraySub"), "Hello");
+
+  // A String set by the host is copied: the host's string may go away.
+  {
+    std::string temporary = "Short lived";
+    ASSERT_TRUE(strenv.setStateVar(state, "InStr", temporary, std::nullopt, dom));
+    temporary.assign(temporary.size(), '#');
+  }
+  EXPECT_EQ(str("InStr"), "Short lived");
+
+  // The state describes where each String's characters are.
+  bool sawShort = false;
+  for (const auto &field : strenv.getStateFields(dom)) {
+    EXPECT_EQ(field.name.find("__chars"), std::string::npos) << field.name;
+    if (field.name == "OutShort") {
+      sawShort = true;
+      EXPECT_EQ(field.kind, StrideEnvironment::StateField::Kind::String);
+      EXPECT_EQ(field.capacity, 5u);
+      const auto *chars =
+          static_cast<const char *>(state) + field.charsOffset;
+      EXPECT_EQ(std::string(chars, 5), "Hello");
+    }
+  }
+  EXPECT_TRUE(sawShort);
 }
 
 TEST(JITStringTest, ObjectAndHeaderEmission) {

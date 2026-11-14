@@ -38,6 +38,8 @@ _domainDefinition RootDomain {
         string OutConstStr { domain: RootDomain }
         string OutConstCat { domain: RootDomain }
         string OutConstFmt { domain: RootDomain }
+        string OutShort { domain: RootDomain maxSize: 5 }
+        string OutShortSub { domain: RootDomain maxSize: 8 }
     ]
     domainFunctionCode: ''
 }
@@ -123,3 +125,7 @@ constant Greeting { value: "Greetings" }
 Greeting >> OutConstStr;
 [ Greeting, ", ", InStr ] >> Concat() >> OutConstCat;
 [ Greeting, 7 ] >> Format(format: "{} #{}!") >> OutConstFmt;
+
+# 22. maxSize: longer values are cut off
+"Hello World" >> OutShort;
+[ "Hello, ", InStr ] >> Concat() >> OutShortSub;

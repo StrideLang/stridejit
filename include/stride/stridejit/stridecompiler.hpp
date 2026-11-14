@@ -29,6 +29,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include "stride/stridegen/codeanalysis.hpp"
@@ -174,6 +175,31 @@ public:
   std::pair<llvm::Value *, std::optional<llvm::Type *>>
   getGlobal(std::string globalName);
   bool globalExists(std::string globalName);
+
+  // ---- String storage ----
+  // A String variable is a {ptr, length} view plus a companion variable,
+  // <name>__chars, that holds its characters: [maxSize x i8], or
+  // [count x [maxSize x i8]] for an array of strings. After every write the
+  // characters are copied into the companion (cut off at maxSize) and the
+  // view is pointed at it, so the value no longer depends on where it came
+  // from (a literal, the runtime's result arena, the host).
+  static constexpr int kDefaultStringMaxSize = 128;
+  static std::string stringCharsName(const std::string &name) {
+    return name + "__chars";
+  }
+  bool isStringType(llvm::Type *type);
+  // The maxSize property of decl, or kDefaultStringMaxSize.
+  static int stringMaxSize(std::shared_ptr<DeclarationNode> decl);
+  // The companion type for a variable of type varType (a String or an array
+  // of String) declared by decl, or nullptr when varType holds no strings.
+  llvm::Type *stringCharsType(std::shared_ptr<DeclarationNode> decl,
+                              llvm::Type *varType);
+  // After a write to the String variable name (element indices[0] for an
+  // array): copies its characters into the variable's own buffer. Does
+  // nothing for a variable without one.
+  void commitStringWrite(
+      const std::string &name,
+      const std::vector<std::variant<size_t, std::string>> &indices);
 
   llvm::Type *getElementType(llvm::Value *V);
 

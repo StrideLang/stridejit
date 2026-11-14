@@ -1954,6 +1954,13 @@ CallExprAST::codegen(StrideCompiler &state) {
     }
   }
 
+  // Strings written by the call keep their characters in their own buffer
+  for (const auto &outArg : OutArgs) {
+    if (auto *varExpr = dynamic_cast<VariableExprAST *>(outArg.get())) {
+      state.commitStringWrite(varExpr->getName(), varExpr->getIndices());
+    }
+  }
+
   return {call, std::nullopt};
 }
 

@@ -102,86 +102,29 @@ static_assert(offsetof(StrideFormatArg, strVal) == 16,
 
 } // namespace strd
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wreturn-type-c-linkage"
-#endif
-
 extern "C" {
 
-STRIDE_EXPORT strd::StrideStringView
-__stride_string_substring(strd::StrideStringView src, int64_t start,
-                          int64_t len);
-
-STRIDE_EXPORT strd::StrideStringView
-__stride_string_trim(strd::StrideStringView src, strd::StrideStringView chars);
-
-STRIDE_EXPORT strd::StrideStringView
-__stride_string_trim_left(strd::StrideStringView src,
-                          strd::StrideStringView chars);
-
-STRIDE_EXPORT strd::StrideStringView
-__stride_string_trim_right(strd::StrideStringView src,
-                           strd::StrideStringView chars);
-
-STRIDE_EXPORT int64_t __stride_string_find(strd::StrideStringView haystack,
-                                           strd::StrideStringView needle,
-                                           int64_t start);
-
-STRIDE_EXPORT int64_t __stride_string_find_last(strd::StrideStringView haystack,
-                                                strd::StrideStringView needle);
-
-STRIDE_EXPORT bool __stride_string_contains(strd::StrideStringView haystack,
-                                            strd::StrideStringView needle);
-
-STRIDE_EXPORT bool __stride_string_starts_with(strd::StrideStringView str,
-                                               strd::StrideStringView prefix);
-
-STRIDE_EXPORT bool __stride_string_ends_with(strd::StrideStringView str,
-                                             strd::StrideStringView suffix);
-
-STRIDE_EXPORT bool __stride_string_equal(strd::StrideStringView a,
-                                         strd::StrideStringView b);
-
-STRIDE_EXPORT int64_t __stride_string_compare(strd::StrideStringView a,
-                                              strd::StrideStringView b);
-
-STRIDE_EXPORT int64_t __stride_string_length(strd::StrideStringView str);
-
-STRIDE_EXPORT bool __stride_string_is_empty(strd::StrideStringView str);
-
-STRIDE_EXPORT int64_t __stride_string_parse_int(strd::StrideStringView str,
-                                                int64_t defaultVal);
-
-STRIDE_EXPORT double __stride_string_parse_real(strd::StrideStringView str,
-                                                double defaultVal);
-
-STRIDE_EXPORT int64_t __stride_string_tokenize(
-    strd::StrideStringView src, strd::StrideStringView delim,
-    strd::StrideStringView *outTokens, int64_t maxTokens, bool *outOverflow);
-
-STRIDE_EXPORT strd::StrideStringView
-__stride_string_token_at(strd::StrideStringView src,
-                         strd::StrideStringView delim, int64_t index);
-
-STRIDE_EXPORT int64_t __stride_string_token_count(strd::StrideStringView src,
-                                                  strd::StrideStringView delim);
-
-STRIDE_EXPORT strd::StrideStringView
-__stride_string_repeat(strd::StrideStringView str, int64_t count);
-
-STRIDE_EXPORT void __stride_string_println(strd::StrideStringView str);
-
-STRIDE_EXPORT void __stride_string_print(strd::StrideStringView str);
+// Where Print and PrintLn output goes. endOfLine is true for PrintLn, after
+// the text. NULL restores the default, stdout.
+typedef void (*StrideRuntimeWriter)(void *context, const char *data,
+                                    int32_t length, bool endOfLine);
+STRIDE_EXPORT void stride_runtime_set_writer(StrideRuntimeWriter writer,
+                                             void *context);
 
 // ---------------------------------------------------------------------------
-// JIT-facing entry points. These are ABI-neutral: strings are always passed by
+// Entry points (implemented in C, strideruntime_string.c). These are
+// ABI-neutral: strings are always passed by
 // pointer, string results are written through a trailing out pointer, and
 // integers use the 32-bit width of Int32. The JIT-generated code and the
 // host C++ compiler (e.g. MSVC, which passes 16-byte structs by hidden
-// reference) disagree on by-value struct passing, so Stride platform modules
-// must bind to these instead of the by-value functions above.
+// reference) disagree on by-value struct passing, so there are no by-value
+// versions.
 // ---------------------------------------------------------------------------
+// Copies the characters of the String in *slot into its own buffer of
+// capacity bytes (cut off there) and points it at them. Called after every
+// write to a String variable.
+STRIDE_EXPORT void __stride_jit_string_store(strd::StrideStringView *slot,
+                                             char *buffer, int32_t capacity);
 STRIDE_EXPORT void
 __stride_jit_string_substring(const strd::StrideStringView *src, int32_t start,
                               int32_t len, strd::StrideStringView *out);
@@ -248,9 +191,5 @@ STRIDE_EXPORT void __stride_jit_string_format(const strd::StrideStringView *fmt,
                                               int32_t count,
                                               strd::StrideStringView *out);
 }
-
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
 
 #endif // STRIDERUNTIME_STRING_H

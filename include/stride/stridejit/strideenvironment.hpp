@@ -262,6 +262,12 @@ public:
     size_t offset{0};
     size_t count{1};       // Elements, 1 for a scalar
     size_t elementSize{0}; // Bytes per element
+    // A String's characters, in the state itself: element i's characters
+    // start at charsOffset + i * capacity, and its length is the view's
+    // length (at offset + i * elementSize, after the pointer). capacity is 0
+    // for a String without its own buffer (e.g. a constant).
+    size_t charsOffset{0};
+    size_t capacity{0};
   };
   // The fields of a function's or domain's state struct, in struct order
   std::vector<StateField> getStateFields(const std::string &funcName) const;

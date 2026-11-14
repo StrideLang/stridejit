@@ -102,7 +102,7 @@ endif()
 
 # StrideRuntime (standalone static runtime library for AOT & JIT) ------------
 set(STRIDERUNTIME_SRC
-  src/strideruntime_string.cpp
+  src/strideruntime_string.c
   src/strideruntime_random.cpp
 )
 

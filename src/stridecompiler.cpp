@@ -468,6 +468,137 @@ void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
   LOG_INFO() << "global: " << fullName << std::endl;
 
   m_globals[globalDecl->getName()] = {MyGlobal, Type};
+
+  // The characters of a String signal (see commitStringWrite)
+  if (!isConstant) {
+    if (llvm::Type *charsType = stringCharsType(globalDecl, Type)) {
+      auto *chars = new llvm::GlobalVariable(
+          *TheModule, charsType, false, llvm::GlobalValue::ExternalLinkage,
+          llvm::Constant::getNullValue(charsType),
+          stringCharsName(fullName));
+      m_globals[stringCharsName(globalDecl->getName())] = {chars, charsType};
+    }
+  }
+}
+
+bool StrideCompiler::isStringType(llvm::Type *type) {
+  auto it = typesMap.find(DataTypes::String);
+  return type && it != typesMap.end() && type == it->second;
+}
+
+int StrideCompiler::stringMaxSize(std::shared_ptr<DeclarationNode> decl) {
+  if (decl) {
+    auto maxSize = decl->getPropertyValue("maxSize");
+    if (maxSize && maxSize->getNodeType() == AST::Int) {
+      int64_t value =
+          std::static_pointer_cast<ValueNode>(maxSize)->getIntValue();
+      if (value > 0 && value <= INT32_MAX) {
+        return static_cast<int>(value);
+      }
+    }
+  }
+  return kDefaultStringMaxSize;
+}
+
+llvm::Type *
+StrideCompiler::stringCharsType(std::shared_ptr<DeclarationNode> decl,
+                                llvm::Type *varType) {
+  if (!varType) {
+    return nullptr;
+  }
+  auto *charsType = llvm::ArrayType::get(llvm::Type::getInt8Ty(*TheContext),
+                                         stringMaxSize(decl));
+  if (isStringType(varType)) {
+    return charsType;
+  }
+  if (varType->isArrayTy() && isStringType(varType->getArrayElementType())) {
+    return llvm::ArrayType::get(charsType, varType->getArrayNumElements());
+  }
+  return nullptr;
+}
+
+void StrideCompiler::commitStringWrite(
+    const std::string &name,
+    const std::vector<std::variant<size_t, std::string>> &indices) {
+  // The variable and its companion, as locals (state fields) or globals
+  std::pair<llvm::Value *, std::optional<llvm::Type *>> var{nullptr, {}};
+  std::pair<llvm::Value *, std::optional<llvm::Type *>> chars{nullptr, {}};
+  const std::string charsName = stringCharsName(name);
+  auto charsIt = NamedValues.find(charsName);
+  if (charsIt != NamedValues.end()) {
+    chars = charsIt->second;
+    auto varIt = NamedValues.find(name);
+    if (varIt != NamedValues.end()) {
+      var = varIt->second;
+    }
+  } else if (globalExists(charsName) && globalExists(name)) {
+    chars = getGlobal(charsName);
+    var = getGlobal(name);
+  }
+  if (!var.first || !chars.first || !var.second || !chars.second ||
+      !var.first->getType()->isPointerTy() ||
+      !chars.first->getType()->isPointerTy()) {
+    return;
+  }
+  llvm::Type *varType = *var.second;
+  llvm::Type *charsType = *chars.second;
+
+  llvm::Type *i32Ty = llvm::Type::getInt32Ty(*TheContext);
+  llvm::Value *zero = Builder->getInt32(0);
+  llvm::Value *slot = var.first;
+  llvm::Value *buffer = nullptr;
+  uint64_t capacity = 0;
+  if (indices.empty()) {
+    if (!isStringType(varType) || !charsType->isArrayTy()) {
+      return; // a whole array written at once is not a string write
+    }
+    capacity = charsType->getArrayNumElements();
+    buffer = Builder->CreateInBoundsGEP(charsType, chars.first, {zero, zero},
+                                        name + "_chars");
+  } else {
+    if (!varType->isArrayTy() || !charsType->isArrayTy() ||
+        !charsType->getArrayElementType()->isArrayTy()) {
+      return;
+    }
+    llvm::Value *index = nullptr;
+    if (const size_t *intIndex = std::get_if<size_t>(&indices[0])) {
+      index = Builder->getInt64(*intIndex);
+    } else if (const std::string *indexName =
+                   std::get_if<std::string>(&indices[0])) {
+      auto it = NamedValues.find(*indexName);
+      if (it == NamedValues.end()) {
+        return;
+      }
+      index = it->second.first;
+      if (index->getType()->isPointerTy() && it->second.second) {
+        index = Builder->CreateLoad(*it->second.second, index, *indexName);
+      }
+    }
+    if (!index || !index->getType()->isIntegerTy()) {
+      return;
+    }
+    llvm::Type *elemType = varType->getArrayElementType();
+    slot = Builder->CreateGEP(elemType, var.first, index, name + "_slot");
+    llvm::Type *elemChars = charsType->getArrayElementType();
+    capacity = elemChars->getArrayNumElements();
+    buffer = Builder->CreateInBoundsGEP(charsType, chars.first,
+                                        {Builder->getInt64(0), index,
+                                         Builder->getInt64(0)},
+                                        name + "_chars");
+  }
+
+  llvm::Function *store = TheModule->getFunction("__stride_jit_string_store");
+  if (!store) {
+    llvm::Type *ptrTy = llvm::PointerType::get(*TheContext, 0);
+    store = llvm::Function::Create(
+        llvm::FunctionType::get(llvm::Type::getVoidTy(*TheContext),
+                                {ptrTy, ptrTy, i32Ty}, false),
+        llvm::Function::ExternalLinkage, "__stride_jit_string_store",
+        *TheModule);
+  }
+  Builder->CreateCall(store, {slot, buffer,
+                              Builder->getInt32(static_cast<uint32_t>(
+                                  capacity))});
 }
 
 llvm::Type *StrideCompiler::getElementType(llvm::Value *V) {
@@ -1065,6 +1196,21 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
         defaultVal = llvm::Constant::getNullValue(varType);
       }
       defaultFieldValues.push_back(defaultVal);
+
+      // The characters of a String variable (see commitStringWrite)
+      if (var.first->getNodeType() == AST::Declaration ||
+          var.first->getNodeType() == AST::ArrayDeclaration) {
+        auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
+        llvm::Type *charsType = decl->getEntityType() == "constant"
+                                    ? nullptr
+                                    : stringCharsType(decl, varType);
+        if (charsType) {
+          info.varIndices[stringCharsName(varName)] =
+              static_cast<unsigned>(fieldTypes.size());
+          fieldTypes.push_back(charsType);
+          defaultFieldValues.push_back(llvm::Constant::getNullValue(charsType));
+        }
+      }
     }
   }
 

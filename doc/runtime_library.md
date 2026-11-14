@@ -2,7 +2,7 @@
 
 `StrideRuntime` is a standalone, lightweight static library that provides the C-ABI runtime support functions called by compiled Stride programs (specifically string manipulation, formatting, parsing, and console I/O defined in `Strings.stride`).
 
-Unlike `StrideJit`, `StrideRuntime` has **zero LLVM or parser dependencies**—it depends only on the standard C/C++ runtime library, making it suitable for linking with Ahead-of-Time (AOT) object files emitted by `StrideEnvironment::emitObjectFile`.
+The runtime is plain C99 (`src/strideruntime_string.c`), so the same file builds for the desktop and for microcontrollers (avr-gcc and avr-libc). Unlike `StrideJit`, `StrideRuntime` has **zero LLVM or parser dependencies**—it depends only on the C library, making it suitable for linking with Ahead-of-Time (AOT) object files emitted by `StrideEnvironment::emitObjectFile`.
 
 ---
 
@@ -13,7 +13,7 @@ Stride `platformModule`s generate code in one of two ways:
 2. **External Runtime Calls (`@` prefix)**: Higher-level operations in `Strings.stride` (e.g., `@__stride_jit_string_format`, `@__stride_jit_string_concat_n`) emit external function calls (`declare ... @__stride_jit_string_*`) resolved at link time from `StrideRuntime`.
 
 ### Mode A: In-Memory JIT (`StrideEnvironment::compileInMemory`)
-`StrideJit` links `StrideRuntime` publicly (`target_link_libraries(StrideJit PUBLIC StrideRuntime ...)`), and `StrideEnvironment::compileInMemory()` automatically registers all `__stride_jit_string_*` and `__stride_string_*` symbols in the ORC `JITDylib`. No additional setup is required.
+`StrideJit` links `StrideRuntime` publicly (`target_link_libraries(StrideJit PUBLIC StrideRuntime ...)`), and `StrideEnvironment::compileInMemory()` automatically registers all `__stride_jit_string_*` symbols in the ORC `JITDylib`. No additional setup is required.
 
 ### Mode B: Ahead-of-Time (AOT) Object Emission (`emitObjectFile` / `emitCHeader`)
 When compiling a `.stride` file to a native object file (`.o` / `.obj`) and C header (`.h`):
@@ -97,7 +97,10 @@ struct StrideFormatArg {
 
 ### Memory Model
 - **Zero-Copy Slicing**: Substring, trimming, and tokenization (`Substring`, `Trim`, `TrimLeft`, `TrimRight`, `TokenAt`, `Tokenize`) never allocate memory; they return a `StrideStringView` pointing directly into the source string buffer with adjusted `data` and `length`.
-- **Thread-Local Scratch Ring Arena**: Generative operations (`Concat`, `Repeat`, `Format`) allocate from a 64 KB thread-local ring buffer (`ScratchArena` in `src/strideruntime_string.cpp`), providing $O(1)$ bump allocation with zero heap fragmentation and automatic wrap-around.
+- **Result arena**: Generative operations (`Concat`, `Repeat`, `Format`) write their characters into one thread-local arena (64 KB by default, `STRIDE_RT_ARENA_SIZE`). It starts over when a result does not fit, so a result stays valid only until enough later results have been made; a `Format` result is at most 4095 characters.
+- **String variables own their characters**: every String variable has a companion buffer of `maxSize` bytes (default 128), named `<name>__chars`. After each write the compiler calls `__stride_jit_string_store(slot, buffer, capacity)`, which copies the characters in (cut off at `maxSize`, overlap allowed) and points the view at them. So a stored String never depends on the arena, a literal or host memory, and `setStateVar` copies the same way. `getStateFields` reports each String's `charsOffset` and `capacity`. Strings never grow.
+- **Numbers ignore the host locale**: `Parse` and `Format` always use `.` as the decimal separator (`_strtod_l`/`_snprintf_l` on Windows, `strtod_l`/`uselocale` elsewhere), even when the host program has set a locale with a decimal comma.
+- **Output**: `Print` and `PrintLn` go to stdout unless the host calls `stride_runtime_set_writer(writer, context)` to receive them; on microcontrollers (`STRIDE_RT_NO_STDIO`) they go to `stride_rt_platform_write`, which the platform runtime provides.
 
 ---
 
@@ -105,7 +108,9 @@ struct StrideFormatArg {
 
 `StrideRuntime` exposes two sets of `extern "C"` functions:
 1. **`__stride_jit_string_*` (JIT / AOT Codegen ABI)**: Pointer-based ABI used by compiled Stride code. Struct inputs are passed by `const StrideStringView*` and struct outputs are written through a trailing `StrideStringView* out` parameter (`stride.struct_out`), avoiding platform-specific struct-by-value calling convention discrepancies.
-2. **`__stride_string_*` (Host C++ Convenience API)**: By-value helpers using `StrideStringView` and `int64_t`.
+There are no by-value versions: calling conventions for structs passed by value differ between compilers.
+
+`void __stride_jit_string_store(StrideStringView *slot, char *buffer, int32_t capacity)` is not bound to a Stride module: the compiler calls it after every write to a String variable (see Memory Model).
 
 ### 4.1 Codegen Entry Points (`__stride_jit_string_*`)
 
@@ -133,8 +138,8 @@ struct StrideFormatArg {
 #### Numeric Parsing
 | Function Signature | Stride Module | Description |
 | :--- | :--- | :--- |
-| `int32_t __stride_jit_string_parse_int(const StrideStringView *str, int32_t defaultVal)` | `Parse@String_Int` | Parses a base-10 integer using `std::from_chars` (ignoring leading/trailing whitespace). Returns `defaultVal` on invalid input. |
-| `double __stride_jit_string_parse_real(const StrideStringView *str, double defaultVal)` | `Parse@String_Real` | Parses a floating-point number using `std::from_chars`. Returns `defaultVal` on invalid input. |
+| `int32_t __stride_jit_string_parse_int(const StrideStringView *str, int32_t defaultVal)` | `Parse@String_Int` | Parses leading whitespace, an optional sign and base-10 digits; text after the digits is ignored. Returns `defaultVal` when there are no digits or the number does not fit in 32 bits. |
+| `double __stride_jit_string_parse_real(const StrideStringView *str, double defaultVal)` | `Parse@String_Real` | Parses a floating-point number as `strtod` does, always with `.` as the decimal separator; text after the number is ignored. Returns `defaultVal` on invalid input. |
 
 #### Tokenization (Zero-Copy)
 | Function Signature | Stride Module | Description |
@@ -149,36 +154,11 @@ struct StrideFormatArg {
 | `void __stride_jit_string_concat_n(const StrideStringView *views, int32_t count, StrideStringView *out)` | `Concat` / `+` | Concatenates `count` string views from `views[0..count-1]` in a single arena allocation. |
 | `void __stride_jit_string_repeat(const StrideStringView *str, int32_t count, StrideStringView *out)` | `Repeat` | Repeats `str` `count` times into a contiguous arena buffer. |
 | `void __stride_jit_string_format(const StrideStringView *fmt, const StrideFormatArg *args, int32_t count, StrideStringView *out)` | `Format` | Formats `fmt` replacing `{}` / `{:...}` placeholders (`{:d}`, `{:04d}`, `{:x}`, `{:X}`, `{:.Nf}`, `{:e}`, `{:b}`, `{:s}`, escaped `{{` / `}}`) with `args[0..count-1]`. |
-| `void __stride_jit_string_print(const StrideStringView *str)` | `Print` | Writes `str` to `stdout` without a trailing newline and flushes. |
-| `void __stride_jit_string_println(const StrideStringView *str)` | `PrintLn` | Writes `str` followed by `\n` to `stdout` and flushes. |
+| `void __stride_jit_string_print(const StrideStringView *str)` | `Print` | Writes `str` without a trailing newline (see Output above). |
+| `void __stride_jit_string_println(const StrideStringView *str)` | `PrintLn` | Writes `str` followed by a newline (see Output above). |
 
 ---
 
-### 4.2 Direct Host C++ Entry Points (`__stride_string_*`)
-
-For host C++ callers and unit tests that prefer passing `StrideStringView` by value:
-
-- `StrideStringView __stride_string_substring(StrideStringView src, int64_t start, int64_t len)`
-- `StrideStringView __stride_string_trim(StrideStringView src, StrideStringView chars)`
-- `StrideStringView __stride_string_trim_left(StrideStringView src, StrideStringView chars)`
-- `StrideStringView __stride_string_trim_right(StrideStringView src, StrideStringView chars)`
-- `int64_t __stride_string_find(StrideStringView haystack, StrideStringView needle, int64_t start)`
-- `int64_t __stride_string_find_last(StrideStringView haystack, StrideStringView needle)`
-- `bool __stride_string_contains(StrideStringView haystack, StrideStringView needle)`
-- `bool __stride_string_starts_with(StrideStringView str, StrideStringView prefix)`
-- `bool __stride_string_ends_with(StrideStringView str, StrideStringView suffix)`
-- `bool __stride_string_equal(StrideStringView a, StrideStringView b)`
-- `int64_t __stride_string_compare(StrideStringView a, StrideStringView b)`
-- `int64_t __stride_string_length(StrideStringView str)`
-- `bool __stride_string_is_empty(StrideStringView str)`
-- `int64_t __stride_string_parse_int(StrideStringView str, int64_t defaultVal)`
-- `double __stride_string_parse_real(StrideStringView str, double defaultVal)`
-- `int64_t __stride_string_tokenize(StrideStringView src, StrideStringView delim, StrideStringView *outTokens, int64_t maxTokens, bool *outOverflow)`
-- `StrideStringView __stride_string_token_at(StrideStringView src, StrideStringView delim, int64_t index)`
-- `int64_t __stride_string_token_count(StrideStringView src, StrideStringView delim)`
-- `StrideStringView __stride_string_repeat(StrideStringView str, int64_t count)`
-- `void __stride_string_print(StrideStringView str)`
-- `void __stride_string_println(StrideStringView str)`
 
 ## 5. Random Numbers
 

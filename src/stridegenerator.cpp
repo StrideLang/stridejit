@@ -1120,6 +1120,16 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
               if (!alreadyAdded) {
                 state.addDynamicDomainField(node, varDecl->getName(), varType,
                                             defaultVal);
+                // The characters of a String (see commitStringWrite)
+                llvm::Type *charsType =
+                    varDecl->getEntityType() == "constant"
+                        ? nullptr
+                        : state.stringCharsType(varDecl, varType);
+                if (charsType) {
+                  state.addDynamicDomainField(
+                      node, StrideCompiler::stringCharsName(varDecl->getName()),
+                      charsType, llvm::Constant::getNullValue(charsType));
+                }
               }
             };
 

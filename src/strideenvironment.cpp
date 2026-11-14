@@ -1485,6 +1485,32 @@ StrideEnvironment::getStateFields(const std::string &funcName) const {
     if (field.elementSize == 0 && DL) {
       field.elementSize = DL->getTypeAllocSize(type);
     }
+    // A String's character buffer is part of the String, not a field of its
+    // own
+    const std::string charsSuffix = StrideCompiler::stringCharsName("");
+    if (name.size() > charsSuffix.size() &&
+        name.compare(name.size() - charsSuffix.size(), charsSuffix.size(),
+                     charsSuffix) == 0 &&
+        info->varIndices.count(
+            name.substr(0, name.size() - charsSuffix.size()))) {
+      continue;
+    }
+    if (field.kind == StateField::Kind::String) {
+      auto charsIt = info->varIndices.find(StrideCompiler::stringCharsName(name));
+      if (charsIt != info->varIndices.end() &&
+          charsIt->second < info->fieldOffsets.size()) {
+        llvm::Type *charsType =
+            info->structType->getElementType(charsIt->second);
+        if (charsType->isArrayTy() &&
+            charsType->getArrayElementType()->isArrayTy()) {
+          charsType = charsType->getArrayElementType();
+        }
+        if (charsType->isArrayTy()) {
+          field.charsOffset = info->fieldOffsets[charsIt->second];
+          field.capacity = charsType->getArrayNumElements();
+        }
+      }
+    }
     fields.push_back(field);
   }
   std::sort(fields.begin(), fields.end(),
@@ -1492,6 +1518,39 @@ StrideEnvironment::getStateFields(const std::string &funcName) const {
               return a.offset < b.offset;
             });
   return fields;
+}
+
+// Writes value into the String at slot, a field of the state at statePtr
+// (element arrayIdx of an array of strings). A String with its own
+// character buffer (<name>__chars) gets a copy of the characters, cut off at
+// its maxSize, so the state never points into the caller's memory.
+static bool storeStateString(const StrideCompiler::StateStructInfo &info,
+                             void *statePtr, const std::string &name,
+                             char *slot, std::optional<size_t> arrayIdx,
+                             StrideStringView value) {
+  auto *view = reinterpret_cast<StrideStringView *>(slot);
+  *view = value;
+  auto charsIt = info.varIndices.find(StrideCompiler::stringCharsName(name));
+  if (charsIt == info.varIndices.end() ||
+      charsIt->second >= info.fieldOffsets.size()) {
+    return true;
+  }
+  llvm::Type *charsType = info.structType->getElementType(charsIt->second);
+  char *chars = static_cast<char *>(statePtr) + info.fieldOffsets[charsIt->second];
+  if (arrayIdx.has_value()) {
+    if (!charsType->isArrayTy() ||
+        !charsType->getArrayElementType()->isArrayTy() ||
+        *arrayIdx >= charsType->getArrayNumElements()) {
+      return true;
+    }
+    charsType = charsType->getArrayElementType();
+    chars += *arrayIdx * charsType->getArrayNumElements();
+  } else if (!charsType->isArrayTy()) {
+    return true;
+  }
+  __stride_jit_string_store(
+      view, chars, static_cast<int32_t>(charsType->getArrayNumElements()));
+  return true;
 }
 
 static const StrideCompiler::StateStructInfo *
@@ -1718,14 +1777,14 @@ bool StrideEnvironment::setStateVar(void *statePtr, const std::string &varName,
     char *elemPtr = bytePtr + (arrayIdx * elemSz);
     if constexpr (std::is_same_v<T, std::string>) {
       if (elemTy->isStructTy()) {
-        *reinterpret_cast<StrideStringView *>(elemPtr) =
-            StrideStringView{value.c_str(), static_cast<int32_t>(value.size())};
-        return true;
+        return storeStateString(
+            *info, statePtr, baseName, elemPtr, arrayIdx,
+            StrideStringView{value.c_str(), static_cast<int32_t>(value.size())});
       }
     } else if constexpr (std::is_same_v<T, StrideStringView>) {
       if (elemTy->isStructTy()) {
-        *reinterpret_cast<StrideStringView *>(elemPtr) = value;
-        return true;
+        return storeStateString(*info, statePtr, baseName, elemPtr, arrayIdx,
+                                value);
       }
     } else {
       if (elemTy->isIntegerTy(1) || elemTy->isIntegerTy(8)) {
@@ -1748,14 +1807,14 @@ bool StrideEnvironment::setStateVar(void *statePtr, const std::string &varName,
 
   if constexpr (std::is_same_v<T, std::string>) {
     if (fieldType->isStructTy()) {
-      *reinterpret_cast<StrideStringView *>(bytePtr) =
-          StrideStringView{value.c_str(), static_cast<int32_t>(value.size())};
-      return true;
+      return storeStateString(
+          *info, statePtr, baseName, bytePtr, std::nullopt,
+          StrideStringView{value.c_str(), static_cast<int32_t>(value.size())});
     }
   } else if constexpr (std::is_same_v<T, StrideStringView>) {
     if (fieldType->isStructTy()) {
-      *reinterpret_cast<StrideStringView *>(bytePtr) = value;
-      return true;
+      return storeStateString(*info, statePtr, baseName, bytePtr, std::nullopt,
+                              value);
     }
   } else {
     if (fieldType->isIntegerTy(1) || fieldType->isIntegerTy(8)) {
@@ -2467,24 +2526,7 @@ bool StrideEnvironment::compileInMemory() {
   regSym("tan", static_cast<double (*)(double)>(&std::tan));
   regSym("__stride_Greater_d_dd", &__stride_Greater_d_dd);
   regSym("__stride_jit_random_int", &__stride_jit_random_int);
-  regSym("__stride_string_substring", &__stride_string_substring);
-  regSym("__stride_string_trim", &__stride_string_trim);
-  regSym("__stride_string_trim_left", &__stride_string_trim_left);
-  regSym("__stride_string_trim_right", &__stride_string_trim_right);
-  regSym("__stride_string_find", &__stride_string_find);
-  regSym("__stride_string_find_last", &__stride_string_find_last);
-  regSym("__stride_string_contains", &__stride_string_contains);
-  regSym("__stride_string_starts_with", &__stride_string_starts_with);
-  regSym("__stride_string_ends_with", &__stride_string_ends_with);
-  regSym("__stride_string_equal", &__stride_string_equal);
-  regSym("__stride_string_compare", &__stride_string_compare);
-  regSym("__stride_string_length", &__stride_string_length);
-  regSym("__stride_string_is_empty", &__stride_string_is_empty);
-  regSym("__stride_string_parse_int", &__stride_string_parse_int);
-  regSym("__stride_string_parse_real", &__stride_string_parse_real);
-  regSym("__stride_string_tokenize", &__stride_string_tokenize);
-  regSym("__stride_string_println", &__stride_string_println);
-  regSym("__stride_string_print", &__stride_string_print);
+  regSym("__stride_jit_string_store", &__stride_jit_string_store);
   regSym("__stride_jit_string_substring", &__stride_jit_string_substring);
   regSym("__stride_jit_string_trim", &__stride_jit_string_trim);
   regSym("__stride_jit_string_trim_left", &__stride_jit_string_trim_left);
@@ -2508,9 +2550,6 @@ bool StrideEnvironment::compileInMemory() {
   regSym("__stride_jit_string_repeat", &__stride_jit_string_repeat);
   regSym("__stride_jit_string_token_at", &__stride_jit_string_token_at);
   regSym("__stride_jit_string_token_count", &__stride_jit_string_token_count);
-  regSym("__stride_string_token_at", &__stride_string_token_at);
-  regSym("__stride_string_token_count", &__stride_string_token_count);
-  regSym("__stride_string_repeat", &__stride_string_repeat);
 
   llvm::cantFail(JIT->getMainJITDylib().define(llvm::orc::absoluteSymbols(M)));
 
