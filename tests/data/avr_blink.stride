@@ -1,0 +1,17 @@
+use AVR version 1.0 on ArduinoUno
+
+# Blinks the Uno's LED (pin 13) once a second and counts ticks. Compiled to
+# IR on the host by JITTypeTest.AvrFrameworkTypes: AVR's Real is Float32 and
+# its Int is Int16.
+
+signal Millis { type: UInt32 domain: AvrTickDomain }
+signal Wave { type: Real domain: AvrTickDomain }
+signal Count { type: Int default: 0 domain: AvrTickDomain }
+switch LedOn { domain: AvrTickDomain }
+
+[13, 1] >> __AvrPinMode();
+__AvrMillis() >> Millis;
+Millis * 0.0062832 >> __Sin() >> Wave;
+[Wave, 0.0] >> Greater() >> LedOn;
+[13, LedOn] >> __AvrPinWrite();
+Count + 1 >> Count;

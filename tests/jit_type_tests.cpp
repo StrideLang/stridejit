@@ -8,7 +8,11 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
+#include "llvm/Support/raw_ostream.h"
+#include "stride/utils/astquery.h"
+#include <iostream>
 
 namespace {
 
@@ -225,6 +229,30 @@ TEST(JITTypeTest, TypecastList) {
                                     "TestDomain")
                  .value_or(false);
   EXPECT_TRUE(compReal != 0.0);
+}
+
+// A program for the AVR framework compiles with that framework's types and
+// platform modules: Real is float, Int is i16, and pin and timer modules
+// call the AVR runtime. Only IR is generated, so the host needs no AVR
+// backend.
+TEST(JITTypeTest, AvrFrameworkTypes) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "avr_blink.stride"));
+
+  ASSERT_NE(strenv.mStrideEnv.TheModule, nullptr);
+  std::string ir;
+  llvm::raw_string_ostream os(ir);
+  strenv.mStrideEnv.TheModule->print(os, nullptr);
+  os.flush();
+
+  EXPECT_NE(strenv.mStrideEnv.TheModule->getFunction("AvrTickDomain_process"),
+            nullptr);
+  EXPECT_NE(ir.find("@__stride_avr_pin_write(i16"), std::string::npos) << ir;
+  EXPECT_NE(ir.find("@__stride_avr_pin_mode(i16"), std::string::npos);
+  EXPECT_NE(ir.find("i32 @__stride_avr_millis()"), std::string::npos);
+  EXPECT_NE(ir.find("float @sin(float"), std::string::npos);
+  // avr-gcc's libraries have no 64-bit float routines: nothing may use double.
+  EXPECT_EQ(ir.find("double"), std::string::npos) << ir;
 }
 
 } // namespace

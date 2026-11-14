@@ -580,6 +580,8 @@ bool StrideEnvironment::generateIr(const std::vector<std::string> &paths,
     // Each file is compiled in its isolated scope into the shared LLVM Module
     ScopeStack globalScope;
     globalScope.push_back({nullptr, {}});
+    // Signatures use the framework's types (Real may be Float32)
+    mStrideEnv.registerDataTypes(tree);
     declarePlatformModules(frameworkPlatformMembers(tree),
                            globalScope.back().second, mStrideEnv);
 
@@ -628,6 +630,8 @@ bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
 
   ScopeStack globalScope;
   globalScope.push_back({nullptr, {}});
+  // Signatures use the framework's types (Real may be Float32)
+  mStrideEnv.registerDataTypes(root);
   declarePlatformModules(frameworkPlatformMembers(root),
                          globalScope.back().second, mStrideEnv);
 
