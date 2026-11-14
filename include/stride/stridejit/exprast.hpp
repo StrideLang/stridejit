@@ -85,6 +85,10 @@ public:
   // Such a literal takes the type of the value it is used with (see
   // DataTypes::untypedLiteralTakes).
   std::shared_ptr<ValueNode> untypedLiteral;
+  // The first statement of a stream's code. Scratch space for string results
+  // (StrideCompiler::takeScratch) is reused from here on: results made by an
+  // earlier stream are stored or dropped by then.
+  bool startsStream{false};
 };
 
 class StringExprAST : public ExprAST {

@@ -218,6 +218,17 @@ private:
                                const std::string &arrayIndexStr = "0");
 };
 
+// How many characters of scratch a String result with new characters needs.
+// kind is the platform module's resultSize: "sum" (the inputs' sizes added
+// up), "format" (the template plus each value's widest text) or "repeat"
+// (the input's size times a constant count). Capped by the destination's
+// maxSize when the result goes straight into a String, and by the default
+// String size when the bound is unknown.
+uint64_t stringResultBound(StrideCompiler &state, const std::string &kind,
+                           const std::vector<std::unique_ptr<ExprAST>> &inputs,
+                           const std::vector<std::unique_ptr<ExprAST>> &properties,
+                           const std::vector<std::unique_ptr<ExprAST>> &outputs);
+
 } // namespace strd
 
 #endif // FUNCTIONAST_HPP

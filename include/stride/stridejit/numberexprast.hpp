@@ -57,6 +57,7 @@ public:
       : Val(Val), NumBits(numBits), Signed(Signed) {}
   std::pair<llvm::Value *, std::optional<llvm::Type *>>
   codegen(StrideCompiler &state) override;
+  int64_t getValue() const { return Val; }
 };
 
 class BoolExprAST : public ExprAST {

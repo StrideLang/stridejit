@@ -544,14 +544,25 @@ BinaryExprAST::codegen(StrideCompiler &state) {
             state.getFunctionInModule("__stride_jit_string_concat_n");
         if (!concatFunc) {
           llvm::FunctionType *fnTy = llvm::FunctionType::get(
-              llvm::Type::getVoidTy(*state.TheContext), {ptrTy, i32Ty, ptrTy},
-              false);
+              llvm::Type::getVoidTy(*state.TheContext),
+              {ptrTy, i32Ty, ptrTy, i32Ty, ptrTy}, false);
           concatFunc = llvm::Function::Create(
               fnTy, llvm::Function::ExternalLinkage,
               "__stride_jit_string_concat_n", state.TheModule.get());
         }
+        // Scratch for the result's characters (see takeScratch)
+        std::vector<std::unique_ptr<ExprAST>> noArgs;
+        std::vector<std::unique_ptr<ExprAST>> operands;
+        operands.push_back(std::move(LHS));
+        operands.push_back(std::move(RHS));
+        uint64_t bytes =
+            stringResultBound(state, "sum", operands, noArgs, noArgs);
+        LHS = std::move(operands[0]);
+        RHS = std::move(operands[1]);
         state.Builder->CreateCall(
-            concatFunc, {arrayAlloc, state.Builder->getInt32(2), allocOut});
+            concatFunc,
+            {arrayAlloc, state.Builder->getInt32(2), state.takeScratch(bytes),
+             state.Builder->getInt32(static_cast<uint32_t>(bytes)), allocOut});
         Val = state.Builder->CreateLoad(stringTy, allocOut, "concat_res");
         Type = stringTy;
         break;

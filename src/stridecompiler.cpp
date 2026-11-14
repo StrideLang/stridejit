@@ -481,6 +481,48 @@ void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
   }
 }
 
+std::optional<uint64_t>
+StrideCompiler::stringCapacity(const std::string &name) {
+  const std::string charsName = stringCharsName(name);
+  std::optional<llvm::Type *> type;
+  auto it = NamedValues.find(charsName);
+  if (it != NamedValues.end()) {
+    type = it->second.second;
+  } else if (globalExists(charsName)) {
+    type = getGlobal(charsName).second;
+  }
+  if (!type || !*type || !(*type)->isArrayTy()) {
+    return std::nullopt;
+  }
+  llvm::Type *chars = *type;
+  if (chars->getArrayElementType()->isArrayTy()) {
+    chars = chars->getArrayElementType();
+  }
+  return chars->getArrayNumElements();
+}
+
+llvm::Value *StrideCompiler::takeScratch(uint64_t bytes) {
+  llvm::Type *i8Ty = llvm::Type::getInt8Ty(*TheContext);
+  if (!scratch.alloca) {
+    // Sized by finishScratch once the whole body is known
+    llvm::Function *function = Builder->GetInsertBlock()->getParent();
+    scratch.alloca = CreateEntryBlockAlloca(function, "string_scratch",
+                                            llvm::ArrayType::get(i8Ty, 1));
+  }
+  llvm::Value *ptr = Builder->CreateInBoundsGEP(
+      i8Ty, scratch.alloca, Builder->getInt64(scratch.offset), "scratch");
+  scratch.offset += bytes;
+  scratch.size = std::max(scratch.size, scratch.offset);
+  return ptr;
+}
+
+void StrideCompiler::finishScratch() {
+  if (scratch.alloca) {
+    scratch.alloca->setAllocatedType(llvm::ArrayType::get(
+        llvm::Type::getInt8Ty(*TheContext), std::max<uint64_t>(scratch.size, 1)));
+  }
+}
+
 bool StrideCompiler::isStringType(llvm::Type *type) {
   auto it = typesMap.find(DataTypes::String);
   return type && it != typesMap.end() && type == it->second;

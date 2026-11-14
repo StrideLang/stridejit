@@ -2825,6 +2825,12 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
             }
             llvm::Type *loweredRet = logicalFT->getReturnType();
             bool stringOut = loweredRet->isStructTy();
+            bool takesScratch = stringOut && !externFunc->resultSize.empty();
+            if (takesScratch) {
+              // Scratch space for the result's characters, and its size
+              loweredParams.push_back(ptrTy);
+              loweredParams.push_back(llvm::Type::getInt32Ty(ctx));
+            }
             if (stringOut) {
               loweredParams.push_back(ptrTy);
               loweredRet = llvm::Type::getVoidTy(ctx);
@@ -2836,6 +2842,9 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                 fnName, *state.TheModule);
             if (stringOut) {
               newFunc->addFnAttr("stride.struct_out");
+            }
+            if (takesScratch) {
+              newFunc->addFnAttr("stride.result_size", externFunc->resultSize);
             }
             if (externFunc->isConstrainedList) {
               newFunc->addFnAttr("stride.constrained_list");
@@ -3188,6 +3197,12 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               condName, std::move(condExpr), std::move(innerExprs)));
         }
       }
+    }
+  }
+  // Scratch for string results is reused from one stream to the next
+  for (auto &domainCode : generated) {
+    if (!domainCode.second.expr.empty() && domainCode.second.expr.front()) {
+      domainCode.second.expr.front()->startsStream = true;
     }
   }
   return generated;
@@ -3789,6 +3804,12 @@ void StrideGenerator::generatePlatformFunctionSignature(
     extFunc.variadicTypes = std::move(variadicTypes);
     extFunc.minItems = minItems;
     extFunc.maxItems = maxItems;
+    if (auto resultSize = decl->getPropertyValue("resultSize")) {
+      if (resultSize->getNodeType() == AST::String) {
+        extFunc.resultSize =
+            std::static_pointer_cast<ValueNode>(resultSize)->getStringValue();
+      }
+    }
 
     auto &funcList = state.functionMap[decl->getName()];
     for (const auto &existing : funcList) {

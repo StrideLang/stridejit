@@ -180,15 +180,21 @@ __stride_jit_string_token_at(const strd::StrideStringView *src,
                              strd::StrideStringView *out);
 STRIDE_EXPORT int32_t __stride_jit_string_token_count(
     const strd::StrideStringView *src, const strd::StrideStringView *delim);
+// Concat, Repeat and Format write the result's characters into scratch
+// (capacity bytes, from the caller; the compiler reserves it on the calling
+// function's stack) and cut the result off there. *out points into scratch.
 STRIDE_EXPORT void
 __stride_jit_string_concat_n(const strd::StrideStringView *views, int32_t count,
+                             char *scratch, int32_t capacity,
                              strd::StrideStringView *out);
 STRIDE_EXPORT void __stride_jit_string_repeat(const strd::StrideStringView *str,
-                                              int32_t count,
+                                              int32_t count, char *scratch,
+                                              int32_t capacity,
                                               strd::StrideStringView *out);
 STRIDE_EXPORT void __stride_jit_string_format(const strd::StrideStringView *fmt,
                                               const strd::StrideFormatArg *args,
-                                              int32_t count,
+                                              int32_t count, char *scratch,
+                                              int32_t capacity,
                                               strd::StrideStringView *out);
 }
 

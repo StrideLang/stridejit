@@ -100,6 +100,10 @@ struct ExternalFunction {
   std::vector<llvm::Type *> variadicTypes;
   int minItems{0};
   int maxItems{-1};
+  // The platform module's resultSize: how to bound a String result that has
+  // new characters ("sum", "format", "repeat"), or empty. Such a function
+  // takes scratch space and its size before the result pointer.
+  std::string resultSize;
 };
 
 struct DomainArg {
@@ -200,6 +204,29 @@ public:
   void commitStringWrite(
       const std::string &name,
       const std::vector<std::variant<size_t, std::string>> &indices);
+  // The maxSize of the String variable name (of each element, for an array),
+  // when it has its own buffer.
+  std::optional<uint64_t> stringCapacity(const std::string &name);
+
+  // ---- Scratch for string results ----
+  // Concat, Repeat and Format (platform modules with a resultSize) write
+  // their characters into scratch space on the stack of the function that
+  // calls them, sized when compiling. Results alive together in one stream
+  // get separate space; each stream reuses the space from its start, so a
+  // function's scratch is its largest stream's need, and a function that
+  // never makes such a result has none. ISR domains and threads run their
+  // own functions on their own stacks, so each gets its own scratch.
+  struct ScratchFrame {
+    llvm::AllocaInst *alloca{nullptr};
+    uint64_t offset{0}; // next free byte in the current stream
+    uint64_t size{0};   // largest need so far
+  };
+  ScratchFrame scratch;
+  // Space for a result of up to bytes characters, valid until the current
+  // stream ends.
+  llvm::Value *takeScratch(uint64_t bytes);
+  // Sizes the current function's scratch once its body is generated.
+  void finishScratch();
 
   llvm::Type *getElementType(llvm::Value *V);
 

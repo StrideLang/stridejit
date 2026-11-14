@@ -13,10 +13,13 @@
  *   String     { const char *data; int32_t length; }
  *   FormatArg  { int32_t typeTag; int32_t intVal; double realVal; String strVal; }
  *
+ * Concat, Repeat and Format write their characters into scratch space the
+ * caller passes, with its size: the compiler reserves it on the stack of the
+ * calling function, sized for the result when compiling. The runtime has no
+ * buffers of its own, so it is safe from any thread or interrupt.
+ *
  * Build options (all optional):
  *
- *   STRIDE_RT_ARENA_SIZE    bytes for concat, repeat and format results
- *                           (default 65536)
  *   STRIDE_RT_NO_STDIO      no <stdio.h>: printing goes to
  *                           stride_rt_platform_write(), which the platform
  *                           runtime provides, and numbers are formatted with
@@ -55,20 +58,10 @@
 
 #if defined(_MSC_VER)
 #define STRIDE_EXPORT __declspec(dllexport)
-#define STRIDE_THREAD_LOCAL __declspec(thread)
-#elif defined(__AVR__)
-#define STRIDE_EXPORT
-#define STRIDE_THREAD_LOCAL
-#elif defined(__GNUC__)
+#elif defined(__GNUC__) && !defined(__AVR__)
 #define STRIDE_EXPORT __attribute__((visibility("default")))
-#define STRIDE_THREAD_LOCAL __thread
 #else
 #define STRIDE_EXPORT
-#define STRIDE_THREAD_LOCAL
-#endif
-
-#ifndef STRIDE_RT_ARENA_SIZE
-#define STRIDE_RT_ARENA_SIZE 65536
 #endif
 
 #ifdef STRIDE_RT_REAL_IS_FLOAT
@@ -154,32 +147,6 @@ STRIDE_EXPORT void stride_runtime_set_writer(stride_rt_writer writer,
                                              void *context) {
   s_writer = writer ? writer : default_writer;
   s_writerContext = writer ? context : NULL;
-}
-
-/* ---- Result arena ------------------------------------------------------- */
-
-/* Concat, Repeat and Format write their characters here. The arena starts
- * over when a result does not fit, so a result is only valid until enough
- * later results have been made. Strings that keep their value will get their
- * own fixed-size storage instead. */
-static STRIDE_THREAD_LOCAL char s_arena[STRIDE_RT_ARENA_SIZE];
-static STRIDE_THREAD_LOCAL size_t s_arenaOffset = 0;
-
-/* Room for a result of up to maxLength characters plus a terminating 0.
- * Returns NULL and sets *available to what can be given when even an empty
- * arena is too small, in which case the result is cut off. */
-static char *arena_begin(size_t maxLength, size_t *available) {
-  if (s_arenaOffset + maxLength + 1 > sizeof(s_arena)) {
-    s_arenaOffset = 0;
-  }
-  size_t room = sizeof(s_arena) - s_arenaOffset - 1;
-  *available = maxLength < room ? maxLength : room;
-  return s_arena + s_arenaOffset;
-}
-
-static void arena_end(char *start, size_t length) {
-  start[length] = '\0';
-  s_arenaOffset = (size_t)(start - s_arena) + length + 1;
 }
 
 /* ---- Locale-independent numbers ----------------------------------------- */
@@ -357,7 +324,7 @@ static const StrideString *delimiter(const StrideString *delim) {
  * buffer (capacity bytes, the String's maxSize; longer values are cut off) and
  * points the String at it. The compiler calls this after every write to a
  * String variable, so the value no longer depends on where it came from: a
- * literal, the result arena or the host. The source may lie in buffer itself
+ * literal, the caller's scratch or the host. The source may lie in buffer itself
  * (e.g. a Substring of the same String). */
 STRIDE_EXPORT void __stride_jit_string_store(StrideString *slot, char *buffer,
                                              int32_t capacity) {
@@ -711,7 +678,8 @@ STRIDE_EXPORT int32_t __stride_jit_string_token_count(
 }
 
 STRIDE_EXPORT void __stride_jit_string_concat_n(const StrideString *views,
-                                                int32_t count,
+                                                int32_t count, char *scratch,
+                                                int32_t capacity,
                                                 StrideString *out) {
   if (!out) {
     return;
@@ -730,8 +698,11 @@ STRIDE_EXPORT void __stride_jit_string_concat_n(const StrideString *views,
     *out = kEmpty;
     return;
   }
-  size_t available;
-  char *dest = arena_begin(total, &available);
+  char *dest = scratch;
+  size_t available = (scratch && capacity > 0) ? (size_t)capacity : 0;
+  if (available > total) {
+    available = total;
+  }
   size_t written = 0;
   for (int32_t i = 0; i < count && written < available; ++i) {
     if (!is_empty(&views[i])) {
@@ -743,12 +714,12 @@ STRIDE_EXPORT void __stride_jit_string_concat_n(const StrideString *views,
       written += n;
     }
   }
-  arena_end(dest, written);
-  *out = make_string(dest, (int32_t)written);
+  *out = written ? make_string(dest, (int32_t)written) : kEmpty;
 }
 
 STRIDE_EXPORT void __stride_jit_string_repeat(const StrideString *str,
-                                              int32_t count,
+                                              int32_t count, char *scratch,
+                                              int32_t capacity,
                                               StrideString *out) {
   if (!out) {
     return;
@@ -758,8 +729,11 @@ STRIDE_EXPORT void __stride_jit_string_repeat(const StrideString *str,
     return;
   }
   size_t total = (size_t)str->length * (size_t)count;
-  size_t available;
-  char *dest = arena_begin(total, &available);
+  char *dest = scratch;
+  size_t available = (scratch && capacity > 0) ? (size_t)capacity : 0;
+  if (available > total) {
+    available = total;
+  }
   size_t written = 0;
   while (written < available) {
     size_t n = (size_t)str->length;
@@ -769,8 +743,7 @@ STRIDE_EXPORT void __stride_jit_string_repeat(const StrideString *str,
     memcpy(dest + written, str->data, n);
     written += n;
   }
-  arena_end(dest, written);
-  *out = make_string(dest, (int32_t)written);
+  *out = written ? make_string(dest, (int32_t)written) : kEmpty;
 }
 
 typedef struct FormatOutput {
@@ -799,10 +772,12 @@ static void append_padding(FormatOutput *o, int count) {
 /* Replaces {} and {:spec} placeholders in fmt with args, in order. A spec is
  * [0][width][.precision][type]; types are d, x, X (Int), f, e, E (Real),
  * b (Switch as true/false), d (Switch as 1/0). {{ and }} are literal braces.
- * The result is at most 4095 characters. */
+ * A value is padded to at most 64 characters. The result is cut off at
+ * capacity, the size of scratch. */
 STRIDE_EXPORT void __stride_jit_string_format(const StrideString *fmt,
                                               const StrideFormatArg *args,
-                                              int32_t count,
+                                              int32_t count, char *scratch,
+                                              int32_t capacity,
                                               StrideString *out) {
   if (!out) {
     return;
@@ -812,7 +787,8 @@ STRIDE_EXPORT void __stride_jit_string_format(const StrideString *fmt,
     return;
   }
   FormatOutput o;
-  o.dest = arena_begin(4095, &o.available);
+  o.dest = scratch;
+  o.available = (scratch && capacity > 0) ? (size_t)capacity : 0;
   o.written = 0;
 
   const char *p = fmt->data;
@@ -935,6 +911,5 @@ STRIDE_EXPORT void __stride_jit_string_format(const StrideString *fmt,
     }
   }
 
-  arena_end(o.dest, o.written);
-  *out = make_string(o.dest, (int32_t)o.written);
+  *out = o.written ? make_string(o.dest, (int32_t)o.written) : kEmpty;
 }

@@ -766,12 +766,20 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   }
   llvm::BasicBlock *TerminateBB = LoopAfterBB ? LoopAfterBB : ReactionExitBB;
 
+  // This function's own scratch for string results (see takeScratch)
+  const StrideCompiler::ScratchFrame outerScratch = state.scratch;
+  state.scratch = {};
+
   // Generate the function body
   for (size_t statementIndex = 0; statementIndex < Body.size();
        ++statementIndex) {
     const auto &statement = Body[statementIndex];
     if (!statement) {
+      state.scratch = outerScratch;
       return nullptr;
+    }
+    if (statement->startsStream) {
+      state.scratch.offset = 0; // earlier streams' results are done with
     }
     if (state.debugEmitter && subprogram && statement->getLine() > 0) {
       state.debugEmitter->emitLocation(*state.Builder, statement->getLine(),
@@ -914,6 +922,8 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
 
   auto *outVal = llvm::ConstantInt::get(state.Builder->getInt32Ty(), 0, true);
   state.Builder->CreateRet(outVal);
+  state.finishScratch();
+  state.scratch = outerScratch;
   state.currentFunctionStatePtr = prevFunctionStatePtr;
   state.currentFunctionStateInfo = prevFunctionStateInfo;
   // Validate the generated code, checking for consistency.
@@ -1388,6 +1398,68 @@ void processArgGroup(
   }
 }
 
+// The most characters the String expression e can hold: a literal's length,
+// a String variable's maxSize, or the default String size otherwise.
+static uint64_t stringBound(StrideCompiler &state, const ExprAST *e) {
+  if (auto *literal = dynamic_cast<const StringExprAST *>(e)) {
+    return literal->getValue().size();
+  }
+  if (auto *var = dynamic_cast<const VariableExprAST *>(e)) {
+    if (auto capacity = state.stringCapacity(var->getName())) {
+      return *capacity;
+    }
+  }
+  return StrideCompiler::kDefaultStringMaxSize;
+}
+
+uint64_t strd::stringResultBound(StrideCompiler &state, const std::string &kind,
+                           const std::vector<std::unique_ptr<ExprAST>> &inputs,
+                           const std::vector<std::unique_ptr<ExprAST>> &properties,
+                           const std::vector<std::unique_ptr<ExprAST>> &outputs) {
+  // Widest a formatted value gets: the runtime pads to at most 64
+  constexpr uint64_t kFormatWidth = 64;
+  std::optional<uint64_t> bound;
+  if (kind == "sum") {
+    uint64_t sum = 0;
+    for (const auto &input : inputs) {
+      sum += stringBound(state, input.get());
+    }
+    bound = sum;
+  } else if (kind == "format") {
+    // The template plus, for each value, its widest text and padding
+    uint64_t sum = 0;
+    for (const auto *group : {&inputs, &properties}) {
+      for (const auto &arg : *group) {
+        bool isNumber = dynamic_cast<const IntExprAST *>(arg.get()) ||
+                        dynamic_cast<const RealExprAST *>(arg.get()) ||
+                        dynamic_cast<const BoolExprAST *>(arg.get());
+        sum += (isNumber ? 0 : stringBound(state, arg.get())) + kFormatWidth;
+      }
+    }
+    bound = sum;
+  } else if (kind == "repeat" && inputs.size() >= 2) {
+    if (auto *count = dynamic_cast<const IntExprAST *>(inputs[1].get())) {
+      bound = stringBound(state, inputs[0].get()) *
+              static_cast<uint64_t>(std::max<int64_t>(count->getValue(), 0));
+    }
+  }
+  // A result stored straight into a String is cut off at its maxSize anyway
+  std::optional<uint64_t> destination;
+  if (!outputs.empty()) {
+    if (auto *var = dynamic_cast<const VariableExprAST *>(outputs[0].get())) {
+      destination = state.stringCapacity(var->getName());
+    }
+  }
+  uint64_t bytes = bound ? *bound
+                         : destination.value_or(
+                               StrideCompiler::kDefaultStringMaxSize);
+  if (destination) {
+    bytes = std::min(bytes, *destination);
+  }
+  // Keep a runaway bound (Repeat of a large count) off the stack
+  return std::min<uint64_t>(bytes, 65535);
+}
+
 std::pair<llvm::Value *, std::optional<llvm::Type *>>
 CallExprAST::codegen(StrideCompiler &state) {
   // Look up the name in the global module table.
@@ -1745,6 +1817,20 @@ CallExprAST::codegen(StrideCompiler &state) {
         }
       }
       if (outPtr && outPtr->getType()->isPointerTy()) {
+        if (CalleeF->hasFnAttribute("stride.result_size")) {
+          // Scratch for the result's characters, then its size
+          std::string kind =
+              CalleeF->getFnAttribute("stride.result_size")
+                  .getValueAsString()
+                  .str();
+          uint64_t bytes = stringResultBound(state, kind, InArgs,
+                                             PropertyArgs, OutArgs);
+          llvm::Type *ptrTy = llvm::PointerType::get(*state.TheContext, 0);
+          CallArgs.push_back({state.takeScratch(bytes), ptrTy});
+          CallArgs.push_back(
+              {state.Builder->getInt32(static_cast<uint32_t>(bytes)),
+               llvm::Type::getInt32Ty(*state.TheContext)});
+        }
         CallArgs.push_back({outPtr, outTy});
       } else {
         LOG_ERROR() << "No destination storage for struct result of " << Callee
