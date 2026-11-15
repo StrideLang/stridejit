@@ -18,6 +18,10 @@
  * calling function, sized for the result when compiling. The runtime has no
  * buffers of its own, so it is safe from any thread or interrupt.
  *
+ * A function that can fail returns a stride_status_t (stride_status.h), or
+ * writes one through a trailing status pointer when its return value is the
+ * result. The compiler folds it into the domain's status word.
+ *
  * Build options (all optional):
  *
  *   STRIDE_RT_NO_STDIO      no <stdio.h>: printing goes to
@@ -47,6 +51,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "stride/stridejit/stride_status.h"
 
 #ifndef STRIDE_RT_NO_STDIO
 #include <locale.h>
@@ -326,20 +332,24 @@ static const StrideString *delimiter(const StrideString *delim) {
  * String variable, so the value no longer depends on where it came from: a
  * literal, the caller's scratch or the host. The source may lie in buffer itself
  * (e.g. a Substring of the same String). */
-STRIDE_EXPORT void __stride_jit_string_store(StrideString *slot, char *buffer,
-                                             int32_t capacity) {
+STRIDE_EXPORT stride_status_t __stride_jit_string_store(StrideString *slot,
+                                                        char *buffer,
+                                                        int32_t capacity) {
   if (!slot || !buffer || capacity < 0) {
-    return;
+    return STRIDE_STATUS_INVALID;
   }
   int32_t length = (slot->data && slot->length > 0) ? slot->length : 0;
+  stride_status_t status = STRIDE_STATUS_OK;
   if (length > capacity) {
     length = capacity;
+    status = STRIDE_STATUS_TRUNCATED;
   }
   if (length > 0 && slot->data != buffer) {
     memmove(buffer, slot->data, (size_t)length);
   }
   slot->data = buffer;
   slot->length = length;
+  return status;
 }
 
 STRIDE_EXPORT void __stride_jit_string_substring(const StrideString *src,
@@ -502,12 +512,22 @@ STRIDE_EXPORT bool __stride_jit_string_is_empty(const StrideString *str) {
   return is_empty(str);
 }
 
+static void set_status(stride_status_t *status, stride_status_t value) {
+  if (status) {
+    *status = value;
+  }
+}
+
 /* Leading whitespace, an optional sign and decimal digits; anything after the
- * digits is ignored. Returns defaultVal when there are no digits or the
- * number does not fit in 32 bits. */
+ * digits is ignored. Returns defaultVal, with status Invalid, when there are
+ * no digits, and with status OutOfRange when the number does not fit in 32
+ * bits. */
 STRIDE_EXPORT int32_t __stride_jit_string_parse_int(const StrideString *str,
-                                                    int32_t defaultVal) {
+                                                    int32_t defaultVal,
+                                                    stride_status_t *status) {
+  set_status(status, STRIDE_STATUS_OK);
   if (is_empty(str)) {
+    set_status(status, STRIDE_STATUS_INVALID);
     return defaultVal;
   }
   const char *p = str->data;
@@ -527,6 +547,7 @@ STRIDE_EXPORT int32_t __stride_jit_string_parse_int(const StrideString *str,
   while (p < end && *p >= '0' && *p <= '9') {
     int32_t digit = *p - '0';
     if (value < (INT32_MIN + digit) / 10) {
+      set_status(status, STRIDE_STATUS_OUT_OF_RANGE);
       return defaultVal;
     }
     value = value * 10 - digit;
@@ -534,10 +555,12 @@ STRIDE_EXPORT int32_t __stride_jit_string_parse_int(const StrideString *str,
     ++p;
   }
   if (!anyDigit) {
+    set_status(status, STRIDE_STATUS_INVALID);
     return defaultVal;
   }
   if (!negative) {
     if (value == INT32_MIN) {
+      set_status(status, STRIDE_STATUS_OUT_OF_RANGE);
       return defaultVal;
     }
     value = -value;
@@ -546,10 +569,14 @@ STRIDE_EXPORT int32_t __stride_jit_string_parse_int(const StrideString *str,
 }
 
 /* Leading whitespace, then a number as strtod reads it with '.' as the
- * decimal separator; anything after it is ignored. */
+ * decimal separator; anything after it is ignored. Returns defaultVal with
+ * status Invalid when there is no number. */
 STRIDE_EXPORT stride_real_t __stride_jit_string_parse_real(
-    const StrideString *str, stride_real_t defaultVal) {
+    const StrideString *str, stride_real_t defaultVal,
+    stride_status_t *status) {
+  set_status(status, STRIDE_STATUS_OK);
   if (is_empty(str)) {
+    set_status(status, STRIDE_STATUS_INVALID);
     return defaultVal;
   }
   /* strtod needs a terminated string; numbers longer than this are not
@@ -561,7 +588,11 @@ STRIDE_EXPORT stride_real_t __stride_jit_string_parse_real(
   memcpy(text, str->data, length);
   text[length] = '\0';
   stride_real_t value;
-  return parse_real(text, &value) ? value : defaultVal;
+  if (!parse_real(text, &value)) {
+    set_status(status, STRIDE_STATUS_INVALID);
+    return defaultVal;
+  }
+  return value;
 }
 
 STRIDE_EXPORT void __stride_jit_string_print(const StrideString *str) {
@@ -677,16 +708,16 @@ STRIDE_EXPORT int32_t __stride_jit_string_token_count(
   return for_each_token(src, delim, NULL, NULL);
 }
 
-STRIDE_EXPORT void __stride_jit_string_concat_n(const StrideString *views,
+STRIDE_EXPORT stride_status_t __stride_jit_string_concat_n(const StrideString *views,
                                                 int32_t count, char *scratch,
                                                 int32_t capacity,
                                                 StrideString *out) {
   if (!out) {
-    return;
+    return STRIDE_STATUS_INVALID;
   }
   if (!views || count <= 0) {
     *out = kEmpty;
-    return;
+    return STRIDE_STATUS_OK;
   }
   size_t total = 0;
   for (int32_t i = 0; i < count; ++i) {
@@ -696,7 +727,7 @@ STRIDE_EXPORT void __stride_jit_string_concat_n(const StrideString *views,
   }
   if (total == 0) {
     *out = kEmpty;
-    return;
+    return STRIDE_STATUS_OK;
   }
   char *dest = scratch;
   size_t available = (scratch && capacity > 0) ? (size_t)capacity : 0;
@@ -715,18 +746,19 @@ STRIDE_EXPORT void __stride_jit_string_concat_n(const StrideString *views,
     }
   }
   *out = written ? make_string(dest, (int32_t)written) : kEmpty;
+  return written < total ? STRIDE_STATUS_TRUNCATED : STRIDE_STATUS_OK;
 }
 
-STRIDE_EXPORT void __stride_jit_string_repeat(const StrideString *str,
+STRIDE_EXPORT stride_status_t __stride_jit_string_repeat(const StrideString *str,
                                               int32_t count, char *scratch,
                                               int32_t capacity,
                                               StrideString *out) {
   if (!out) {
-    return;
+    return STRIDE_STATUS_INVALID;
   }
   if (is_empty(str) || count <= 0) {
     *out = kEmpty;
-    return;
+    return STRIDE_STATUS_OK;
   }
   size_t total = (size_t)str->length * (size_t)count;
   char *dest = scratch;
@@ -744,20 +776,27 @@ STRIDE_EXPORT void __stride_jit_string_repeat(const StrideString *str,
     written += n;
   }
   *out = written ? make_string(dest, (int32_t)written) : kEmpty;
+  return written < total ? STRIDE_STATUS_TRUNCATED : STRIDE_STATUS_OK;
 }
 
 typedef struct FormatOutput {
   char *dest;
   size_t written;
   size_t available;
+  bool truncated;
 } FormatOutput;
 
 static void append(FormatOutput *o, const char *src, size_t length) {
-  if (!src || length == 0 || o->written >= o->available) {
+  if (!src || length == 0) {
+    return;
+  }
+  if (o->written >= o->available) {
+    o->truncated = true;
     return;
   }
   if (length > o->available - o->written) {
     length = o->available - o->written;
+    o->truncated = true;
   }
   memcpy(o->dest + o->written, src, length);
   o->written += length;
@@ -774,22 +813,23 @@ static void append_padding(FormatOutput *o, int count) {
  * b (Switch as true/false), d (Switch as 1/0). {{ and }} are literal braces.
  * A value is padded to at most 64 characters. The result is cut off at
  * capacity, the size of scratch. */
-STRIDE_EXPORT void __stride_jit_string_format(const StrideString *fmt,
+STRIDE_EXPORT stride_status_t __stride_jit_string_format(const StrideString *fmt,
                                               const StrideFormatArg *args,
                                               int32_t count, char *scratch,
                                               int32_t capacity,
                                               StrideString *out) {
   if (!out) {
-    return;
+    return STRIDE_STATUS_INVALID;
   }
   if (is_empty(fmt)) {
     *out = kEmpty;
-    return;
+    return STRIDE_STATUS_OK;
   }
   FormatOutput o;
   o.dest = scratch;
   o.available = (scratch && capacity > 0) ? (size_t)capacity : 0;
   o.written = 0;
+  o.truncated = false;
 
   const char *p = fmt->data;
   const char *end = fmt->data + fmt->length;
@@ -912,4 +952,5 @@ STRIDE_EXPORT void __stride_jit_string_format(const StrideString *fmt,
   }
 
   *out = o.written ? make_string(o.dest, (int32_t)o.written) : kEmpty;
+  return o.truncated ? STRIDE_STATUS_TRUNCATED : STRIDE_STATUS_OK;
 }

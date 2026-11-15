@@ -90,6 +90,14 @@ BinaryExprAST::codegen(StrideCompiler &state) {
     // default.  If you build LLVM with RTTI this can be changed to a
     // dynamic_cast for automatic error checking.
     VariableExprAST *LHSE = dynamic_cast<VariableExprAST *>(LHS.get());
+    std::unique_ptr<VariableExprAST> memberTarget;
+    if (!LHSE) {
+      // A member that is a variable of its own: RootDomain.status
+      if (auto *member = dynamic_cast<MemberAccessAST *>(LHS.get())) {
+        memberTarget = std::make_unique<VariableExprAST>(member->portToken());
+        LHSE = memberTarget.get();
+      }
+    }
     if (!LHSE) {
       return {state.LogErrorV("destination of '=' must be a variable"),
               std::nullopt};
@@ -544,7 +552,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
             state.getFunctionInModule("__stride_jit_string_concat_n");
         if (!concatFunc) {
           llvm::FunctionType *fnTy = llvm::FunctionType::get(
-              llvm::Type::getVoidTy(*state.TheContext),
+              llvm::Type::getInt8Ty(*state.TheContext),
               {ptrTy, i32Ty, ptrTy, i32Ty, ptrTy}, false);
           concatFunc = llvm::Function::Create(
               fnTy, llvm::Function::ExternalLinkage,
@@ -555,14 +563,21 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         std::vector<std::unique_ptr<ExprAST>> operands;
         operands.push_back(std::move(LHS));
         operands.push_back(std::move(RHS));
-        uint64_t bytes =
+        StringResultBound result =
             stringResultBound(state, "sum", operands, noArgs, noArgs);
         LHS = std::move(operands[0]);
         RHS = std::move(operands[1]);
-        state.Builder->CreateCall(
+        reportStringResultBound(result, "+", "the destination",
+                                m_relativeFilename, m_line, m_column);
+        uint64_t bytes = result.bytes;
+        llvm::Value *concatStatus = state.Builder->CreateCall(
             concatFunc,
             {arrayAlloc, state.Builder->getInt32(2), state.takeScratch(bytes),
-             state.Builder->getInt32(static_cast<uint32_t>(bytes)), allocOut});
+             state.Builder->getInt32(static_cast<uint32_t>(bytes)), allocOut},
+            "concat_status");
+        if (!result.cannotTruncate()) {
+          state.recordStatus(concatStatus);
+        }
         Val = state.Builder->CreateLoad(stringTy, allocOut, "concat_res");
         Type = stringTy;
         break;
@@ -1063,6 +1078,12 @@ DownsampleExprAST::codegen(StrideCompiler &state) {
   }
 
   auto it = state.NamedValues.find(Schedule.phaseStateFieldName);
+  if ((it == state.NamedValues.end() || !it->second.first) &&
+      state.globalExists(Schedule.phaseStateFieldName)) {
+    state.NamedValues[Schedule.phaseStateFieldName] =
+        state.getGlobal(Schedule.phaseStateFieldName);
+    it = state.NamedValues.find(Schedule.phaseStateFieldName);
+  }
   if (it == state.NamedValues.end() || !it->second.first) {
     // Fallback if state field is unavailable: execute directly
     for (auto &expr : Expressions) {
@@ -1194,6 +1215,12 @@ UpsampleExprAST::codegen(StrideCompiler &state) {
     state.Builder->SetInsertPoint(afterBB);
   } else {
     auto it = state.NamedValues.find(Schedule.phaseStateFieldName);
+    if ((it == state.NamedValues.end() || !it->second.first) &&
+        state.globalExists(Schedule.phaseStateFieldName)) {
+      state.NamedValues[Schedule.phaseStateFieldName] =
+          state.getGlobal(Schedule.phaseStateFieldName);
+      it = state.NamedValues.find(Schedule.phaseStateFieldName);
+    }
     if (it == state.NamedValues.end() || !it->second.first) {
       headerBB->eraseFromParent();
       bodyBB->eraseFromParent();

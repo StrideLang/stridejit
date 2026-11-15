@@ -1,0 +1,36 @@
+# The domain's status word and each String's last write status.
+# Runtime calls that cannot do what they were asked set bits in
+# RootDomain.status, which stay until the program clears the word.
+
+_domainDefinition RootDomain {
+    framework: _JitFramework
+    rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+        string Text { domain: RootDomain }
+        signal ClearStatus { domain: RootDomain type: Int }
+    ]
+    outputs: [
+        string Short { domain: RootDomain maxSize: 4 }
+        string Whole { domain: RootDomain }
+        string Pair { domain: RootDomain }
+        signal Number { domain: RootDomain type: Int }
+        signal Before { domain: RootDomain type: Int }
+    ]
+    domainFunctionCode: ''
+}
+
+# The word before anything in this tick could set it
+RootDomain.status >> Before;
+ClearStatus >> RootDomain.status;
+
+# A value that does not fit in Short is cut off: Truncated
+[ "ab", Text ] >> Concat() >> Short;
+# The same value fits in Whole this time, but Text could be up to 128
+# characters, so the compiler warns and the status is checked at run time
+[ "ab", Text ] >> Concat() >> Whole;
+# Two literals always fit in Pair: proven when compiling, no status recorded
+[ "ab", "cd" ] >> Concat() >> Pair;
+# Text with no number in it: Invalid
+[ Text, -1 ] >> Parse() >> Number;

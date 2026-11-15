@@ -477,7 +477,53 @@ void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
           llvm::Constant::getNullValue(charsType),
           stringCharsName(fullName));
       m_globals[stringCharsName(globalDecl->getName())] = {chars, charsType};
+      llvm::Type *statusType = llvm::Type::getInt8Ty(*TheContext);
+      auto *status = new llvm::GlobalVariable(
+          *TheModule, statusType, false, llvm::GlobalValue::ExternalLinkage,
+          llvm::Constant::getNullValue(statusType),
+          statusName(fullName));
+      m_globals[statusName(globalDecl->getName())] = {status, statusType};
     }
+  }
+}
+
+void StrideCompiler::recordStatus(llvm::Value *status) {
+  if (!status || !statusPtr) {
+    return;
+  }
+  llvm::Type *i8Ty = llvm::Type::getInt8Ty(*TheContext);
+  if (status->getType() != i8Ty) {
+    status = Builder->CreateIntCast(status, i8Ty, false, "status");
+  }
+  llvm::Value *word = Builder->CreateLoad(i8Ty, statusPtr, "domain_status");
+  Builder->CreateStore(Builder->CreateOr(word, status), statusPtr);
+}
+
+void StrideCompiler::recordStatus(llvm::Value *status,
+                                  const std::string &varName,
+                                  bool accumulate) {
+  recordStatus(status);
+  if (!status) {
+    return;
+  }
+  const std::string name = statusName(varName);
+  llvm::Value *slot = nullptr;
+  auto it = NamedValues.find(name);
+  if (it != NamedValues.end()) {
+    slot = it->second.first;
+  } else if (globalExists(name)) {
+    slot = getGlobal(name).first;
+  }
+  if (slot && slot->getType()->isPointerTy()) {
+    llvm::Type *i8Ty = llvm::Type::getInt8Ty(*TheContext);
+    if (status->getType() != i8Ty) {
+      status = Builder->CreateIntCast(status, i8Ty, false, "status");
+    }
+    if (accumulate) {
+      llvm::Value *previous = Builder->CreateLoad(i8Ty, slot, "write_status");
+      status = Builder->CreateOr(previous, status);
+    }
+    Builder->CreateStore(status, slot);
   }
 }
 
@@ -561,7 +607,8 @@ StrideCompiler::stringCharsType(std::shared_ptr<DeclarationNode> decl,
 
 void StrideCompiler::commitStringWrite(
     const std::string &name,
-    const std::vector<std::variant<size_t, std::string>> &indices) {
+    const std::vector<std::variant<size_t, std::string>> &indices,
+    bool freshWrite, bool reportStatus) {
   // The variable and its companion, as locals (state fields) or globals
   std::pair<llvm::Value *, std::optional<llvm::Type *>> var{nullptr, {}};
   std::pair<llvm::Value *, std::optional<llvm::Type *>> chars{nullptr, {}};
@@ -633,14 +680,18 @@ void StrideCompiler::commitStringWrite(
   if (!store) {
     llvm::Type *ptrTy = llvm::PointerType::get(*TheContext, 0);
     store = llvm::Function::Create(
-        llvm::FunctionType::get(llvm::Type::getVoidTy(*TheContext),
+        llvm::FunctionType::get(llvm::Type::getInt8Ty(*TheContext),
                                 {ptrTy, ptrTy, i32Ty}, false),
         llvm::Function::ExternalLinkage, "__stride_jit_string_store",
         *TheModule);
   }
-  Builder->CreateCall(store, {slot, buffer,
-                              Builder->getInt32(static_cast<uint32_t>(
-                                  capacity))});
+  llvm::Value *status = Builder->CreateCall(
+      store,
+      {slot, buffer, Builder->getInt32(static_cast<uint32_t>(capacity))},
+      "store_status");
+  if (reportStatus) {
+    recordStatus(status, name, /* accumulate */ !freshWrite);
+  }
 }
 
 llvm::Type *StrideCompiler::getElementType(llvm::Value *V) {
@@ -1251,6 +1302,12 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
               static_cast<unsigned>(fieldTypes.size());
           fieldTypes.push_back(charsType);
           defaultFieldValues.push_back(llvm::Constant::getNullValue(charsType));
+          llvm::Type *statusType = llvm::Type::getInt8Ty(*TheContext);
+          info.varIndices[statusName(varName)] =
+              static_cast<unsigned>(fieldTypes.size());
+          fieldTypes.push_back(statusType);
+          defaultFieldValues.push_back(
+              llvm::Constant::getNullValue(statusType));
         }
       }
     }

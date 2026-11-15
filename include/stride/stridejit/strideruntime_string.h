@@ -7,6 +7,8 @@
 #include <string>
 #include <type_traits>
 
+#include "stride/stridejit/stride_status.h"
+
 #if defined(_MSC_VER)
 #define STRIDE_EXPORT __declspec(dllexport)
 #elif defined(__GNUC__)
@@ -120,11 +122,16 @@ STRIDE_EXPORT void stride_runtime_set_writer(StrideRuntimeWriter writer,
 // reference) disagree on by-value struct passing, so there are no by-value
 // versions.
 // ---------------------------------------------------------------------------
+// A function that can fail returns a stride_status_t (stride_status.h), or
+// writes one through a trailing status pointer when its return value is the
+// result. The compiler folds it into the domain's status word.
+
 // Copies the characters of the String in *slot into its own buffer of
-// capacity bytes (cut off there) and points it at them. Called after every
-// write to a String variable.
-STRIDE_EXPORT void __stride_jit_string_store(strd::StrideStringView *slot,
-                                             char *buffer, int32_t capacity);
+// capacity bytes (cut off there, with status Truncated) and points it at
+// them. Called after every write to a String variable.
+STRIDE_EXPORT stride_status_t
+__stride_jit_string_store(strd::StrideStringView *slot, char *buffer,
+                          int32_t capacity);
 STRIDE_EXPORT void
 __stride_jit_string_substring(const strd::StrideStringView *src, int32_t start,
                               int32_t len, strd::StrideStringView *out);
@@ -162,11 +169,14 @@ STRIDE_EXPORT int32_t
 __stride_jit_string_length(const strd::StrideStringView *str);
 STRIDE_EXPORT bool
 __stride_jit_string_is_empty(const strd::StrideStringView *str);
-STRIDE_EXPORT int32_t __stride_jit_string_parse_int(
-    const strd::StrideStringView *str, int32_t defaultVal);
+// status (may be null): Invalid when there is no number, OutOfRange when it
+// does not fit.
+STRIDE_EXPORT int32_t
+__stride_jit_string_parse_int(const strd::StrideStringView *str,
+                              int32_t defaultVal, stride_status_t *status);
 STRIDE_EXPORT double
 __stride_jit_string_parse_real(const strd::StrideStringView *str,
-                               double defaultVal);
+                               double defaultVal, stride_status_t *status);
 STRIDE_EXPORT void
 __stride_jit_string_println(const strd::StrideStringView *str);
 STRIDE_EXPORT void __stride_jit_string_print(const strd::StrideStringView *str);
@@ -182,20 +192,21 @@ STRIDE_EXPORT int32_t __stride_jit_string_token_count(
     const strd::StrideStringView *src, const strd::StrideStringView *delim);
 // Concat, Repeat and Format write the result's characters into scratch
 // (capacity bytes, from the caller; the compiler reserves it on the calling
-// function's stack) and cut the result off there. *out points into scratch.
-STRIDE_EXPORT void
+// function's stack) and cut the result off there, with status Truncated.
+// *out points into scratch.
+STRIDE_EXPORT stride_status_t
 __stride_jit_string_concat_n(const strd::StrideStringView *views, int32_t count,
                              char *scratch, int32_t capacity,
                              strd::StrideStringView *out);
-STRIDE_EXPORT void __stride_jit_string_repeat(const strd::StrideStringView *str,
-                                              int32_t count, char *scratch,
-                                              int32_t capacity,
-                                              strd::StrideStringView *out);
-STRIDE_EXPORT void __stride_jit_string_format(const strd::StrideStringView *fmt,
-                                              const strd::StrideFormatArg *args,
-                                              int32_t count, char *scratch,
-                                              int32_t capacity,
-                                              strd::StrideStringView *out);
+STRIDE_EXPORT stride_status_t
+__stride_jit_string_repeat(const strd::StrideStringView *str, int32_t count,
+                           char *scratch, int32_t capacity,
+                           strd::StrideStringView *out);
+STRIDE_EXPORT stride_status_t
+__stride_jit_string_format(const strd::StrideStringView *fmt,
+                           const strd::StrideFormatArg *args, int32_t count,
+                           char *scratch, int32_t capacity,
+                           strd::StrideStringView *out);
 }
 
 #endif // STRIDERUNTIME_STRING_H

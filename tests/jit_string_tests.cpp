@@ -40,13 +40,14 @@ int32_t tokenCount(const char *text, const char *delim) {
   StrideStringView src = sv(text), d = sv(delim);
   return __stride_jit_string_token_count(&src, &d);
 }
+stride_status_t gParseStatus = STRIDE_STATUS_OK;
 int32_t parseInt(const char *text, int32_t defaultVal) {
   StrideStringView s = sv(text);
-  return __stride_jit_string_parse_int(&s, defaultVal);
+  return __stride_jit_string_parse_int(&s, defaultVal, &gParseStatus);
 }
 double parseReal(const char *text, double defaultVal) {
   StrideStringView s = sv(text);
-  return __stride_jit_string_parse_real(&s, defaultVal);
+  return __stride_jit_string_parse_real(&s, defaultVal, &gParseStatus);
 }
 std::string format(const char *tpl, std::vector<StrideFormatArg> args) {
   StrideStringView t = sv(tpl), out{};
@@ -140,22 +141,39 @@ TEST(JITStringTest, ResultsAreCutOffAtTheScratchSize) {
   StrideStringView parts[2] = {sv("Hello"), sv(" World")};
   char small[5];
   StrideStringView out{};
-  __stride_jit_string_concat_n(parts, 2, small, 5, &out);
+  EXPECT_EQ(__stride_jit_string_concat_n(parts, 2, small, 5, &out),
+            STRIDE_STATUS_TRUNCATED);
   EXPECT_EQ(out.toString(), "Hello");
   EXPECT_EQ(out.data, small);
+  EXPECT_EQ(__stride_jit_string_concat_n(parts, 2, gScratch, kScratchSize, &out),
+            STRIDE_STATUS_OK);
 
   StrideStringView star = sv("ab");
-  __stride_jit_string_repeat(&star, 10, small, 5, &out);
+  EXPECT_EQ(__stride_jit_string_repeat(&star, 10, small, 5, &out),
+            STRIDE_STATUS_TRUNCATED);
   EXPECT_EQ(out.toString(), "ababa");
 
   StrideStringView tpl = sv("value {}");
   StrideFormatArg arg = intArg(12345);
-  __stride_jit_string_format(&tpl, &arg, 1, small, 5, &out);
+  EXPECT_EQ(__stride_jit_string_format(&tpl, &arg, 1, small, 5, &out),
+            STRIDE_STATUS_TRUNCATED);
   EXPECT_EQ(out.toString(), "value");
+  EXPECT_EQ(__stride_jit_string_format(&tpl, &arg, 1, gScratch, kScratchSize,
+                                       &out),
+            STRIDE_STATUS_OK);
 
   // No scratch: an empty result, never a write
-  __stride_jit_string_concat_n(parts, 2, nullptr, 0, &out);
+  EXPECT_EQ(__stride_jit_string_concat_n(parts, 2, nullptr, 0, &out),
+            STRIDE_STATUS_TRUNCATED);
   EXPECT_EQ(out.length, 0);
+
+  // The store cuts off at the String's maxSize
+  char chars[3];
+  StrideStringView slot = sv("abcdef");
+  EXPECT_EQ(__stride_jit_string_store(&slot, chars, 3), STRIDE_STATUS_TRUNCATED);
+  EXPECT_EQ(slot.toString(), "abc");
+  slot = sv("ab");
+  EXPECT_EQ(__stride_jit_string_store(&slot, chars, 3), STRIDE_STATUS_OK);
 }
 
 TEST(JITStringTest, ParseNumbers) {
@@ -168,11 +186,21 @@ TEST(JITStringTest, ParseNumbers) {
   EXPECT_EQ(parseInt("2147483647", 0), 2147483647);
   EXPECT_EQ(parseInt("-2147483648", 0), INT32_MIN);
   EXPECT_EQ(parseInt("2147483648", 99), 99); // does not fit in Int32
+  EXPECT_EQ(gParseStatus, STRIDE_STATUS_OUT_OF_RANGE);
+  EXPECT_EQ(parseInt("x", 99), 99);
+  EXPECT_EQ(gParseStatus, STRIDE_STATUS_INVALID);
+  EXPECT_EQ(parseInt("5", 99), 5);
+  EXPECT_EQ(gParseStatus, STRIDE_STATUS_OK);
+  EXPECT_EQ(parseInt("5", 99), 5);
+  // A null status pointer is allowed
+  StrideStringView five = sv("5");
+  EXPECT_EQ(__stride_jit_string_parse_int(&five, 0, nullptr), 5);
 
   EXPECT_DOUBLE_EQ(parseReal("3.14159", 0.0), 3.14159);
   EXPECT_DOUBLE_EQ(parseReal(" -2.5e3", 0.0), -2500.0);
   EXPECT_DOUBLE_EQ(parseReal("1.5kg", 0.0), 1.5);
   EXPECT_DOUBLE_EQ(parseReal("abc", 7.0), 7.0);
+  EXPECT_EQ(gParseStatus, STRIDE_STATUS_INVALID);
 }
 
 // Stride numbers always use '.', whatever locale the host program sets.
@@ -516,5 +544,66 @@ TEST(JITStringTest, ScratchOnlyWhereNeeded) {
   for (auto &function : *plain.mStrideEnv.TheModule) {
     EXPECT_TRUE(scratchSizes(plain, function.getName().str()).empty())
         << function.getName().str();
+  }
+}
+
+// A runtime call that cannot do what it was asked sets a bit in the domain's
+// status word, which stays until the program clears it, and leaves its code
+// on the String it wrote. Stride code reads both as members.
+TEST(JITStringTest, DomainStatus) {
+  StrideEnvironment strenv;
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "StatusTest.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *state = statePtr.get();
+  const std::string dom = "RootDomain";
+  void *args[8] = {state};
+
+  auto status = [&](const char *name) {
+    return static_cast<int>(
+        strenv.getStateVar<int8_t>(state, name, std::nullopt, dom).value_or(-1));
+  };
+  auto str = [&](const char *name) {
+    auto v = strenv.getStateVar<StrideStringView>(state, name, std::nullopt, dom);
+    return v ? v->toString() : std::string();
+  };
+
+  ASSERT_TRUE(strenv.setStateVar(state, "Text", std::string("cdef"), std::nullopt, dom));
+  ASSERT_TRUE(strenv.setStateVar(state, "ClearStatus", 0, std::nullopt, dom));
+  EXPECT_EQ(strenv.invoke("RootDomain_process", args), 0);
+  EXPECT_EQ(str("Short"), "abcd");
+  EXPECT_EQ(str("Whole"), "abcdef");
+  EXPECT_EQ(str("Pair"), "abcd");
+  EXPECT_EQ(status("Pair_status"), STRIDE_STATUS_OK);
+  // Truncated (1) from Short, Invalid (2) from Parse: both bits in the word
+  EXPECT_EQ(status("RootDomain_status"), STRIDE_STATUS_TRUNCATED | STRIDE_STATUS_INVALID);
+  EXPECT_EQ(status("Short_status"), STRIDE_STATUS_TRUNCATED);
+  EXPECT_EQ(status("Whole_status"), STRIDE_STATUS_OK);
+  EXPECT_EQ(strenv.getStateVar<int32_t>(state, "Number", std::nullopt, dom).value_or(0), -1);
+
+  // The word is sticky: a tick with nothing wrong keeps it. The program
+  // read it at the start of the tick, before writing it.
+  ASSERT_TRUE(strenv.setStateVar(state, "Text", std::string("7"), std::nullopt, dom));
+  EXPECT_EQ(strenv.invoke("RootDomain_process", args), 0);
+  EXPECT_EQ(strenv.getStateVar<int32_t>(state, "Before", std::nullopt, dom).value_or(0),
+            STRIDE_STATUS_TRUNCATED | STRIDE_STATUS_INVALID);
+  EXPECT_EQ(status("RootDomain_status"), STRIDE_STATUS_OK);
+  EXPECT_EQ(status("Short_status"), STRIDE_STATUS_OK);
+  EXPECT_EQ(strenv.getStateVar<int32_t>(state, "Number", std::nullopt, dom).value_or(0), 7);
+
+  // Clearing from Stride: ClearStatus >> RootDomain.status
+  ASSERT_TRUE(strenv.setStateVar(state, "Text", std::string("cdef"), std::nullopt, dom));
+  EXPECT_EQ(strenv.invoke("RootDomain_process", args), 0);
+  EXPECT_NE(status("RootDomain_status"), 0);
+  ASSERT_TRUE(strenv.setStateVar(state, "Text", std::string("7"), std::nullopt, dom));
+  EXPECT_EQ(strenv.invoke("RootDomain_process", args), 0);
+  EXPECT_EQ(status("RootDomain_status"), STRIDE_STATUS_OK);
+
+  // A domain that can report nothing has no word
+  StrideEnvironment plain;
+  ASSERT_TRUE(plain.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "avr_blink.stride"));
+  for (const auto &field : plain.getStateFields("AvrTickDomain")) {
+    EXPECT_EQ(field.name.find("_status"), std::string::npos) << field.name;
   }
 }

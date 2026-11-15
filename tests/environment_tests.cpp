@@ -802,4 +802,210 @@ TEST(MultiDomainTest, CrossDomainSignalReadSharedMemory) {
   EXPECT_EQ(*consumeVal, 18);
 }
 
+TEST(MultiDomainTest, ParentTickedSynchronousSubdomains) {
+  strd::StrideEnvironment env;
+  ASSERT_TRUE(env.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                             "domain_parent_ticked_rate.stride"));
+  ASSERT_TRUE(env.compileInMemory());
+
+  auto *parentCount = env.getGlobal<int32_t>("ParentCount");
+  auto *subDiv4Count = env.getGlobal<int32_t>("SubDiv4Count");
+  auto *subDiv4LastParent = env.getGlobal<int32_t>("SubDiv4LastParent");
+  auto *subMul2Count = env.getGlobal<int32_t>("SubMul2Count");
+  ASSERT_NE(parentCount, nullptr);
+  ASSERT_NE(subDiv4Count, nullptr);
+  ASSERT_NE(subDiv4LastParent, nullptr);
+  ASSERT_NE(subMul2Count, nullptr);
+
+  auto initParentSym = env.getFunction("ParentDomain_init");
+  auto procParentSym = env.getFunction("ParentDomain_process");
+  ASSERT_TRUE((bool)initParentSym);
+  ASSERT_TRUE((bool)procParentSym);
+  auto *initParent = initParentSym->toPtr<void (*)()>();
+  auto *procParent = procParentSym->toPtr<void (*)()>();
+
+  // ParentDomain_init also initializes its parent-ticked subdomains
+  initParent();
+  EXPECT_EQ(*parentCount, 0);
+  EXPECT_EQ(*subDiv4Count, 0);
+  EXPECT_EQ(*subDiv4LastParent, 0);
+  EXPECT_EQ(*subMul2Count, 0);
+
+  // Tick 0: ParentCount -> 1, SubDiv4Domain runs on tick 0 (count -> 1, lastParent -> 1), SubMul2Domain runs 2x (count -> 2)
+  procParent();
+  EXPECT_EQ(*parentCount, 1);
+  EXPECT_EQ(*subDiv4Count, 1);
+  EXPECT_EQ(*subDiv4LastParent, 1);
+  EXPECT_EQ(*subMul2Count, 2);
+
+  // Ticks 1, 2, 3: SubDiv4Domain does not run; SubMul2Domain runs 2x per parent tick
+  for (int t = 1; t <= 3; ++t) {
+    procParent();
+    EXPECT_EQ(*parentCount, t + 1);
+    EXPECT_EQ(*subDiv4Count, 1);
+    EXPECT_EQ(*subDiv4LastParent, 1);
+    EXPECT_EQ(*subMul2Count, (t + 1) * 2);
+  }
+
+  // Tick 4: SubDiv4Domain runs again (count -> 2, lastParent -> 5)
+  procParent();
+  EXPECT_EQ(*parentCount, 5);
+  EXPECT_EQ(*subDiv4Count, 2);
+  EXPECT_EQ(*subDiv4LastParent, 5);
+  EXPECT_EQ(*subMul2Count, 10);
+}
+
+TEST(MultiDomainTest, ParentTickedReactiveTriggerSubdomains) {
+  strd::StrideEnvironment env;
+  ASSERT_TRUE(env.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                             "domain_parent_ticked_trigger.stride"));
+  ASSERT_TRUE(env.compileInMemory());
+
+  auto *sampleIn = env.getGlobal<int32_t>("SampleIn");
+  auto *fireSub = env.getGlobal<bool>("FireSub");
+  auto *switchSubCount = env.getGlobal<int32_t>("SwitchSubCount");
+  auto *switchSubCaptured = env.getGlobal<int32_t>("SwitchSubCaptured");
+  auto *bufSubCount = env.getGlobal<int32_t>("BufSubCount");
+  auto *capturedFrame = env.getGlobal<int32_t>("CapturedFrame");
+  ASSERT_NE(sampleIn, nullptr);
+  ASSERT_NE(fireSub, nullptr);
+  ASSERT_NE(switchSubCount, nullptr);
+  ASSERT_NE(switchSubCaptured, nullptr);
+  ASSERT_NE(bufSubCount, nullptr);
+  ASSERT_NE(capturedFrame, nullptr);
+
+  auto initParentSym = env.getFunction("ParentDomain_init");
+  auto procParentSym = env.getFunction("ParentDomain_process");
+  ASSERT_TRUE((bool)initParentSym);
+  ASSERT_TRUE((bool)procParentSym);
+  auto *initParent = initParentSym->toPtr<void (*)()>();
+  auto *procParent = procParentSym->toPtr<void (*)()>();
+
+  initParent();
+  EXPECT_EQ(*switchSubCount, 0);
+  EXPECT_EQ(*bufSubCount, 0);
+
+  // Sample 1: no trigger, buffer has 1/4 samples
+  *sampleIn = 10;
+  *fireSub = false;
+  procParent();
+  EXPECT_EQ(*switchSubCount, 0);
+  EXPECT_EQ(*bufSubCount, 0);
+
+  // Sample 2: trigger FireSub -> SwitchTriggeredSub runs once and FireSub auto-clears
+  *sampleIn = 20;
+  *fireSub = true;
+  procParent();
+  EXPECT_EQ(*switchSubCount, 1);
+  EXPECT_EQ(*switchSubCaptured, 20);
+  EXPECT_FALSE(*fireSub);
+  EXPECT_EQ(*bufSubCount, 0);
+
+  // Sample 3: FireSub stays false, buffer has 3/4 samples
+  *sampleIn = 30;
+  procParent();
+  EXPECT_EQ(*switchSubCount, 1);
+  EXPECT_EQ(*bufSubCount, 0);
+
+  // Sample 4: WinBuf reaches frameSize=4 -> WinBuf.ready triggers BufferTriggeredSub
+  *sampleIn = 40;
+  procParent();
+  EXPECT_EQ(*bufSubCount, 1);
+  EXPECT_EQ(capturedFrame[0], 10);
+  EXPECT_EQ(capturedFrame[1], 20);
+  EXPECT_EQ(capturedFrame[2], 30);
+  EXPECT_EQ(capturedFrame[3], 40);
+
+  // Sample 5: hop=2 (1/2 samples since last frame), BufferTriggeredSub does not run
+  *sampleIn = 50;
+  procParent();
+  EXPECT_EQ(*bufSubCount, 1);
+
+  // Sample 6: hop=2 (2/2 samples since last frame) -> BufferTriggeredSub runs again with [30, 40, 50, 60]
+  *sampleIn = 60;
+  procParent();
+  EXPECT_EQ(*bufSubCount, 2);
+  EXPECT_EQ(capturedFrame[0], 30);
+  EXPECT_EQ(capturedFrame[1], 40);
+  EXPECT_EQ(capturedFrame[2], 50);
+  EXPECT_EQ(capturedFrame[3], 60);
+}
+
+TEST(MultiDomainTest, PreAndPostSubdomainsOrdering) {
+  strd::StrideEnvironment env;
+  ASSERT_TRUE(env.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                             "domain_pre_post_subdomains.stride"));
+  ASSERT_TRUE(env.compileInMemory());
+
+  auto *postBStep = env.getGlobal<int32_t>("PostBStep");
+  ASSERT_NE(postBStep, nullptr);
+
+  auto statePtr = env.allocateSharedState("ParentDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+
+  env.invoke("ParentDomain_init", args);
+  EXPECT_EQ(*postBStep, 0);
+
+  // Expected execution order:
+  // 1. PreSubA (1)
+  // 2. PreSubB (2)
+  // 3. ParentDomain stream (3)
+  // 4. OrderSM stateMachine (4)
+  // 5. PostSubA (5)
+  // 6. PostSubB (6)
+  env.invoke("ParentDomain_process", args);
+  EXPECT_EQ(*postBStep, 123456);
+}
+
+TEST(MultiDomainTest, InlineSubdomainCallsInStream) {
+  strd::StrideEnvironment env;
+  ASSERT_TRUE(env.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                             "domain_inline_stream_call.stride"));
+  ASSERT_TRUE(env.compileInMemory());
+
+  auto *step1 = env.getGlobal<int32_t>("Step1");
+  auto *subAStep = env.getGlobal<int32_t>("SubAStep");
+  auto *step3 = env.getGlobal<int32_t>("Step3");
+  auto *subBStep = env.getGlobal<int32_t>("SubBStep");
+  auto *step5 = env.getGlobal<int32_t>("Step5");
+  auto *condTrig = env.getGlobal<bool>("CondTrig");
+  ASSERT_NE(step1, nullptr);
+  ASSERT_NE(subAStep, nullptr);
+  ASSERT_NE(step3, nullptr);
+  ASSERT_NE(subBStep, nullptr);
+  ASSERT_NE(step5, nullptr);
+  ASSERT_NE(condTrig, nullptr);
+
+  auto initParentSym = env.getFunction("ParentDomain_init");
+  auto procParentSym = env.getFunction("ParentDomain_process");
+  ASSERT_TRUE((bool)initParentSym);
+  ASSERT_TRUE((bool)procParentSym);
+  auto *initParent = initParentSym->toPtr<void (*)()>();
+  auto *procParent = procParentSym->toPtr<void (*)()>();
+
+  initParent();
+  EXPECT_EQ(*step1, 0);
+  EXPECT_EQ(*subBStep, 0);
+
+  // Tick 1: CondTrig is false -> InlineSubA runs between Step1 and Step3, InlineSubB is skipped
+  *condTrig = false;
+  procParent();
+  EXPECT_EQ(*step1, 1);
+  EXPECT_EQ(*subAStep, 12);
+  EXPECT_EQ(*step3, 123);
+  EXPECT_EQ(*subBStep, 0);
+  EXPECT_EQ(*step5, 5);
+
+  // Tick 2: CondTrig is true -> InlineSubA and InlineSubB both run at their exact stream positions
+  *condTrig = true;
+  procParent();
+  EXPECT_EQ(*step1, 2);
+  EXPECT_EQ(*subAStep, 22);
+  EXPECT_EQ(*step3, 223);
+  EXPECT_EQ(*subBStep, 2234);
+  EXPECT_EQ(*step5, 22345);
+  EXPECT_FALSE(*condTrig);
+}
+
 } // namespace

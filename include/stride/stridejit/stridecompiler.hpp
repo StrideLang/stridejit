@@ -104,6 +104,9 @@ struct ExternalFunction {
   // new characters ("sum", "format", "repeat"), or empty. Such a function
   // takes scratch space and its size before the result pointer.
   std::string resultSize;
+  // status: on. The function reports a stride_status_t: returned when its
+  // result goes through the out pointer, else through a trailing pointer.
+  bool hasStatus{false};
 };
 
 struct DomainArg {
@@ -200,10 +203,13 @@ public:
                               llvm::Type *varType);
   // After a write to the String variable name (element indices[0] for an
   // array): copies its characters into the variable's own buffer. Does
-  // nothing for a variable without one.
+  // nothing for a variable without one. The store's status becomes the
+  // variable's last write status; when the write was a call that already
+  // recorded its own status (freshWrite false), the store's is ORed in.
   void commitStringWrite(
       const std::string &name,
-      const std::vector<std::variant<size_t, std::string>> &indices);
+      const std::vector<std::variant<size_t, std::string>> &indices,
+      bool freshWrite = true, bool reportStatus = true);
   // The maxSize of the String variable name (of each element, for an array),
   // when it has its own buffer.
   std::optional<uint64_t> stringCapacity(const std::string &name);
@@ -227,6 +233,27 @@ public:
   llvm::Value *takeScratch(uint64_t bytes);
   // Sizes the current function's scratch once its body is generated.
   void finishScratch();
+
+  // ---- Runtime status ----
+  // A runtime call that can fail reports a stride_status_t (one bit per
+  // kind of failure). Stride code never sees it: the compiler ORs it into
+  // the domain's status word, <Domain>_status, a UInt8 that stays set until
+  // the program writes it, and stores it as the last write's code on the
+  // variable it wrote, <Name>_status. Both are read as members:
+  // RootDomain.status, Title.status. A domain gets a word only when
+  // something in it can report a status.
+  static std::string statusName(const std::string &name) {
+    return name + "_status";
+  }
+  // The current domain's status word, or nullptr when it has none (then the
+  // status is dropped).
+  llvm::Value *statusPtr{nullptr};
+  // ORs status (an integer) into the domain's word.
+  void recordStatus(llvm::Value *status);
+  // Also stores it as varName's last write status, when varName has one
+  // (ORed into it when accumulate: a later step of the same write).
+  void recordStatus(llvm::Value *status, const std::string &varName,
+                    bool accumulate = false);
 
   llvm::Type *getElementType(llvm::Value *V);
 

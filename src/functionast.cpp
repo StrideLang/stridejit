@@ -362,6 +362,10 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   llvm::Value *prevFunctionStatePtr = state.currentFunctionStatePtr;
   const StrideCompiler::StateStructInfo *prevFunctionStateInfo =
       state.currentFunctionStateInfo;
+  // A domain function records statuses in its domain's word; a module has
+  // no word of its own yet
+  llvm::Value *prevStatusPtr = state.statusPtr;
+  state.statusPtr = nullptr;
 
   if (hasState) {
     auto stateArgIt = state.NamedValues.find("__state");
@@ -375,8 +379,8 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
         LOG_DEBUG() << "DEBUG: currentFunctionStateInfo is NULL!\n";
       }
 
-      if (!state.currentFunctionStateInfo && state.m_tree) {
-        std::string searchName = P.getName();
+      std::string searchName = P.getName();
+      {
         size_t pos = searchName.find("_process");
         if (pos != std::string::npos) {
           searchName = searchName.substr(0, pos);
@@ -386,7 +390,8 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
             searchName = searchName.substr(0, pos);
           }
         }
-
+      }
+      if (!state.currentFunctionStateInfo && state.m_tree) {
         state.currentFunctionStateInfo = state.getStateStructInfo(searchName);
 
         if (!state.currentFunctionStateInfo) {
@@ -405,6 +410,10 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
               state.currentFunctionStateInfo->structType,
               state.currentFunctionStatePtr, idx, varName + "_ptr");
           state.NamedValues[varName] = {fieldPtr, elemTy};
+          if (callType == CallableType::DomainFunction &&
+              varName == StrideCompiler::statusName(searchName)) {
+            state.statusPtr = fieldPtr;
+          }
 
           // Independent Variable Resets:
           // When a persistent variable specifies a reset property (e.g. signal Total { reset: Reset }),
@@ -776,6 +785,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     const auto &statement = Body[statementIndex];
     if (!statement) {
       state.scratch = outerScratch;
+      state.statusPtr = prevStatusPtr;
       return nullptr;
     }
     if (statement->startsStream) {
@@ -924,6 +934,7 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   state.Builder->CreateRet(outVal);
   state.finishScratch();
   state.scratch = outerScratch;
+  state.statusPtr = prevStatusPtr;
   state.currentFunctionStatePtr = prevFunctionStatePtr;
   state.currentFunctionStateInfo = prevFunctionStateInfo;
   // Validate the generated code, checking for consistency.
@@ -1412,10 +1423,11 @@ static uint64_t stringBound(StrideCompiler &state, const ExprAST *e) {
   return StrideCompiler::kDefaultStringMaxSize;
 }
 
-uint64_t strd::stringResultBound(StrideCompiler &state, const std::string &kind,
-                           const std::vector<std::unique_ptr<ExprAST>> &inputs,
-                           const std::vector<std::unique_ptr<ExprAST>> &properties,
-                           const std::vector<std::unique_ptr<ExprAST>> &outputs) {
+StringResultBound strd::stringResultBound(
+    StrideCompiler &state, const std::string &kind,
+    const std::vector<std::unique_ptr<ExprAST>> &inputs,
+    const std::vector<std::unique_ptr<ExprAST>> &properties,
+    const std::vector<std::unique_ptr<ExprAST>> &outputs) {
   // Widest a formatted value gets: the runtime pads to at most 64
   constexpr uint64_t kFormatWidth = 64;
   std::optional<uint64_t> bound;
@@ -1444,20 +1456,40 @@ uint64_t strd::stringResultBound(StrideCompiler &state, const std::string &kind,
     }
   }
   // A result stored straight into a String is cut off at its maxSize anyway
-  std::optional<uint64_t> destination;
+  StringResultBound result;
+  result.bound = bound;
   if (!outputs.empty()) {
     if (auto *var = dynamic_cast<const VariableExprAST *>(outputs[0].get())) {
-      destination = state.stringCapacity(var->getName());
+      result.destination = state.stringCapacity(var->getName());
     }
   }
   uint64_t bytes = bound ? *bound
-                         : destination.value_or(
+                         : result.destination.value_or(
                                StrideCompiler::kDefaultStringMaxSize);
-  if (destination) {
-    bytes = std::min(bytes, *destination);
+  if (result.destination) {
+    bytes = std::min(bytes, *result.destination);
   }
   // Keep a runaway bound (Repeat of a large count) off the stack
-  return std::min<uint64_t>(bytes, 65535);
+  result.bytes = std::min<uint64_t>(bytes, 65535);
+  return result;
+}
+
+void strd::reportStringResultBound(const StringResultBound &result,
+                                   const std::string &callee,
+                                   const std::string &destination,
+                                   const std::string &file, int line,
+                                   int column) {
+  if (result.mayTruncate()) {
+    LOG_WARNING() << file << ":" << line << ":" << column << ": " << callee
+                  << " can make " << *result.bound << " characters; "
+                  << destination << " holds " << *result.destination
+                  << ". Longer results are cut off (status Truncated)."
+                  << std::endl;
+  } else if (!result.bound) {
+    LOG_INFO() << file << ":" << line << ":" << column << ": the size of "
+               << callee << "'s result is not known when compiling; it is cut"
+               << " off at " << result.bytes << " characters." << std::endl;
+  }
 }
 
 std::pair<llvm::Value *, std::optional<llvm::Type *>>
@@ -1479,6 +1511,8 @@ CallExprAST::codegen(StrideCompiler &state) {
   std::vector<std::pair<llvm::Value *, std::optional<llvm::Type *>>> CallArgs;
   std::vector<std::tuple<std::string, llvm::AllocaInst *, llvm::Type *>>
       tempOuts;
+  llvm::AllocaInst *statusSlot = nullptr;
+  bool provenSafe = false; // the result always fits: no status to record
   if (callType != CallableType::External) {
     processArgGroup(state, OutArgs, CalleeF, CallArgs, true, &tempOuts,
                     &OutArgsDataType);
@@ -1779,10 +1813,23 @@ CallExprAST::codegen(StrideCompiler &state) {
                       &InArgsDataType);
     }
     // processArgGroup(state, InternalArgs, CalleeF, CallArgs)
+    if (CalleeF->hasFnAttribute("stride.status") &&
+        CalleeF->getFnAttribute("stride.status").getValueAsString() ==
+            "pointer") {
+      // The status comes back through a trailing pointer
+      llvm::Function *TheFunction = state.Builder->GetInsertBlock()->getParent();
+      statusSlot = state.CreateEntryBlockAlloca(
+          TheFunction, "call_status", llvm::Type::getInt8Ty(*state.TheContext));
+      state.Builder->CreateStore(state.Builder->getInt8(0), statusSlot);
+      CallArgs.push_back(
+          {statusSlot, llvm::PointerType::get(*state.TheContext, 0)});
+    }
     if (CalleeF->hasFnAttribute("stride.struct_out") && !OutArgs.empty()) {
       // Struct results are written through a trailing out pointer
       auto [outPtr, outTy] = OutArgs[0]->codegen(state);
+      std::string outVarName;
       if (auto *varExpr = dynamic_cast<VariableExprAST *>(OutArgs[0].get())) {
+        outVarName = varExpr->getName();
         auto indeces = varExpr->getIndices();
         if (!indeces.empty() && outPtr && outPtr->getType()->isPointerTy()) {
           std::vector<llvm::Value *> idxList;
@@ -1823,8 +1870,15 @@ CallExprAST::codegen(StrideCompiler &state) {
               CalleeF->getFnAttribute("stride.result_size")
                   .getValueAsString()
                   .str();
-          uint64_t bytes = stringResultBound(state, kind, InArgs,
-                                             PropertyArgs, OutArgs);
+          StringResultBound result = stringResultBound(
+              state, kind, InArgs, PropertyArgs, OutArgs);
+          reportStringResultBound(
+              result, Callee,
+              outVarName.empty() ? std::string("the destination") : outVarName,
+              m_relativeFilename, m_line, m_column);
+          // A result that always fits needs no status recorded
+          provenSafe = result.cannotTruncate();
+          uint64_t bytes = result.bytes;
           llvm::Type *ptrTy = llvm::PointerType::get(*state.TheContext, 0);
           CallArgs.push_back({state.takeScratch(bytes), ptrTy});
           CallArgs.push_back(
@@ -2020,9 +2074,30 @@ CallExprAST::codegen(StrideCompiler &state) {
     }
   }
 
+  // The status (stride_status.h) goes into the domain's word and, for a
+  // String result, onto the variable; Stride code never sees it
+  bool statusReturned =
+      CalleeF->hasFnAttribute("stride.status") &&
+      CalleeF->getFnAttribute("stride.status").getValueAsString() == "return";
+  if ((statusReturned || statusSlot) && !provenSafe) {
+    llvm::Value *status =
+        statusReturned
+            ? static_cast<llvm::Value *>(call)
+            : state.Builder->CreateLoad(llvm::Type::getInt8Ty(*state.TheContext),
+                                        statusSlot, "call_status");
+    auto *outVar = OutArgs.empty()
+                       ? nullptr
+                       : dynamic_cast<VariableExprAST *>(OutArgs[0].get());
+    if (outVar && statusReturned) {
+      state.recordStatus(status, outVar->getName());
+    } else {
+      state.recordStatus(status);
+    }
+  }
+
   // Write to output
   if (callType == CallableType::External) {
-    if (!call->getType()->isVoidTy() && OutArgs.size() > 0) {
+    if (!call->getType()->isVoidTy() && !statusReturned && OutArgs.size() > 0) {
       auto [outVal, outType] = OutArgs[0]->codegen(state);
       if (outVal->getType()->isPointerTy()) {
         llvm::Value *result = call;
@@ -2040,10 +2115,13 @@ CallExprAST::codegen(StrideCompiler &state) {
     }
   }
 
-  // Strings written by the call keep their characters in their own buffer
+  // Strings written by the call keep their characters in their own buffer.
+  // The call's status is already the variable's; the store adds its own.
   for (const auto &outArg : OutArgs) {
     if (auto *varExpr = dynamic_cast<VariableExprAST *>(outArg.get())) {
-      state.commitStringWrite(varExpr->getName(), varExpr->getIndices());
+      state.commitStringWrite(varExpr->getName(), varExpr->getIndices(),
+                              /* freshWrite */ !statusReturned,
+                              /* reportStatus */ !provenSafe);
     }
   }
 

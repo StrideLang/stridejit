@@ -1,0 +1,76 @@
+# Execution ordering for parent-ticked subdomains:
+# 1. preSubdomains (PreSubA, PreSubB)
+# 2. ParentDomain streams
+# 3. stateMachines (OrderSM)
+# 4. postSubdomains (PostSubA, PostSubB)
+
+_domainDefinition ParentDomain {
+    framework: _JitFramework
+    rate: 100
+    preSubdomains: [PreSubA, PreSubB]
+    postSubdomains: [PostSubA, PostSubB]
+    stateMachines: [OrderSM]
+    domainFunctionCode: ''
+}
+
+_domainDefinition PreSubA {
+    framework: _JitFramework
+    parentDomain: ParentDomain
+    rate: 100
+    domainFunctionCode: ''
+}
+
+_domainDefinition PreSubB {
+    framework: _JitFramework
+    parentDomain: ParentDomain
+    rate: 100
+    domainFunctionCode: ''
+}
+
+_domainDefinition PostSubA {
+    framework: _JitFramework
+    parentDomain: ParentDomain
+    rate: 100
+    domainFunctionCode: ''
+}
+
+_domainDefinition PostSubB {
+    framework: _JitFramework
+    parentDomain: ParentDomain
+    rate: 100
+    domainFunctionCode: ''
+}
+
+signal PreAStep { type: Int default: 0 domain: PreSubA }
+signal PreBStep { type: Int default: 0 domain: PreSubB }
+signal ParentStep { type: Int default: 0 domain: ParentDomain }
+signal SMStep { type: Int default: 0 domain: ParentDomain }
+signal PostAStep { type: Int default: 0 domain: PostSubA }
+signal PostBStep { type: Int default: 0 domain: PostSubB }
+
+# 1. PreSubA
+PostBStep * 10 + 1 >> PreAStep;
+
+# 2. PreSubB
+PreAStep * 10 + 2 >> PreBStep;
+
+# 3. ParentDomain stream
+PreBStep * 10 + 3 >> ParentStep;
+
+# 4. StateMachine (entity type 'state')
+state Active {
+    onProcess: [
+        ParentStep * 10 + 4 >> SMStep;
+    ]
+}
+
+state OrderSM {
+    initialState: Active
+    states: [Active]
+}
+
+# 5. PostSubA
+SMStep * 10 + 5 >> PostAStep;
+
+# 6. PostSubB
+PostAStep * 10 + 6 >> PostBStep;

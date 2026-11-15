@@ -224,10 +224,30 @@ private:
 // (the input's size times a constant count). Capped by the destination's
 // maxSize when the result goes straight into a String, and by the default
 // String size when the bound is unknown.
-uint64_t stringResultBound(StrideCompiler &state, const std::string &kind,
-                           const std::vector<std::unique_ptr<ExprAST>> &inputs,
-                           const std::vector<std::unique_ptr<ExprAST>> &properties,
-                           const std::vector<std::unique_ptr<ExprAST>> &outputs);
+struct StringResultBound {
+  uint64_t bytes{0};                 // scratch to reserve
+  std::optional<uint64_t> bound;     // the most the result can be, if known
+  std::optional<uint64_t> destination; // the String's maxSize it goes into
+  // The result always fits: no status needs recording for it
+  bool cannotTruncate() const {
+    return bound && destination && *bound <= *destination;
+  }
+  // The result can be cut off, and the compiler can say by how much
+  bool mayTruncate() const {
+    return bound && destination && *bound > *destination;
+  }
+};
+StringResultBound
+stringResultBound(StrideCompiler &state, const std::string &kind,
+                  const std::vector<std::unique_ptr<ExprAST>> &inputs,
+                  const std::vector<std::unique_ptr<ExprAST>> &properties,
+                  const std::vector<std::unique_ptr<ExprAST>> &outputs);
+// Reports a result that can be cut off (a warning with the sizes) or whose
+// bound is unknown (a note), at the call's location.
+void reportStringResultBound(const StringResultBound &result,
+                             const std::string &callee,
+                             const std::string &destination,
+                             const std::string &file, int line, int column);
 
 } // namespace strd
 

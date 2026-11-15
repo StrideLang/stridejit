@@ -106,6 +106,12 @@ public:
 
   std::pair<llvm::Value *, std::optional<llvm::Type *>>
   codegen(StrideCompiler &state) override;
+  const std::string &getName() const { return Name; }
+  const std::string &getProperty() const { return Property; }
+  // The variable that holds Name.Property (Buf_ready, RootDomain_status)
+  std::string portToken() const {
+    return Name.empty() ? Property : Name + "_" + Property;
+  }
 };
 
 class ResetExprAST : public ExprAST {

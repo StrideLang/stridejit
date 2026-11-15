@@ -100,6 +100,7 @@ struct StrideFormatArg {
 - **Scratch from the caller**: Generative operations (`Concat`, `Repeat`, `Format`) write their characters into scratch space the caller passes with its size, and cut the result off there. The runtime has no buffers of its own, so it is safe from any thread or interrupt. The compiler reserves the scratch on the calling function's stack, sized when compiling from the platform module's `resultSize` (`sum`, `format`, `repeat`): results alive together in one stream get separate space, each stream reuses the space from its start, a result that goes straight into a String is capped at its `maxSize`, and a function that makes no such result has no scratch. Each domain (an ISR, a thread) runs its own function on its own stack, so each gets its own.
 - **String variables own their characters**: every String variable has a companion buffer of `maxSize` bytes (default 128), named `<name>__chars`. After each write the compiler calls `__stride_jit_string_store(slot, buffer, capacity)`, which copies the characters in (cut off at `maxSize`, overlap allowed) and points the view at them. So a stored String never depends on scratch, a literal or host memory, and `setStateVar` copies the same way. `getStateFields` reports each String's `charsOffset` and `capacity`. Strings never grow.
 - **Numbers ignore the host locale**: `Parse` and `Format` always use `.` as the decimal separator (`_strtod_l`/`_snprintf_l` on Windows, `strtod_l`/`uselocale` elsewhere), even when the host program has set a locale with a decimal comma.
+- **Status**: a function that cannot do what it was asked reports a `stride_status_t` (`stride_status.h`): `Ok` 0, `Truncated` 1, `Invalid` 2, `OutOfRange` 4, `Unavailable` 8, `Platform` 128, one bit each. It is returned when the result goes through the out pointer (`Concat`, `Repeat`, `Format`, the store) and written through a trailing status pointer when the return value is the result (`Parse`; the pointer may be null). Stride code never sees it: the compiler ORs it into the domain's status word `<Domain>_status` (a `UInt8` in the domain state, read as `RootDomain.status`, sticky until the program writes it, e.g. `0 >> RootDomain.status`) and stores it as the last write's code on the String it wrote (`<Name>_status`, read as `Title.status`; a call's status and its store's are ORed). A domain gets a word only when something in it can report a status: a String variable, or a call to a platform module with `status: on`. The library package `Status` names the codes.
 - **Output**: `Print` and `PrintLn` go to stdout unless the host calls `stride_runtime_set_writer(writer, context)` to receive them; on microcontrollers (`STRIDE_RT_NO_STDIO`) they go to `stride_rt_platform_write`, which the platform runtime provides.
 
 ---
@@ -110,7 +111,7 @@ struct StrideFormatArg {
 1. **`__stride_jit_string_*` (JIT / AOT Codegen ABI)**: Pointer-based ABI used by compiled Stride code. Struct inputs are passed by `const StrideStringView*` and struct outputs are written through a trailing `StrideStringView* out` parameter (`stride.struct_out`), avoiding platform-specific struct-by-value calling convention discrepancies.
 There are no by-value versions: calling conventions for structs passed by value differ between compilers.
 
-`void __stride_jit_string_store(StrideStringView *slot, char *buffer, int32_t capacity)` is not bound to a Stride module: the compiler calls it after every write to a String variable (see Memory Model).
+`stride_status_t __stride_jit_string_store(StrideStringView *slot, char *buffer, int32_t capacity)` is not bound to a Stride module: the compiler calls it after every write to a String variable (see Memory Model).
 
 ### 4.1 Codegen Entry Points (`__stride_jit_string_*`)
 
@@ -138,8 +139,8 @@ There are no by-value versions: calling conventions for structs passed by value 
 #### Numeric Parsing
 | Function Signature | Stride Module | Description |
 | :--- | :--- | :--- |
-| `int32_t __stride_jit_string_parse_int(const StrideStringView *str, int32_t defaultVal)` | `Parse@String_Int` | Parses leading whitespace, an optional sign and base-10 digits; text after the digits is ignored. Returns `defaultVal` when there are no digits or the number does not fit in 32 bits. |
-| `double __stride_jit_string_parse_real(const StrideStringView *str, double defaultVal)` | `Parse@String_Real` | Parses a floating-point number as `strtod` does, always with `.` as the decimal separator; text after the number is ignored. Returns `defaultVal` on invalid input. |
+| `int32_t __stride_jit_string_parse_int(const StrideStringView *str, int32_t defaultVal, stride_status_t *status)` | `Parse@String_Int` | Parses leading whitespace, an optional sign and base-10 digits; text after the digits is ignored. Returns `defaultVal` with status `Invalid` when there are no digits, and with `OutOfRange` when the number does not fit in 32 bits. |
+| `double __stride_jit_string_parse_real(const StrideStringView *str, double defaultVal, stride_status_t *status)` | `Parse@String_Real` | Parses a floating-point number as `strtod` does, always with `.` as the decimal separator; text after the number is ignored. Returns `defaultVal` with status `Invalid` when there is no number. |
 
 #### Tokenization (Zero-Copy)
 | Function Signature | Stride Module | Description |
@@ -151,9 +152,9 @@ There are no by-value versions: calling conventions for structs passed by value 
 #### Generative Operations (Scratch Arena) & Console I/O
 | Function Signature | Stride Module | Description |
 | :--- | :--- | :--- |
-| `void __stride_jit_string_concat_n(const StrideStringView *views, int32_t count, char *scratch, int32_t capacity, StrideStringView *out)` | `Concat` / `+` | Concatenates `count` string views from `views[0..count-1]` into `scratch`, cut off at `capacity`. |
-| `void __stride_jit_string_repeat(const StrideStringView *str, int32_t count, char *scratch, int32_t capacity, StrideStringView *out)` | `Repeat` | Repeats `str` `count` times into `scratch`, cut off at `capacity`. |
-| `void __stride_jit_string_format(const StrideStringView *fmt, const StrideFormatArg *args, int32_t count, char *scratch, int32_t capacity, StrideStringView *out)` | `Format` | Formats `fmt` replacing `{}` / `{:...}` placeholders (`{:d}`, `{:04d}`, `{:x}`, `{:X}`, `{:.Nf}`, `{:e}`, `{:b}`, `{:s}`, escaped `{{` / `}}`) with `args[0..count-1]`, into `scratch` and cut off at `capacity`. A value is padded to at most 64 characters. |
+| `stride_status_t __stride_jit_string_concat_n(const StrideStringView *views, int32_t count, char *scratch, int32_t capacity, StrideStringView *out)` | `Concat` / `+` | Concatenates `count` string views from `views[0..count-1]` into `scratch`, cut off at `capacity` (status `Truncated`). |
+| `stride_status_t __stride_jit_string_repeat(const StrideStringView *str, int32_t count, char *scratch, int32_t capacity, StrideStringView *out)` | `Repeat` | Repeats `str` `count` times into `scratch`, cut off at `capacity`. |
+| `stride_status_t __stride_jit_string_format(const StrideStringView *fmt, const StrideFormatArg *args, int32_t count, char *scratch, int32_t capacity, StrideStringView *out)` | `Format` | Formats `fmt` replacing `{}` / `{:...}` placeholders (`{:d}`, `{:04d}`, `{:x}`, `{:X}`, `{:.Nf}`, `{:e}`, `{:b}`, `{:s}`, escaped `{{` / `}}`) with `args[0..count-1]`, into `scratch` and cut off at `capacity`. A value is padded to at most 64 characters. |
 | `void __stride_jit_string_print(const StrideStringView *str)` | `Print` | Writes `str` without a trailing newline (see Output above). |
 | `void __stride_jit_string_println(const StrideStringView *str)` | `PrintLn` | Writes `str` followed by a newline (see Output above). |
 

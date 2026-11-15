@@ -1,0 +1,46 @@
+# Inline subdomain calls in parent domain streams:
+# - InlineSubA(); runs unconditionally at its exact stream position
+# - CondTrig >> InlineSubB(); runs conditionally at its exact stream position
+
+_domainDefinition ParentDomain {
+    framework: _JitFramework
+    rate: 100
+    domainFunctionCode: ''
+}
+
+_domainDefinition InlineSubA {
+    framework: _JitFramework
+    parentDomain: ParentDomain
+    rate: 100
+    domainFunctionCode: ''
+}
+
+_domainDefinition InlineSubB {
+    framework: _JitFramework
+    parentDomain: ParentDomain
+    rate: 100
+    domainFunctionCode: ''
+}
+
+signal Step1 { type: Int default: 0 domain: ParentDomain }
+signal SubAStep { type: Int default: 0 domain: InlineSubA }
+signal Step3 { type: Int default: 0 domain: ParentDomain }
+signal SubBStep { type: Int default: 0 domain: InlineSubB }
+signal Step5 { type: Int default: 0 domain: ParentDomain }
+
+trigger CondTrig {
+    domain: ParentDomain
+}
+
+# InlineSubA appends 2
+Step1 * 10 + 2 >> SubAStep;
+
+# InlineSubB appends 4
+Step3 * 10 + 4 >> SubBStep;
+
+# ParentDomain streams with inline subdomain calls
+Step1 + 1 >> Step1;
+InlineSubA();
+SubAStep * 10 + 3 >> Step3;
+CondTrig >> InlineSubB();
+SubBStep * 10 + 5 >> Step5;

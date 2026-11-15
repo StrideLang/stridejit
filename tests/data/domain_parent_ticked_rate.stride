@@ -1,0 +1,52 @@
+# Synchronous parent-ticked subdomains:
+# - ParentDomain runs at 100 Hz
+# - SubDiv4Domain has parentDomain: ParentDomain and rate: ParentDomain.rate / 4 (25 Hz)
+# - SubMul2Domain has parentDomain: ParentDomain and rate: ParentDomain.rate * 2 (200 Hz)
+_domainDefinition ParentDomain {
+    framework: _JitFramework
+    rate: 100
+    domainFunctionCode: ''
+}
+
+_domainDefinition SubDiv4Domain {
+    framework: _JitFramework
+    parentDomain: ParentDomain
+    rate: ParentDomain.rate / 4
+    domainFunctionCode: ''
+}
+
+_domainDefinition SubMul2Domain {
+    framework: _JitFramework
+    parentDomain: ParentDomain
+    rate: ParentDomain.rate * 2
+    domainFunctionCode: ''
+}
+
+signal ParentCount {
+    domain: ParentDomain
+    default: 0
+    type: Int
+}
+
+signal SubDiv4Count {
+    domain: SubDiv4Domain
+    default: 0
+    type: Int
+}
+
+signal SubDiv4LastParent {
+    domain: SubDiv4Domain
+    default: 0
+    type: Int
+}
+
+signal SubMul2Count {
+    domain: SubMul2Domain
+    default: 0
+    type: Int
+}
+
+ParentCount + 1 >> ParentCount;
+SubDiv4Count + 1 >> SubDiv4Count;
+ParentCount >> SubDiv4LastParent;
+SubMul2Count + 1 >> SubMul2Count;

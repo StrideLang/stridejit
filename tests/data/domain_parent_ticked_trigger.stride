@@ -1,0 +1,73 @@
+# Reactive parent-ticked subdomains:
+# - ParentDomain runs at 100 Hz
+# - SwitchTriggeredSub has parentDomain: ParentDomain and trigger: FireSub
+# - BufferTriggeredSub has parentDomain: ParentDomain and trigger: WinBuf.ready
+_domainDefinition ParentDomain {
+    framework: _JitFramework
+    rate: 100
+    domainFunctionCode: ''
+}
+
+_domainDefinition SwitchTriggeredSub {
+    framework: _JitFramework
+    parentDomain: ParentDomain
+    trigger: FireSub
+    domainFunctionCode: ''
+}
+
+_domainDefinition BufferTriggeredSub {
+    framework: _JitFramework
+    parentDomain: ParentDomain
+    trigger: WinBuf.ready
+    domainFunctionCode: ''
+}
+
+signal SampleIn {
+    domain: ParentDomain
+    default: 0
+    type: Int
+}
+
+trigger FireSub {
+    domain: ParentDomain
+}
+
+buffer WinBuf {
+    domain: ParentDomain
+    type: Int
+    capacity: 4
+    frameSize: 4
+    hop: 2
+}
+
+signal SwitchSubCount {
+    domain: SwitchTriggeredSub
+    default: 0
+    type: Int
+}
+
+signal SwitchSubCaptured {
+    domain: SwitchTriggeredSub
+    default: 0
+    type: Int
+}
+
+signal BufSubCount {
+    domain: BufferTriggeredSub
+    default: 0
+    type: Int
+}
+
+signal CapturedFrame[4] {
+    domain: BufferTriggeredSub
+    default: 0
+    type: Int
+}
+
+SampleIn >> WinBuf;
+
+SwitchSubCount + 1 >> SwitchSubCount;
+SampleIn >> SwitchSubCaptured;
+
+BufSubCount + 1 >> BufSubCount;
+WinBuf.frame >> CapturedFrame;

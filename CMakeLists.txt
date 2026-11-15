@@ -34,7 +34,7 @@ FetchContent_Declare(
 # Optional: Set LLVM-specific variables before making it available
 # set(LLVM_ENABLE_PROJECTS "clang" CACHE STRING "")
 set(LLVM_BUILD_TOOLS OFF CACHE BOOL "")
-set(LLVM_TARGETS_TO_BUILD "X86;AArch64;ARM;WebAssembly" CACHE STRING "")
+set(LLVM_TARGETS_TO_BUILD "X86;AArch64;ARM;WebAssembly;AVR" CACHE STRING "")
 set(LLVM_ENABLE_THREADS OFF CACHE BOOL "")
 set(LLVM_INCLUDE_TESTS OFF CACHE BOOL "")
 set(LLVM_BUILD_TESTS OFF CACHE BOOL "")
@@ -108,6 +108,7 @@ set(STRIDERUNTIME_SRC
 
 set(STRIDERUNTIME_HEADERS
   include/stride/stridejit/strideruntime_string.h
+  include/stride/stridejit/stride_status.h
   include/stride/stridejit/strideruntime_random.h
 )
 

@@ -130,7 +130,7 @@ bool isCallable(const std::shared_ptr<DeclarationNode> &decl,
   }
   const auto &t = decl->getEntityType();
   if (t == "module" || t == "reaction" || t == "loop" ||
-      t == "platformModule" || t == "function") {
+      t == "platformModule" || t == "function" || t == "_domainDefinition") {
     return true;
   }
   if (isReaction(decl, scope, tree)) {
@@ -141,12 +141,140 @@ bool isCallable(const std::shared_ptr<DeclarationNode> &decl,
     auto inherited = ASTQuery::getInheritedTypes(typeDecl, scope, tree);
     for (const auto &p : inherited) {
       if (p && (p->getName() == "_Reaction" || p->getName() == "_Module" ||
-                p->getName() == "_Loop")) {
+                p->getName() == "_Loop" || p->getName() == "_Callable" ||
+                p->getName() == "_PortedCallable")) {
         return true;
       }
     }
   }
   return false;
+}
+
+struct DirectFuncCallExprAST : public ExprAST {
+  std::string FuncName;
+  DirectFuncCallExprAST(std::string funcName)
+      : FuncName(std::move(funcName)) {}
+  std::pair<llvm::Value *, std::optional<llvm::Type *>>
+  codegen(StrideCompiler &state) override {
+    llvm::Function *callee = state.getFunctionInModule(FuncName);
+    if (!callee) {
+      auto *funcTy = llvm::FunctionType::get(
+          llvm::Type::getVoidTy(*state.TheContext), {}, false);
+      callee = llvm::Function::Create(
+          funcTy, llvm::Function::ExternalLinkage, FuncName,
+          state.TheModule.get());
+    }
+    llvm::SmallVector<llvm::Value *, 2> args;
+    for (auto &arg : callee->args()) {
+      args.push_back(llvm::Constant::getNullValue(arg.getType()));
+    }
+    llvm::Value *res = state.Builder->CreateCall(callee, args);
+    return {res, callee->getReturnType()};
+  }
+};
+
+struct ParentTickedSubdomain {
+  std::string childName;
+  std::string parentName;
+  std::shared_ptr<DeclarationNode> childDecl;
+  bool isTriggered = false;
+  ASTNode triggerNode = nullptr;
+  bool isRateDriven = false;
+  double parentRate = -1.0;
+  double childRate = -1.0;
+  std::string phaseGlobalName;
+};
+
+ParentTickedSubdomain
+buildSubdomainScheduleInfo(const std::shared_ptr<DeclarationNode> &childDecl,
+                           const std::string &parentName, ASTNode tree) {
+  ParentTickedSubdomain sub;
+  if (!childDecl) {
+    return sub;
+  }
+  sub.childName = childDecl->getName();
+  sub.parentName = parentName;
+  sub.childDecl = childDecl;
+  auto trigProp = childDecl->getPropertyValue("trigger");
+  if (trigProp && trigProp->getNodeType() != AST::None) {
+    sub.isTriggered = true;
+    sub.triggerNode = trigProp;
+  }
+  double childRate = CodeAnalysis::getDomainDefaultRate(childDecl);
+  auto parentDecl = CodeAnalysis::findDomainDeclaration(parentName, tree);
+  double parentRate =
+      parentDecl ? CodeAnalysis::getDomainDefaultRate(parentDecl) : -1.0;
+  if (childRate > 0.0 && parentRate > 0.0) {
+    sub.isRateDriven = true;
+    sub.parentRate = parentRate;
+    sub.childRate = childRate;
+    std::string phaseGlobalName =
+        "__rate_phase_sub_" + parentName + "_" + sub.childName;
+    auto spec =
+        RateScheduleSpec::build(parentRate, childRate, phaseGlobalName);
+    if (spec.needsPersistentPhaseState()) {
+      sub.phaseGlobalName = phaseGlobalName;
+    }
+  }
+  return sub;
+}
+
+std::unique_ptr<ExprAST>
+buildSubdomainCallExpr(const ParentTickedSubdomain &sub,
+                       const ScopeStack &scope, ASTNode tree) {
+  if (sub.childName.empty()) {
+    return nullptr;
+  }
+  std::vector<std::unique_ptr<ExprAST>> subCallBody;
+  subCallBody.push_back(
+      std::make_unique<DirectFuncCallExprAST>(sub.childName + "_process"));
+
+  if (sub.isRateDriven) {
+    auto spec = RateScheduleSpec::build(sub.parentRate, sub.childRate,
+                                        sub.phaseGlobalName);
+    if (std::abs(sub.childRate - sub.parentRate) >= 1e-9) {
+      std::vector<std::unique_ptr<ExprAST>> rateWrapped;
+      if (sub.childRate < sub.parentRate) {
+        rateWrapped.push_back(std::make_unique<DownsampleExprAST>(
+            std::move(spec), std::move(subCallBody)));
+      } else {
+        rateWrapped.push_back(std::make_unique<UpsampleExprAST>(
+            std::move(spec), std::move(subCallBody)));
+      }
+      subCallBody = std::move(rateWrapped);
+    }
+  }
+
+  if (sub.isTriggered && sub.triggerNode) {
+    std::unique_ptr<ExprAST> condExpr;
+    std::string condName = "sub_trig_" + sub.childName;
+    if (sub.triggerNode->getNodeType() == AST::Entity) {
+      condName = ASTQuery::getNodeName(sub.triggerNode);
+      condExpr = std::make_unique<VariableExprAST>(condName);
+    } else if (sub.triggerNode->getNodeType() == AST::MemberAccess) {
+      auto ma = std::static_pointer_cast<MemberAccessNode>(sub.triggerNode);
+      auto entityDecl =
+          ASTQuery::findDeclarationByName(ma->getEntity(), scope, tree);
+      if (entityDecl && entityDecl->getEntityType() == "buffer" &&
+          ma->getPropertyName() == "ready") {
+        condName = BufferSpec::fromDeclaration(entityDecl, tree).readyName();
+        condExpr = std::make_unique<VariableExprAST>(condName);
+      } else {
+        condName = ma->getEntity() + "_" + ma->getPropertyName();
+        condExpr =
+            std::make_unique<MemberAccessAST>(ma->getEntity(), ma->getPropertyName());
+      }
+    }
+    if (condExpr) {
+      return std::make_unique<ResetExprAST>(condName, std::move(condExpr),
+                                            std::move(subCallBody));
+    }
+  }
+
+  if (subCallBody.size() == 1) {
+    return std::move(subCallBody.front());
+  }
+  return nullptr;
 }
 
 } // namespace
@@ -164,8 +292,89 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
     }
   }
 
+  std::map<std::string, std::vector<ParentTickedSubdomain>>
+      parentTickedSubdomains;
+  std::map<std::string, std::string> domainParentMap;
+
   state.stateMachineInfos.clear();
   GeneratedIRCode generatedIRCode = generateCodeForTree(tree, scope, state);
+
+  auto registerSubdomain = [&](const std::string &parentName,
+                               const std::shared_ptr<DeclarationNode> &childDecl,
+                               bool forceRegister) {
+    if (parentName.empty() || !childDecl || childDecl->getName().empty()) {
+      return;
+    }
+    std::string childName = childDecl->getName();
+    domainParentMap[childName] = parentName;
+    auto &vec = parentTickedSubdomains[parentName];
+    for (const auto &existing : vec) {
+      if (existing.childName == childName) {
+        return;
+      }
+    }
+    auto sub = buildSubdomainScheduleInfo(childDecl, parentName, tree);
+    bool calledInStream = childDecl->getCompilerProperty("calledInStream") != nullptr;
+    if (!forceRegister && !calledInStream && !sub.isTriggered && !sub.isRateDriven) {
+      return;
+    }
+    if (!sub.phaseGlobalName.empty()) {
+      auto spec = RateScheduleSpec::build(sub.parentRate, sub.childRate,
+                                          sub.phaseGlobalName);
+      std::string typeStr =
+          spec.isExactInteger ? "Int"
+                              : (spec.useInt64Phase ? "Int64" : "Real");
+      ASTNode defVal =
+          (typeStr != "Real")
+              ? ASTNode(std::make_shared<ValueNode>(static_cast<int64_t>(0),
+                                                    __FILE__, __LINE__))
+              : ASTNode(std::make_shared<ValueNode>(0.0, __FILE__, __LINE__));
+      auto phaseDecl = std::make_shared<DeclarationNode>(
+          sub.phaseGlobalName, "signal", nullptr, __FILE__, __LINE__);
+      phaseDecl->addProperty(std::make_shared<PropertyNode>(
+          "type", std::make_shared<ValueNode>(typeStr, __FILE__, __LINE__),
+          __FILE__, __LINE__));
+      phaseDecl->addProperty(std::make_shared<PropertyNode>(
+          "default", defVal, __FILE__, __LINE__));
+      phaseDecl->addProperty(std::make_shared<PropertyNode>(
+          "domain", std::make_shared<EntityNode>(parentName, __FILE__, __LINE__),
+          __FILE__, __LINE__));
+      generatedIRCode.GlobalSignals.push_back(phaseDecl);
+    }
+    vec.push_back(std::move(sub));
+    (void)generatedIRCode.domainGeneratedCode[parentName];
+  };
+
+  for (const auto &node : tree->getChildren()) {
+    if (node->getNodeType() == AST::Declaration) {
+      auto decl = std::static_pointer_cast<DeclarationNode>(node);
+      if (decl->getEntityType() == "_domainDefinition" ||
+          decl->getEntityType() == "gameDefinition") {
+        std::string domName = decl->getName();
+        for (const char *listPropName : {"preSubdomains", "postSubdomains"}) {
+          auto subList = decl->getPropertyValue(listPropName);
+          if (subList && subList->getNodeType() == AST::List) {
+            for (const auto &subNode : subList->getChildren()) {
+              std::string subName =
+                  (subNode->getNodeType() == AST::String)
+                      ? std::static_pointer_cast<ValueNode>(subNode)
+                            ->getStringValue()
+                      : ASTQuery::getNodeName(subNode);
+              if (auto subDecl =
+                      CodeAnalysis::findDomainDeclaration(subName, tree)) {
+                registerSubdomain(domName, subDecl, true);
+              }
+            }
+          }
+        }
+        auto parentProp = decl->getPropertyValue("parentDomain");
+        if (parentProp && parentProp->getNodeType() != AST::None) {
+          std::string parentName = ASTQuery::getNodeName(parentProp);
+          registerSubdomain(parentName, decl, false);
+        }
+      }
+    }
+  }
 
   // Domain member variables (globals)
   // TODO set global linkage according to debug mode
@@ -173,15 +382,80 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
     state.createGlobal(globalDecl);
   }
 
-  for (auto it = generatedIRCode.domainGeneratedCode.begin();
-       it != generatedIRCode.domainGeneratedCode.end(); it++) {
+  std::vector<std::string> sortedDomains;
+  for (const auto &pair : generatedIRCode.domainGeneratedCode) {
+    sortedDomains.push_back(pair.first);
+  }
+  auto getDomainDepth = [&](const std::string &dom) {
+    int depth = 0;
+    std::string cur = dom;
+    std::set<std::string> visited;
+    while (domainParentMap.count(cur) && !visited.count(cur)) {
+      visited.insert(cur);
+      cur = domainParentMap[cur];
+      depth++;
+    }
+    return depth;
+  };
+  std::stable_sort(sortedDomains.begin(), sortedDomains.end(),
+                   [&](const std::string &a, const std::string &b) {
+                     return getDomainDepth(a) > getDomainDepth(b);
+                   });
+
+  for (const std::string &domainName : sortedDomains) {
+    auto it = generatedIRCode.domainGeneratedCode.find(domainName);
+    if (it == generatedIRCode.domainGeneratedCode.end()) {
+      continue;
+    }
     std::vector<PrototypeArg> ExternalArgs; // Args to domain functions
-    const std::string &domainName = it->first;
+    std::set<std::string> scheduledSubdomains;
+    auto findOrBuildSubdomainInfo =
+        [&](const std::string &subName) -> std::optional<ParentTickedSubdomain> {
+      if (parentTickedSubdomains.count(domainName)) {
+        for (const auto &s : parentTickedSubdomains[domainName]) {
+          if (s.childName == subName) {
+            return s;
+          }
+        }
+      }
+      if (auto subDecl = CodeAnalysis::findDomainDeclaration(subName, tree)) {
+        return buildSubdomainScheduleInfo(subDecl, domainName, tree);
+      }
+      return std::nullopt;
+    };
+
     // Find domain and insert inputs and output to tree.
     auto domainDecl = ASTQuery::findDeclarationByName(domainName, scope, tree);
     if (domainDecl) {
       LOG_DEBUG() << " Found domain declaration for " << domainName
                   << std::endl;
+
+      // 1. Prepend preSubdomains before the domain's own streams
+      if (auto preList = domainDecl->getPropertyValue("preSubdomains");
+          preList && preList->getNodeType() == AST::List) {
+        std::vector<std::unique_ptr<ExprAST>> preExprs;
+        for (const auto &subNode : preList->getChildren()) {
+          std::string subName =
+              (subNode->getNodeType() == AST::String)
+                  ? std::static_pointer_cast<ValueNode>(subNode)->getStringValue()
+                  : ASTQuery::getNodeName(subNode);
+          if (subName.empty()) {
+            continue;
+          }
+          scheduledSubdomains.insert(subName);
+          if (auto subInfo = findOrBuildSubdomainInfo(subName)) {
+            if (auto callExpr = buildSubdomainCallExpr(*subInfo, scope, tree)) {
+              preExprs.push_back(std::move(callExpr));
+            }
+          }
+        }
+        if (!preExprs.empty()) {
+          it->second.insert(it->second.begin(),
+                            std::make_move_iterator(preExprs.begin()),
+                            std::make_move_iterator(preExprs.end()));
+        }
+      }
+
       auto smContexts =
           StateMachine::collectStateMachines(domainDecl, scope, tree);
 
@@ -237,8 +511,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
         // Inject the master switch block into the domain's process execution
         // stream
         auto smExpr = std::make_unique<StateMachineExprAST>(std::move(smCtx));
-        generatedIRCode.domainGeneratedCode[domainName].push_back(
-            std::move(smExpr));
+        it->second.push_back(std::move(smExpr));
       }
       auto domainExternalInputNode = domainDecl->getPropertyValue("inputs");
       if (domainExternalInputNode) {
@@ -310,6 +583,47 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
             ASTQuery::findDeclarationByName(bufferDomain.first, scope, tree);
         domainTriggers.push_back(
             BufferSpec::fromDeclaration(bufferDecl, tree).readyName());
+      }
+    }
+
+    // 2. Append postSubdomains right after stateMachines
+    if (domainDecl) {
+      if (auto postList = domainDecl->getPropertyValue("postSubdomains");
+          postList && postList->getNodeType() == AST::List) {
+        for (const auto &subNode : postList->getChildren()) {
+          std::string subName =
+              (subNode->getNodeType() == AST::String)
+                  ? std::static_pointer_cast<ValueNode>(subNode)->getStringValue()
+                  : ASTQuery::getNodeName(subNode);
+          if (subName.empty()) {
+            continue;
+          }
+          scheduledSubdomains.insert(subName);
+          if (auto subInfo = findOrBuildSubdomainInfo(subName)) {
+            if (auto callExpr = buildSubdomainCallExpr(*subInfo, scope, tree)) {
+              it->second.push_back(std::move(callExpr));
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Append any remaining parent-ticked subdomains not explicitly listed in
+    // preSubdomains, postSubdomains, or called inline in a stream
+    if (parentTickedSubdomains.count(domainName)) {
+      for (const auto &sub : parentTickedSubdomains[domainName]) {
+        if (scheduledSubdomains.count(sub.childName)) {
+          continue;
+        }
+        if (sub.childDecl &&
+            sub.childDecl->getCompilerProperty("calledInStream") != nullptr) {
+          continue;
+        }
+        if (sub.isTriggered || sub.isRateDriven) {
+          if (auto callExpr = buildSubdomainCallExpr(sub, scope, tree)) {
+            it->second.push_back(std::move(callExpr));
+          }
+        }
       }
     }
     for (const auto &triggerName : domainTriggers) {
@@ -641,6 +955,28 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
             }
           }
         }
+      }
+    }
+
+    if (parentTickedSubdomains.count(domainName)) {
+      for (const auto &sub : parentTickedSubdomains[domainName]) {
+        if (!sub.phaseGlobalName.empty()) {
+          auto spec = RateScheduleSpec::build(sub.parentRate, sub.childRate,
+                                              sub.phaseGlobalName);
+          std::unique_ptr<ExprAST> zeroExpr;
+          if (spec.isExactInteger) {
+            zeroExpr = std::make_unique<IntExprAST>(0, 32);
+          } else if (spec.useInt64Phase) {
+            zeroExpr = std::make_unique<IntExprAST>(0, 64);
+          } else {
+            zeroExpr = std::make_unique<RealExprAST>(0.0);
+          }
+          resetBody.push_back(std::make_unique<BinaryExprAST>(
+              '=', std::make_unique<VariableExprAST>(sub.phaseGlobalName),
+              std::move(zeroExpr)));
+        }
+        resetBody.push_back(
+            std::make_unique<DirectFuncCallExprAST>(sub.childName + "_init"));
       }
     }
 
@@ -1074,6 +1410,29 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
     }
   }
 
+  // Whether any stream calls a module that reports a status (status: on)
+  const bool treeHasStatusCalls = [&]() {
+    for (const auto &child : tree->getChildren()) {
+      if (child->getNodeType() != AST::Stream) {
+        continue;
+      }
+      StreamNodeIterator it(std::static_pointer_cast<StreamNode>(child));
+      while (auto n = it.next()) {
+        if (n->getNodeType() != AST::Function) {
+          continue;
+        }
+        for (const auto &d : ASTQuery::findAllDeclarationsForNode(
+                 std::static_pointer_cast<FunctionNode>(n), scope, tree)) {
+          auto status = d ? d->getPropertyValue("status") : nullptr;
+          if (status && status->getNodeType() == AST::Switch &&
+              std::static_pointer_cast<ValueNode>(status)->getSwitchValue()) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }();
   // PRE-PASS: Find all domain variables, signals, switches, and state machine
   // variables, and inject them into dynamic fields for each domain.
   for (const auto &node : tree->getChildren()) {
@@ -1083,6 +1442,9 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
               ASTQuery::findTypeDeclaration(decl, scope, tree), scope, tree)) {
         std::string domainName = decl->getName();
 
+        // The domain gets a status word when something in it can report a
+        // status: a String write, or a call to a module with status: on
+        bool domainUsesStatus = treeHasStatusCalls;
         auto registerVarDeclAsDynamicField =
             [&](const std::shared_ptr<DeclarationNode> &varDecl) {
               llvm::Type *varType = state.getLLVMType(varDecl);
@@ -1129,6 +1491,12 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
                   state.addDynamicDomainField(
                       node, StrideCompiler::stringCharsName(varDecl->getName()),
                       charsType, llvm::Constant::getNullValue(charsType));
+                  llvm::Type *statusType =
+                      llvm::Type::getInt8Ty(*state.TheContext);
+                  state.addDynamicDomainField(
+                      node, StrideCompiler::statusName(varDecl->getName()),
+                      statusType, llvm::Constant::getNullValue(statusType));
+                  domainUsesStatus = true;
                 }
               }
             };
@@ -1241,6 +1609,12 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
             }
           }
         }
+        if (domainUsesStatus) {
+          llvm::Type *statusType = llvm::Type::getInt8Ty(*state.TheContext);
+          state.addDynamicDomainField(
+              node, StrideCompiler::statusName(domainName), statusType,
+              llvm::Constant::getNullValue(statusType));
+        }
       }
     }
   }
@@ -1275,6 +1649,10 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
               double firstRate = -1.0;
               bool internalTransitions = false;
               while (auto n = it.next()) {
+                std::string nDom = CodeAnalysis::getNodeDomainName(n, scope, tree);
+                if (!nDom.empty() && nDom != domName) {
+                  continue;
+                }
                 double r = CodeAnalysis::getNodeRate(n, scope, tree);
                 if (r > 0.0) {
                   if (firstRate <= 0.0) {
@@ -1398,8 +1776,20 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
           }
           if (domainName.empty()) domainName = "RootDomain";
         }
+        if (prev == nullptr && next != nullptr) {
+          std::string nextDomain = CodeAnalysis::getNodeDomainName(next, scope, tree);
+          if (!nextDomain.empty() && !domainName.empty() && domainName != nextDomain) {
+            if (!CodeAnalysis::getCommonAncestorDomain(domainName, nextDomain, tree).empty()) {
+              domainName = nextDomain;
+            }
+          }
+        }
         auto &segState = resolveDomain(domainName);
-        double currentRate = CodeAnalysis::getNodeRate(current, scope, tree);
+        std::string origCurrDom = CodeAnalysis::getNodeDomainName(current, scope, tree);
+    double currentRate = (!origCurrDom.empty() && origCurrDom != domainName &&
+                          prev == nullptr && next != nullptr)
+                             ? CodeAnalysis::getNodeRate(next, scope, tree)
+                             : CodeAnalysis::getNodeRate(current, scope, tree);
         if (currentRate > 0.0 && segState.activeRate <= 0.0) {
           segState.activeRate = currentRate;
         } else if (currentRate > 0.0 && segState.activeRate > 0.0 &&
@@ -1447,6 +1837,10 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
               StreamNodeIterator it(stream);
               double firstRate = -1.0;
               while (auto n = it.next()) {
+                std::string nDom = CodeAnalysis::getNodeDomainName(n, scope, tree);
+                if (!nDom.empty() && nDom != domName) {
+                  continue;
+                }
                 double r = CodeAnalysis::getNodeRate(n, scope, tree);
                 if (r > 0.0) {
                   if (firstRate <= 0.0) {
@@ -2170,7 +2564,8 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         auto firstFuncDecl = CodeAnalysis::matchDefinitionToTypes(
             funcDecls, funcNode, scope, tree);
         if (firstFuncDecl) {
-          if (isReaction(firstFuncDecl, scope, tree)) {
+          if (isReaction(firstFuncDecl, scope, tree) ||
+              firstFuncDecl->getEntityType() == "_domainDefinition") {
             isTriggeredReactionStream = true;
           }
         }
@@ -2344,7 +2739,11 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       domainName = streamDomain;
     }
     auto &segState = resolveDomainRateInfo(domainName);
-    double currentRate = CodeAnalysis::getNodeRate(current, scope, tree);
+    std::string origCurrDom = CodeAnalysis::getNodeDomainName(current, scope, tree);
+    double currentRate = (!origCurrDom.empty() && origCurrDom != domainName &&
+                          prev == nullptr && next != nullptr)
+                             ? CodeAnalysis::getNodeRate(next, scope, tree)
+                             : CodeAnalysis::getNodeRate(current, scope, tree);
     if (currentRate > 0.0 && segState.activeRate <= 0.0) {
       segState.activeRate = currentRate;
     }
@@ -2530,6 +2929,18 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         continue;
       }
 
+      if (funcDecl->getEntityType() == "_domainDefinition") {
+        funcDecl->setCompilerProperty(
+            "calledInStream",
+            std::make_shared<ValueNode>(true, __FILE__, __LINE__));
+        auto subInfo = buildSubdomainScheduleInfo(funcDecl, domainName, tree);
+        if (auto callExpr = buildSubdomainCallExpr(subInfo, scope, tree)) {
+          callExpr->setLocationFrom(func);
+          generated[domainName].expr.push_back(std::move(callExpr));
+        }
+        continue;
+      }
+
       state.pushName(funcDecl->getName());
       // Collect arguments for function call ------------------------------
 
@@ -2588,7 +2999,8 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         if (!nextDecl && !nextDecls.empty()) {
           nextDecl = nextDecls.front();
         }
-        if (isReaction(nextDecl, scope, tree)) {
+        if (isReaction(nextDecl, scope, tree) ||
+            (nextDecl && nextDecl->getEntityType() == "_domainDefinition")) {
           nextIsReaction = true;
         }
       }
@@ -2835,6 +3247,15 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               loweredParams.push_back(ptrTy);
               loweredRet = llvm::Type::getVoidTy(ctx);
             }
+            // The status (stride_status.h): returned when the result goes
+            // through the out pointer, else through a trailing pointer
+            bool statusReturned = externFunc->hasStatus && stringOut;
+            bool statusPointer = externFunc->hasStatus && !stringOut;
+            if (statusReturned) {
+              loweredRet = llvm::Type::getInt8Ty(ctx);
+            } else if (statusPointer) {
+              loweredParams.push_back(ptrTy);
+            }
             auto *loweredFT =
                 llvm::FunctionType::get(loweredRet, loweredParams, false);
             auto *newFunc = llvm::Function::Create(
@@ -2845,6 +3266,11 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
             }
             if (takesScratch) {
               newFunc->addFnAttr("stride.result_size", externFunc->resultSize);
+            }
+            if (statusReturned) {
+              newFunc->addFnAttr("stride.status", "return");
+            } else if (statusPointer) {
+              newFunc->addFnAttr("stride.status", "pointer");
             }
             if (externFunc->isConstrainedList) {
               newFunc->addFnAttr("stride.constrained_list");
@@ -3160,6 +3586,14 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
     } else if (current->getNodeType() == AST::MemberAccess) {
       if (current == stream->getLeft() && isTriggeredReactionStream) {
         // Skip pushing trigger switch
+      } else if (current != stream->getLeft() && prev &&
+                 prev->getNodeType() != AST::Function &&
+                 !generated[domainName].expr.empty()) {
+        // Written to: 0 >> RootDomain.status
+        generated[domainName].expr.back() = std::make_unique<BinaryExprAST>(
+            '=', createExpr(current),
+            std::move(generated[domainName].expr.back()));
+        generated[domainName].expr.back()->setLocationFrom(stream);
       } else {
         generated[domainName].expr.push_back(createExpr(current));
       }
@@ -3185,9 +3619,20 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         } else if (leftNode) {
           if (leftNode->getNodeType() == AST::MemberAccess) {
             auto pp = std::static_pointer_cast<MemberAccessNode>(leftNode);
-            condName = pp->getEntity() + "_" + pp->getPropertyName();
+            auto entityDecl =
+                ASTQuery::findDeclarationByName(pp->getEntity(), scope, tree);
+            if (entityDecl && entityDecl->getEntityType() == "buffer" &&
+                pp->getPropertyName() == "ready") {
+              condName =
+                  BufferSpec::fromDeclaration(entityDecl, tree).readyName();
+              condExpr = std::make_unique<VariableExprAST>(condName);
+            } else {
+              condName = pp->getEntity() + "_" + pp->getPropertyName();
+              condExpr = createExpr(leftNode);
+            }
+          } else {
+            condExpr = createExpr(leftNode);
           }
-          condExpr = createExpr(leftNode);
         }
         if (condExpr) {
           std::vector<std::unique_ptr<ExprAST>> innerExprs =
@@ -3809,6 +4254,11 @@ void StrideGenerator::generatePlatformFunctionSignature(
         extFunc.resultSize =
             std::static_pointer_cast<ValueNode>(resultSize)->getStringValue();
       }
+    }
+    if (auto status = decl->getPropertyValue("status")) {
+      extFunc.hasStatus =
+          status->getNodeType() == AST::Switch &&
+          std::static_pointer_cast<ValueNode>(status)->getSwitchValue();
     }
 
     auto &funcList = state.functionMap[decl->getName()];
