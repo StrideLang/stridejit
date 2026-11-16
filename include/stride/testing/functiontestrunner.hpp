@@ -60,6 +60,9 @@ struct StateAccessor {
     // When provided, ports that are also state variables (e.g. domain inputs and
     // outputs) are written/read through the state instead of the argument buffer.
     std::function<bool(const void* state, const std::string& name)> hasVar;
+    std::function<void(void* state, const std::string& name, size_t index, double val)> setArrayVar;
+    std::function<double(const void* state, const std::string& name, size_t index)> getArrayVar;
+    std::function<bool(const void* state, const std::string& name)> hasArrayVar;
 };
 
 class FunctionTestRunner {

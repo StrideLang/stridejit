@@ -267,6 +267,27 @@ int main(int argc, char *argv[]) {
                        .getStateVar<double>(statePtr, name, std::nullopt,
                                             spec.functionName)
                        .has_value();
+                 },
+                 [&strenv, &spec](void *statePtr, const std::string &name,
+                                  size_t index, double val) {
+                   strenv.setStateVar<double>(statePtr, name, val,
+                                              static_cast<int>(index),
+                                              spec.functionName);
+                 },
+                 [&strenv, &spec](const void *statePtr,
+                                  const std::string &name, size_t index) {
+                   return strenv
+                       .getStateVar<double>(statePtr, name,
+                                            static_cast<int>(index),
+                                            spec.functionName)
+                       .value_or(0.0);
+                 },
+                 [&strenv, &spec](const void *statePtr,
+                                  const std::string &name) {
+                   return strenv
+                       .getStateVar<double>(statePtr, name, 0,
+                                            spec.functionName)
+                       .has_value();
                  }});
           }
 

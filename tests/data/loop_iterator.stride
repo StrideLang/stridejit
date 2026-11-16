@@ -1,3 +1,44 @@
+_domainDefinition RootDomain {
+    framework: _JitFramework
+    rate: -1
+    substitutions: []
+    domainIncludes: []
+    inputs: [
+        signal List[6] { domain: RootDomain default: 1 type: Int }
+    ]
+    outputs: [
+        signal Out { domain: RootDomain default: 0 type: Int }
+    ]
+    domainFunctionCode: ''
+}
+
+module Greater {
+    ports: [
+        mainOutputPort OutputPort {
+            name: 'output'
+            entity: Output
+        },
+        mainInputPort InputPort {
+            name: 'input'
+            entity: Input
+        }
+    ]
+    entities: [
+        signal Input[2] { domain: OutputPort.domain type: Int }
+        switch Output { domain: OutputPort.domain }
+    ]
+    streams: [
+        [Input[0], Input[1]] >> __Greater() >> Output;
+    ]
+}
+
+platformModule __Greater@Int_Bool {
+    inputs: [Int, Int]
+    outputs: [Switch]
+    processing: "%%outtokens:0%% = llvm::icmp sgt %%intokens:0%%, %%intokens:1%%"
+    inherits: [_Signal]
+}
+
 loop Max {
     ports: [
         mainInputPort InputPort {
@@ -8,30 +49,25 @@ loop Max {
         }
     ]
     entities: [
-        signal Input[InputPort.size] {}
-        signal Output { default: 0 reset:Reset }
-        iterator Index {
-            default:    1                       # default
-            increment:  1                       # default
-            limit:      InputPort.size          # default: none, has to be assigned by user
-            rate:       0                       # default
-            domain:     OutputPort.domain       # default
-            reset:      Reset                   # default
-            done:       Done                    # default
+        signal Input[InputPort.size] { type: Int }
+        signal Output { default: 0 type: Int reset: Reset }
+        iterator Item {
+            entity: Input
+            done: Done
         }
-        trigger Reset {domain: OutputPort.domain}
-        trigger Done {domain: OutputPort.domain}
+        trigger Reset { domain: OutputPort.domain }
+        trigger Done { domain: OutputPort.domain }
     ]
     onExecution: Reset
     terminateWhen: Done
-    constraints:    [InputPort.size , 2] >> Less () >> Error();
     streams: [
-        [Input[Index], Output] >> Greater() >> reaction { Input[Index] >> Output;  domain: OutputPort.domain };
-
+        [Item, Output] >> Greater() >> reaction {
+            streams: [
+                Item >> Output;
+            ]
+            domain: OutputPort.domain
+        };
     ]
 }
-
-
-signal List[20] { default: 1 }
 
 List >> Max() >> Out;

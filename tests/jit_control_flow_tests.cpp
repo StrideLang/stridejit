@@ -1021,4 +1021,171 @@ TEST(JITControlFlowTest, StandaloneLoop) {
   EXPECT_EQ(out, 40);
 }
 
+TEST(JITControlFlowTest, LoopIteratorMaxReduction) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "loop_iterator.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_init", args);
+
+  const int32_t values[6] = {4, 19, 7, 42, 15, 23};
+  for (int i = 0; i < 6; ++i) {
+    strenv.setStateVar(statePtr.get(), "List", values[i], i, "RootDomain");
+  }
+
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(strenv
+                .getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                      "RootDomain")
+                .value_or(-1),
+            42);
+}
+
+TEST(JITControlFlowTest, LoopArrayIteratorsAndDeinterleave) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                "loop_array_iterators.stride"));
+
+  // Verify unit-stride ScaleLoop has llvm.loop.vectorize.enable metadata,
+  // while strided DeinterleaveLeft does not
+  auto hasVectorizeMetadata = [&](const char *fnName) {
+    auto *fn = strenv.mStrideEnv.TheModule->getFunction(fnName);
+    if (!fn)
+      return false;
+    for (const auto &bb : *fn) {
+      if (const auto *br = llvm::dyn_cast<llvm::BranchInst>(bb.getTerminator())) {
+        if (br->getMetadata(llvm::LLVMContext::MD_loop) != nullptr) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+  EXPECT_TRUE(hasVectorizeMetadata("ScaleLoop"));
+  EXPECT_FALSE(hasVectorizeMetadata("DeinterleaveLeft"));
+
+  ASSERT_TRUE(strenv.compileInMemory());
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_init", args);
+
+  for (int i = 0; i < 6; ++i) {
+    strenv.setStateVar(statePtr.get(), "InArr", i + 1, i, "RootDomain");
+  }
+  const int32_t stereo[8] = {10, 100, 20, 200, 30, 300, 40, 400};
+  for (int i = 0; i < 8; ++i) {
+    strenv.setStateVar(statePtr.get(), "StereoIn", stereo[i], i, "RootDomain");
+  }
+
+  strenv.invoke("RootDomain_process", args);
+
+  for (int i = 0; i < 6; ++i) {
+    EXPECT_EQ(strenv
+                  .getStateVar<int32_t>(statePtr.get(), "ScaledOut", i,
+                                        "RootDomain")
+                  .value_or(-1),
+              (i + 1) * 3);
+  }
+  for (int i = 0; i < 4; ++i) {
+    EXPECT_EQ(strenv
+                  .getStateVar<int32_t>(statePtr.get(), "InPlaceArr", i,
+                                        "RootDomain")
+                  .value_or(-1),
+              (i + 1) + 10);
+    EXPECT_EQ(strenv
+                  .getStateVar<int32_t>(statePtr.get(), "LeftOut", i,
+                                        "RootDomain")
+                  .value_or(-1),
+              (i + 1) * 10);
+    EXPECT_EQ(strenv
+                  .getStateVar<int32_t>(statePtr.get(), "RightOut", i,
+                                        "RootDomain")
+                  .value_or(-1),
+              (i + 1) * 100);
+  }
+}
+
+TEST(JITControlFlowTest, LoopSequencePortSizeAndSignalCapture) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "loop_sequence.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_init", args);
+  strenv.invoke("RootDomain_process", args);
+
+  // EvenSeq: 0 to OutputPort.size * 2 stepping by 2 -> [0, 2, 4, 6, 8, 10]
+  for (int i = 0; i < 6; ++i) {
+    EXPECT_EQ(strenv
+                  .getStateVar<int32_t>(statePtr.get(), "EvenSeq", i,
+                                        "RootDomain")
+                  .value_or(-1),
+              i * 2);
+  }
+  // PortEntitySeq: 10 to Output.size + 10 stepping by 1 -> [10, 11, 12, 13, 14]
+  for (int i = 0; i < 5; ++i) {
+    EXPECT_EQ(strenv
+                  .getStateVar<int32_t>(statePtr.get(), "PortEntitySeq", i,
+                                        "RootDomain")
+                  .value_or(-1),
+              10 + i);
+  }
+  // DynamicSum with defaults StartSig=2, CountSig=4, StepSig=3:
+  // sequence values: 2, 5, 8, 11 -> sum = 26
+  EXPECT_EQ(strenv
+                .getStateVar<int32_t>(statePtr.get(), "DynamicSum",
+                                      std::nullopt, "RootDomain")
+                .value_or(-1),
+            26);
+
+  // Update dynamic signals and re-execute: StartSig=10, CountSig=3, StepSig=5
+  // sequence values: 10, 15, 20 -> sum = 45
+  strenv.setStateVar(statePtr.get(), "StartSig", 10, std::nullopt,
+                     "RootDomain");
+  strenv.setStateVar(statePtr.get(), "CountSig", 3, std::nullopt, "RootDomain");
+  strenv.setStateVar(statePtr.get(), "StepSig", 5, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(strenv
+                .getStateVar<int32_t>(statePtr.get(), "DynamicSum",
+                                      std::nullopt, "RootDomain")
+                .value_or(-1),
+            45);
+
+  // Zero-trip guard when CountSig=0 -> sum resets to 0 and loop body does not run
+  strenv.setStateVar(statePtr.get(), "CountSig", 0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(strenv
+                .getStateVar<int32_t>(statePtr.get(), "DynamicSum",
+                                      std::nullopt, "RootDomain")
+                .value_or(-1),
+            0);
+}
+
+TEST(JITControlFlowTest, LoopIteratorSizeMismatchValidation) {
+  auto tree = strd::AST::parseFile(STRIDEJIT_TESTS_SOURCE_DIR
+                                   "loop_iterator_size_mismatch.stride");
+  ASSERT_NE(tree, nullptr);
+  strd::StrideEnvironment strenv;
+  strenv.prepareTree(tree);
+  strd::CodeValidator validator(tree);
+  EXPECT_FALSE(validator.isValid());
+  bool foundSizeMismatch = false;
+  for (const auto &err : validator.getErrors()) {
+    if (err.type == strd::LangError::ArraySizeMismatch) {
+      foundSizeMismatch = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(foundSizeMismatch);
+}
+
 } // namespace

@@ -373,6 +373,8 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                 bool inState = !isArg;
                 if (isArg && !prepStream.isArrayPort && m_stateAccessor->hasVar) {
                     inState = m_stateAccessor->hasVar(m_statePtr, prepStream.portName);
+                } else if (isArg && prepStream.isArrayPort && m_stateAccessor->hasArrayVar) {
+                    inState = m_stateAccessor->hasArrayVar(m_statePtr, prepStream.portName);
                 }
                 if (inState) {
                     SignalScalarValue val = 0.0;
@@ -381,7 +383,19 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                     } else if (t < prepStream.values.size()) {
                         val = prepStream.values[t];
                     }
-                    m_stateAccessor->setVar(m_statePtr, prepStream.portName, toDoubleVal(val));
+                    if (prepStream.isArrayPort && m_stateAccessor->setArrayVar) {
+                        std::vector<SignalScalarValue> curVals;
+                        if (t < prepStream.tickValues.size()) {
+                            curVals = prepStream.tickValues[t];
+                        } else if (!prepStream.values.empty()) {
+                            curVals = prepStream.values;
+                        }
+                        for (size_t k = 0; k < curVals.size(); ++k) {
+                            m_stateAccessor->setArrayVar(m_statePtr, prepStream.portName, k, toDoubleVal(curVals[k]));
+                        }
+                    } else if (m_stateAccessor->setVar) {
+                        m_stateAccessor->setVar(m_statePtr, prepStream.portName, toDoubleVal(val));
+                    }
                 }
             }
         };
@@ -444,7 +458,24 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                     if (argIdx < m_argInfos.size()) {
                         if (valStream.isArrayPort) {
                             std::vector<SignalScalarValue> actualVec;
-                            if (m_argInfos[argIdx].type == DataType::INT32) {
+                            if (m_stateAccessor.has_value() && m_statePtr &&
+                                m_stateAccessor->hasArrayVar &&
+                                m_stateAccessor->getArrayVar &&
+                                m_stateAccessor->hasArrayVar(m_statePtr, valStream.portName)) {
+                                size_t arrSize = m_argInfos[argIdx].count > 0 ? m_argInfos[argIdx].count : 1;
+                                if (t < valStream.tickValues.size() && !valStream.tickValues[t].empty()) {
+                                    arrSize = valStream.tickValues[t].size();
+                                } else if (!valStream.values.empty()) {
+                                    arrSize = valStream.values.size();
+                                }
+                                actualVec.reserve(arrSize);
+                                argBuffers[argIdx].doubleVec.resize(arrSize, 0.0);
+                                for (size_t k = 0; k < arrSize; ++k) {
+                                    double v = m_stateAccessor->getArrayVar(m_statePtr, valStream.portName, k);
+                                    argBuffers[argIdx].doubleVec[k] = v;
+                                    actualVec.push_back(v);
+                                }
+                            } else if (m_argInfos[argIdx].type == DataType::INT32) {
                                 actualVec.reserve(argBuffers[argIdx].int32Vec.size());
                                 for (auto v : argBuffers[argIdx].int32Vec) actualVec.push_back(v);
                             } else if (m_argInfos[argIdx].type == DataType::BOOL) {
@@ -500,7 +531,21 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                             }
                         }
                     } else if (m_stateAccessor.has_value() && m_statePtr) {
-                        actualScalar = m_stateAccessor->getVar(m_statePtr, valStream.portName);
+                        if (valStream.isArrayPort && m_stateAccessor->getArrayVar) {
+                            size_t arrSize = 1;
+                            if (t < valStream.tickValues.size() && !valStream.tickValues[t].empty()) {
+                                arrSize = valStream.tickValues[t].size();
+                            } else if (!valStream.values.empty()) {
+                                arrSize = valStream.values.size();
+                            }
+                            std::vector<SignalScalarValue> actualVec;
+                            actualVec.reserve(arrSize);
+                            for (size_t k = 0; k < arrSize; ++k) {
+                                actualVec.push_back(m_stateAccessor->getArrayVar(m_statePtr, valStream.portName, k));
+                            }
+                            matched = valStream.matches(actualVec, t);
+                        } else {
+                            actualScalar = m_stateAccessor->getVar(m_statePtr, valStream.portName);
                         if (!valStream.baselinePort.empty()) {
                             SignalScalarValue baselineScalar = readPortScalarVal(valStream.baselinePort);
                             matched = valStream.matches(actualScalar, baselineScalar, t);
@@ -530,6 +575,7 @@ TestRunResult FunctionTestRunner::runTestWithFunction(const FunctionTestSpec& sp
                             streamStats[v].sumErrorSq += (act - exp) * (act - exp);
                             streamStats[v].sumRefSq += exp * exp;
                             streamStats[v].sampleCount++;
+                        }
                         }
                     }
 

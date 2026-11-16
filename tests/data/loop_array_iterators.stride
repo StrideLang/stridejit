@@ -1,0 +1,112 @@
+_domainDefinition RootDomain {
+    framework: _JitFramework
+    rate: -1
+    substitutions: []
+    domainIncludes: []
+    inputs: [
+        signal InArr[6] { domain: RootDomain default: 0 type: Int }
+        signal StereoIn[8] { domain: RootDomain default: 0 type: Int }
+    ]
+    outputs: [
+        signal ScaledOut[6] { domain: RootDomain default: 0 type: Int }
+        signal InPlaceArr[4] { domain: RootDomain default: [1, 2, 3, 4] type: Int }
+        signal LeftOut[4] { domain: RootDomain default: 0 type: Int }
+        signal RightOut[4] { domain: RootDomain default: 0 type: Int }
+    ]
+    domainFunctionCode: ''
+}
+
+# Unit-stride element-wise mapping (eligible for SIMD loop vectorization)
+loop ScaleLoop {
+    ports: [
+        mainInputPort InputPort {
+            entity: Input
+        }
+        mainOutputPort OutputPort {
+            entity: Output
+        }
+    ]
+    entities: [
+        signal Input[InputPort.size] { type: Int }
+        signal Output[OutputPort.size] { type: Int }
+        iterator InItem { entity: Input }
+        iterator OutItem { entity: Output }
+    ]
+    streams: [
+        InItem * 3 >> OutItem;
+    ]
+}
+
+# In-place read/write iterator over an output array
+loop AddTenInPlace {
+    ports: [
+        mainOutputPort OutputPort {
+            entity: Target
+        }
+    ]
+    entities: [
+        signal Target[OutputPort.size] { type: Int }
+        iterator Item { entity: Target }
+    ]
+    streams: [
+        Item + 10 >> Item;
+    ]
+}
+
+# Strided iterator for stereo deinterleaving (offset 0/1, stride 2 -> 4 trips)
+loop DeinterleaveLeft {
+    ports: [
+        mainInputPort InputPort {
+            entity: Stereo
+        }
+        mainOutputPort OutputPort {
+            entity: Mono
+        }
+    ]
+    entities: [
+        signal Stereo[InputPort.size] { type: Int }
+        signal Mono[OutputPort.size] { type: Int }
+        iterator InL {
+            entity: Stereo
+            offset: 0
+            stride: 2
+        }
+        iterator OutL {
+            entity: Mono
+        }
+    ]
+    streams: [
+        InL >> OutL;
+    ]
+}
+
+loop DeinterleaveRight {
+    ports: [
+        mainInputPort InputPort {
+            entity: Stereo
+        }
+        mainOutputPort OutputPort {
+            entity: Mono
+        }
+    ]
+    entities: [
+        signal Stereo[InputPort.size] { type: Int }
+        signal Mono[OutputPort.size] { type: Int }
+        iterator InR {
+            entity: Stereo
+            offset: 1
+            stride: 2
+        }
+        iterator OutR {
+            entity: Mono
+        }
+    ]
+    streams: [
+        InR >> OutR;
+    ]
+}
+
+InArr >> ScaleLoop() >> ScaledOut;
+AddTenInPlace() >> InPlaceArr;
+StereoIn >> DeinterleaveLeft() >> LeftOut;
+StereoIn >> DeinterleaveRight() >> RightOut;

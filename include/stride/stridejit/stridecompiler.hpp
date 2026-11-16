@@ -129,7 +129,8 @@ public:
                       std::vector<llvm::Type *> argTypes,
                       bool allowConversion = false);
 
-  llvm::Type *getLLVMType(std::shared_ptr<strd::DeclarationNode> decl);
+  llvm::Type *getLLVMType(std::shared_ptr<strd::DeclarationNode> decl,
+                          const ScopeStack &scope = {});
 
   // Reads the frameworkDataType declarations in tree into typesMap and
   // dataTypes, so each framework decides e.g. the size of Int and Real.
@@ -256,6 +257,12 @@ public:
                     bool accumulate = false);
 
   llvm::Type *getElementType(llvm::Value *V);
+
+  /// Resolves a variable's array index (constant or named scalar) into an
+  /// integer LLVM Value suitable for GEP, converting floating-point indices
+  /// to 64-bit signed integers.
+  std::vector<llvm::Value *> resolveGepIndices(
+      const std::vector<std::variant<size_t, std::string>> &indices);
 
   // Name prefix. Used to name instances and globals
   void pushName(std::string name);
@@ -422,7 +429,9 @@ public:
   // Builds a compile-time default constant of `varType` from a `default:`
   // AST value (Int/Real/Switch/String scalars, broadcast to arrays, or a List
   // matching an array's length). Returns nullptr if it cannot be converted.
-  llvm::Constant *makeDefaultConstant(ASTNode defaultNode, llvm::Type *varType);
+  llvm::Constant *makeDefaultConstant(ASTNode defaultNode, llvm::Type *varType,
+                                      const ScopeStack &scope = {},
+                                      int depth = 0);
   void buildNodeState(const CodeAnalysis::TypeTree &nodeTree);
   void buildStateStructTypes(const CodeAnalysis::TypeTree &tree,
                              ScopeStack &scope, ASTNode root);

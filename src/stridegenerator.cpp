@@ -23,6 +23,178 @@
 using namespace strd;
 
 namespace {
+std::string findPortNameByType(const std::shared_ptr<DeclarationNode> &decl,
+                               const std::string &portEntityType) {
+  if (!decl) {
+    return "";
+  }
+  auto portsNode = decl->getPropertyValue("ports");
+  if (!portsNode) {
+    return "";
+  }
+  for (const auto &port : portsNode->getChildren()) {
+    if (port->getNodeType() == AST::Declaration) {
+      auto portDecl = std::static_pointer_cast<DeclarationNode>(port);
+      if (portDecl->getEntityType() == portEntityType) {
+        return portDecl->getName();
+      }
+    }
+  }
+  return "";
+}
+
+void collectUsedPortPropertiesImpl(
+    const std::shared_ptr<DeclarationNode> &funcDecl, const ScopeStack &scope,
+    const ASTNode &tree,
+    std::vector<std::shared_ptr<MemberAccessNode>> &out,
+    std::vector<DeclarationNode *> &visited) {
+  if (!funcDecl || std::find(visited.begin(), visited.end(), funcDecl.get()) !=
+                       visited.end()) {
+    return;
+  }
+  visited.push_back(funcDecl.get());
+
+  auto addUnique = [&](const std::shared_ptr<MemberAccessNode> &pp) {
+    bool known = std::any_of(out.begin(), out.end(), [&](const auto &u) {
+      return u->getEntity() == pp->getEntity() &&
+             u->getPropertyName() == pp->getPropertyName();
+    });
+    if (!known) {
+      out.push_back(pp);
+    }
+  };
+
+  for (const auto &pp : CodeAnalysis::getUsedMemberAccesses(funcDecl)) {
+    addUnique(pp);
+  }
+
+  auto innerScope = scope;
+  std::vector<ASTNode> innerEntities;
+  if (auto blocksNode = funcDecl->getPropertyValue("entities")) {
+    innerEntities = blocksNode->getChildren();
+  }
+  innerScope.push_back({funcDecl, innerEntities});
+
+  std::string callerMainIn = findPortNameByType(funcDecl, "mainInputPort");
+  std::string callerMainOut = findPortNameByType(funcDecl, "mainOutputPort");
+
+  auto streamBlocks =
+      ASTQuery::getContainedStreamEntities(funcDecl, innerScope, tree);
+  for (const auto &block : streamBlocks) {
+    if (block.propertyName == "constraints") {
+      continue;
+    }
+    for (const auto &stream : block.streams) {
+      StreamNodeIterator it(stream);
+      while (it.hasNext()) {
+        ASTNode node = it.next();
+        if (node->getNodeType() != AST::Function) {
+          continue;
+        }
+        auto calleeFunc = std::static_pointer_cast<FunctionNode>(node);
+        std::string framework;
+        auto calleeDecl = ASTQuery::findDeclarationByName(
+            calleeFunc->getName(), innerScope, tree,
+            calleeFunc->getNamespaceList(), framework);
+        if (!calleeDecl || (calleeDecl->getEntityType() != "module" &&
+                            calleeDecl->getEntityType() != "loop" &&
+                            calleeDecl->getEntityType() != "reaction")) {
+          continue;
+        }
+        std::vector<std::shared_ptr<MemberAccessNode>> calleeUsed;
+        collectUsedPortPropertiesImpl(calleeDecl, innerScope, tree, calleeUsed,
+                                      visited);
+        if (calleeUsed.empty()) {
+          continue;
+        }
+        auto calleeScope = innerScope;
+        std::vector<ASTNode> calleeEntities;
+        if (auto cBlocks = calleeDecl->getPropertyValue("entities")) {
+          calleeEntities = cBlocks->getChildren();
+        }
+        calleeScope.push_back({calleeDecl, calleeEntities});
+        std::string calleeMainIn =
+            findPortNameByType(calleeDecl, "mainInputPort");
+        std::string calleeMainOut =
+            findPortNameByType(calleeDecl, "mainOutputPort");
+
+        for (const auto &pp : calleeUsed) {
+          bool resolved = false;
+          if (pp->getPropertyName() == "rate") {
+            resolved = CodeAnalysis::evaluateRateMemberAccess(
+                           pp->getEntity(), calleeScope, calleeDecl,
+                           calleeFunc, tree) > 0;
+          } else if (pp->getPropertyName() == "size") {
+            resolved = CodeAnalysis::evaluateSizeMemberAccess(
+                           pp->getEntity(), calleeScope, calleeDecl,
+                           calleeFunc, tree) > 0;
+          }
+          if (!resolved) {
+            std::string mappedEntity = pp->getEntity();
+            auto tryMapPortSizeFromEndpoint =
+                [&](const char *propKey, const char *altPropKey) -> bool {
+              ASTNode endpoint = calleeFunc->getCompilerProperty(propKey);
+              if (!endpoint && altPropKey) {
+                endpoint = calleeFunc->getCompilerProperty(altPropKey);
+              }
+              if (!endpoint) {
+                return false;
+              }
+              auto epDecl =
+                  ASTQuery::findDeclarationForNode(endpoint, innerScope, tree);
+              if (epDecl && epDecl->getNodeType() == AST::ArrayDeclaration) {
+                if (auto arrIdx = epDecl->getArrayIndex()) {
+                  if (arrIdx->index() &&
+                      !arrIdx->index()->getChildren().empty()) {
+                    auto firstIdx = arrIdx->index()->getChildren()[0];
+                    if (firstIdx &&
+                        firstIdx->getNodeType() == AST::MemberAccess) {
+                      auto ma =
+                          std::static_pointer_cast<MemberAccessNode>(firstIdx);
+                      if (ma->getPropertyName() == "size") {
+                        mappedEntity = ma->getEntity();
+                        return true;
+                      }
+                    }
+                  }
+                }
+              }
+              return false;
+            };
+            if (!calleeMainOut.empty() && mappedEntity == calleeMainOut) {
+              if (!(pp->getPropertyName() == "size" &&
+                    tryMapPortSizeFromEndpoint("outputEntity", "mainOutput")) &&
+                  !callerMainOut.empty()) {
+                mappedEntity = callerMainOut;
+              }
+            } else if (!calleeMainIn.empty() && mappedEntity == calleeMainIn) {
+              if (!(pp->getPropertyName() == "size" &&
+                    tryMapPortSizeFromEndpoint("inputEntity", "mainInput")) &&
+                  !callerMainIn.empty()) {
+                mappedEntity = callerMainIn;
+              }
+            }
+            addUnique(std::make_shared<MemberAccessNode>(
+                mappedEntity, pp->getPropertyName(),
+                pp->getFilename().c_str(), pp->getLine()));
+          }
+        }
+      }
+    }
+  }
+
+  visited.pop_back();
+}
+
+std::vector<std::shared_ptr<MemberAccessNode>> collectUsedPortProperties(
+    const std::shared_ptr<DeclarationNode> &funcDecl,
+    const ScopeStack &scope, const ASTNode &tree) {
+  std::vector<std::shared_ptr<MemberAccessNode>> out;
+  std::vector<DeclarationNode *> visited;
+  collectUsedPortPropertiesImpl(funcDecl, scope, tree, out, visited);
+  return out;
+}
+
 
 struct ExternalCallTemplate {
   std::string symbol;
@@ -1312,6 +1484,9 @@ void StrideGenerator::processStateStreams(
       auto streamBlocks =
           ASTQuery::getContainedStreamEntities(stateNode, scope, tree);
       for (const auto &streamBlock : streamBlocks) {
+    if (streamBlock.propertyName == "constraints") {
+      continue;
+    }
         std::vector<ASTNode> streamNodes(streamBlock.streams.begin(),
                                          streamBlock.streams.end());
         if (streamBlock.executionStage == "updateGuard") {
@@ -3398,9 +3573,37 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               }
             }
           }
+          const PrototypeAST *calleeProto = nullptr;
+          if (newFuncDecl) {
+            calleeProto = &newFuncDecl->getProto();
+          } else {
+            auto protoIt = state.FunctionProtos.find(calleeName);
+            if (protoIt != state.FunctionProtos.end()) {
+              calleeProto = protoIt->second.get();
+            }
+          }
+          if (calleeProto) {
+            const auto &protoProps = calleeProto->getPropertyArgs();
+            while (args.Properties.args.size() < protoProps.size()) {
+              llvm::Type *propTy =
+                  protoProps[args.Properties.args.size()].llvmType;
+              std::unique_ptr<ExprAST> defaultExpr;
+              if (propTy && propTy->isIntegerTy(1)) {
+                defaultExpr = std::make_unique<BoolExprAST>(false);
+              } else if (propTy && propTy->isIntegerTy()) {
+                defaultExpr = std::make_unique<IntExprAST>(
+                    0, static_cast<int>(propTy->getIntegerBitWidth()));
+              } else {
+                defaultExpr = std::make_unique<RealExprAST>(0.0);
+              }
+              args.Properties.args.push_back(std::move(defaultExpr));
+              args.Properties.argTypes.push_back(
+                  propTy ? propTy : state.realType());
+            }
+          }
           std::vector<std::unique_ptr<ExprAST>> PortPropArgs;
           if (funcDecl) {
-            auto usedPortProps = CodeAnalysis::getUsedMemberAccesses(funcDecl);
+            auto usedPortProps = collectUsedPortProperties(funcDecl, scope, tree);
             auto innerScope = scope;
             std::vector<ASTNode> innerEntities;
             auto blocksNode = funcDecl->getPropertyValue("entities");
@@ -3966,7 +4169,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
     }
   }
 
-  auto usedPortPropertiesNodes = CodeAnalysis::getUsedMemberAccesses(funcDecl);
+  auto usedPortPropertiesNodes = collectUsedPortProperties(funcDecl, *scope, tree);
   for (const auto &pp : usedPortPropertiesNodes) {
     // FIXME validate unique name
     std::string name = pp->getEntity() + "_" + pp->getPropertyName();
@@ -4016,6 +4219,9 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
   auto streamBlocks =
       ASTQuery::getContainedStreamEntities(funcDecl, functionScope, tree);
   for (const auto &streamBlock : streamBlocks) {
+    if (streamBlock.propertyName == "constraints") {
+      continue;
+    }
     for (const auto &stream : streamBlock.streams) {
       auto code = createStreamCode(stream, tree, functionScope, state);
       for (auto &domainCode : code) {

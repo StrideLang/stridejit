@@ -7,6 +7,7 @@
 #include "stride/parser/memberaccessnode.h"
 #include "stride/stridejit/bufferspec.hpp"
 #include "stride/stridejit/stridecompiler.hpp"
+#include "stride/utils/astfunctions.h"
 #include "stride/utils/astquery.h"
 
 // #include "llvm/ADT/APFloat.h"
@@ -326,6 +327,36 @@ StrideCompiler::CreateEntryBlockAlloca(llvm::Function *TheFunction,
   auto *Alloca = TmpB.CreateAlloca(dataType, nullptr, VarName);
   pointerElementTypes[Alloca] = dataType;
   return Alloca;
+}
+
+std::vector<llvm::Value *> StrideCompiler::resolveGepIndices(
+    const std::vector<std::variant<size_t, std::string>> &indices) {
+  std::vector<llvm::Value *> idxList;
+  if (indices.empty()) {
+    return idxList;
+  }
+  const auto &idx = indices[0];
+  if (const size_t *intIdx = std::get_if<size_t>(&idx)) {
+    idxList.push_back(
+        llvm::ConstantInt::get(*TheContext, llvm::APInt(64, *intIdx)));
+  } else if (const std::string *strIdx = std::get_if<std::string>(&idx)) {
+    auto it = NamedValues.find(*strIdx);
+    if (it != NamedValues.end()) {
+      llvm::Value *indexVal = it->second.first;
+      if (indexVal->getType()->isPointerTy()) {
+        indexVal = Builder->CreateLoad(it->second.second.value(), indexVal,
+                                       *strIdx);
+      }
+      if (indexVal->getType()->isFloatingPointTy()) {
+        indexVal = Builder->CreateFPToSI(indexVal, Builder->getInt64Ty(),
+                                         *strIdx + "_idx");
+      }
+      idxList.push_back(indexVal);
+    } else {
+      assert(0 == 1);
+    }
+  }
+  return idxList;
 }
 
 llvm::AllocaInst *
@@ -736,7 +767,8 @@ bool StrideCompiler::hasConfiguration(StrideConfig option) {
 }
 
 llvm::Type *
-StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl) {
+StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl,
+                            const ScopeStack &scope) {
   if (!decl) {
     return typesMap[""];
   }
@@ -782,6 +814,86 @@ StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl) {
   if (decl->getEntityType() == "reaction") {
     return typesMap[DataTypes::Switch];
   }
+  if (decl->getEntityType() == "iterator") {
+    auto entityProp = decl->getPropertyValue("entity");
+    if (entityProp && entityProp->getNodeType() != strd::AST::None) {
+      auto targetDecl = findConnectedDeclaration(entityProp);
+      if (!targetDecl && m_tree) {
+        targetDecl = ASTQuery::findDeclarationForNode(entityProp, {}, m_tree);
+      }
+      if (targetDecl) {
+        if (targetDecl->getEntityType() == "buffer") {
+          auto tProp = targetDecl->getPropertyValue("type");
+          std::string tName =
+              (tProp && tProp->getNodeType() == strd::AST::Entity)
+                  ? ASTQuery::getNodeName(tProp)
+                  : DataTypes::Real;
+          return (!tName.empty() && typesMap.find(tName) != typesMap.end() &&
+                  !typesMap[tName]->isVoidTy())
+                     ? typesMap[tName]
+                     : typesMap[DataTypes::Real];
+        }
+        return getLLVMType(targetDecl);
+      }
+    }
+    auto startProp = decl->getPropertyValue("default");
+    auto incProp = decl->getPropertyValue("increment");
+    auto limitProp = decl->getPropertyValue("limit");
+    if ((startProp && startProp->getNodeType() == strd::AST::Real) ||
+        (incProp && incProp->getNodeType() == strd::AST::Real) ||
+        (limitProp && limitProp->getNodeType() == strd::AST::Real)) {
+      return typesMap[DataTypes::Real];
+    }
+    return typesMap[DataTypes::Int];
+  }
+  if (decl->getEntityType() == "sequence") {
+    auto fromProp = decl->getPropertyValue("from");
+    auto defProp = decl->getPropertyValue("default");
+    auto stepProp = decl->getPropertyValue("step");
+    auto incProp = decl->getPropertyValue("increment");
+    auto limitProp = decl->getPropertyValue("limit");
+    if ((fromProp && fromProp->getNodeType() == strd::AST::Real) ||
+        (defProp && defProp->getNodeType() == strd::AST::Real) ||
+        (stepProp && stepProp->getNodeType() == strd::AST::Real) ||
+        (incProp && incProp->getNodeType() == strd::AST::Real) ||
+        (limitProp && limitProp->getNodeType() == strd::AST::Real)) {
+      return typesMap[DataTypes::Real];
+    }
+    return typesMap[DataTypes::Int];
+  }
+  if (decl->getEntityType() == "table") {
+    llvm::Type *elemTy = (!type.empty() && typesMap.find(type) != typesMap.end() &&
+                          !typesMap[type]->isVoidTy())
+                             ? typesMap[type]
+                             : typesMap[DataTypes::Real];
+    auto sizeNode = decl->getPropertyValue("size");
+    if (sizeNode) {
+      ScopeStack evalScope = scope;
+      if (evalScope.empty() && !connectionScopes.empty() &&
+          connectionScopes.back().scope) {
+        evalScope = *connectionScopes.back().scope;
+      }
+      std::vector<LangError> errors;
+      int64_t tableSize = ASTFunctions::evaluateConstInteger(
+          sizeNode, evalScope, m_tree, &errors);
+      if (errors.empty() && tableSize > 0) {
+        return llvm::ArrayType::get(elemTy, static_cast<uint64_t>(tableSize));
+      }
+      if (auto sizeDecl = std::static_pointer_cast<DeclarationNode>(
+              sizeNode->getCompilerProperty("declaration"))) {
+        if (auto valNode = sizeDecl->getPropertyValue("value")) {
+          errors.clear();
+          tableSize = ASTFunctions::evaluateConstInteger(valNode, evalScope,
+                                                         m_tree, &errors);
+          if (errors.empty() && tableSize > 0) {
+            return llvm::ArrayType::get(elemTy,
+                                        static_cast<uint64_t>(tableSize));
+          }
+        }
+      }
+    }
+    return elemTy;
+  }
   if (decl->getEntityType() == "buffer") {
     auto spec = BufferSpec::fromDeclaration(decl, m_tree);
     llvm::Type *elemTy = (!type.empty() && typesMap.find(type) != typesMap.end() &&
@@ -813,7 +925,31 @@ llvm::Type *StrideCompiler::getLLVMTypeForCodegenEntity(
   if (decl->getEntityType() == "string") {
     return typesMap[DataTypes::String];
   }
-  if (decl->getEntityType() == "constant") {
+  if (decl->getEntityType() == "constant" ||
+      decl->getEntityType() == "sequence") {
+    return getLLVMType(decl);
+  }
+  if (decl->getEntityType() == "iterator") {
+    auto entityProp = decl->getPropertyValue("entity");
+    if (entityProp && entityProp->getNodeType() != strd::AST::None) {
+      auto targetDecl = findConnectedDeclaration(entityProp);
+      if (!targetDecl && funcDecl) {
+        if (auto entities = funcDecl->getPropertyValue("entities")) {
+          targetDecl = ASTQuery::findDeclarationForNode(
+              entityProp, {{funcDecl, entities->getChildren()}}, m_tree);
+        }
+      }
+      if (!targetDecl && m_tree) {
+        targetDecl = ASTQuery::findDeclarationForNode(entityProp, {}, m_tree);
+      }
+      if (targetDecl) {
+        if (targetDecl->getEntityType() == "buffer") {
+          return getLLVMType(decl);
+        }
+        return getLLVMTypeForCodegenEntity(targetDecl, funcDecl,
+                                           functionInstance);
+      }
+    }
     return getLLVMType(decl);
   }
   auto typePropNode = decl->getPropertyValue("type");
@@ -1029,14 +1165,41 @@ bool StrideCompiler::doesDomainNeedState(ASTNode domainDecl) const {
 }
 
 llvm::Constant *StrideCompiler::makeDefaultConstant(ASTNode defaultNode,
-                                                    llvm::Type *varType) {
+                                                    llvm::Type *varType,
+                                                    const ScopeStack &scope,
+                                                    int depth) {
+  if (!defaultNode || !varType || depth > 16) {
+    return nullptr;
+  }
   if (!defaultNode || !varType) {
     return nullptr;
   }
   llvm::Type *scalarType =
       varType->isArrayTy() ? varType->getArrayElementType() : varType;
 
-  auto getScalarConst = [&](ASTNode valNode) -> llvm::Constant * {
+  std::function<llvm::Constant *(ASTNode, int)> getScalarConst =
+      [&](ASTNode valNode, int curDepth) -> llvm::Constant * {
+    if (!valNode || curDepth > 16) {
+      return nullptr;
+    }
+    if (valNode->getNodeType() == AST::Entity) {
+      auto entityNode = std::static_pointer_cast<EntityNode>(valNode);
+      auto refDecl = std::static_pointer_cast<DeclarationNode>(
+          valNode->getCompilerProperty("declaration"));
+      if (!refDecl) {
+        refDecl = ASTQuery::findDeclarationByName(
+            entityNode->getName(), scope, m_tree,
+            entityNode->getNamespaceList());
+      }
+      if (refDecl) {
+        ASTNode refVal = refDecl->getPropertyValue("default");
+        if (!refVal || refVal->getNodeType() == AST::None) {
+          refVal = refDecl->getPropertyValue("value");
+        }
+        return getScalarConst(refVal, curDepth + 1);
+      }
+      return nullptr;
+    }
     if (!valNode) {
       return nullptr;
     }
@@ -1099,18 +1262,18 @@ llvm::Constant *StrideCompiler::makeDefaultConstant(ASTNode defaultNode,
       std::vector<llvm::Constant *> initVals;
       initVals.reserve(numElems);
       for (const auto &child : children) {
-        llvm::Constant *c = getScalarConst(child);
+        llvm::Constant *c = getScalarConst(child, depth);
         initVals.push_back(c ? c : llvm::Constant::getNullValue(scalarType));
       }
       return llvm::ConstantArray::get(arrayType, initVals);
     }
-    if (llvm::Constant *scalar = getScalarConst(defaultNode)) {
+    if (llvm::Constant *scalar = getScalarConst(defaultNode, depth)) {
       std::vector<llvm::Constant *> initVals(numElems, scalar);
       return llvm::ConstantArray::get(arrayType, initVals);
     }
     return nullptr;
   }
-  return getScalarConst(defaultNode);
+  return getScalarConst(defaultNode, depth);
 }
 
 bool StrideCompiler::doesNodeNeedState(const CodeAnalysis::TypeTree *node) {
@@ -1256,17 +1419,50 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
   // 1. Persistent fields for this node's own state (only modules have
   // state of their own)
   if (ASTQuery::isModuleNode(nodeTree.instance, {}, m_tree)) {
+    ScopeStack moduleScope;
+    std::shared_ptr<DeclarationNode> instDecl;
+    if (nodeTree.instance) {
+      if (nodeTree.instance->getNodeType() == AST::Declaration ||
+          nodeTree.instance->getNodeType() == AST::ArrayDeclaration) {
+        instDecl = std::static_pointer_cast<DeclarationNode>(nodeTree.instance);
+      } else if (auto declProp =
+                     nodeTree.instance->getCompilerProperty("declaration")) {
+        if (declProp->getNodeType() == AST::Declaration ||
+            declProp->getNodeType() == AST::ArrayDeclaration) {
+          instDecl = std::static_pointer_cast<DeclarationNode>(declProp);
+        }
+      }
+      if (!instDecl) {
+        instDecl = ASTQuery::findDeclarationForNode(nodeTree.instance, {}, m_tree);
+      }
+    }
+    if (instDecl) {
+      auto entities = instDecl->getPropertyValue("entities");
+      moduleScope.push_back(
+          {instDecl, entities ? entities->getChildren() : std::vector<ASTNode>{}});
+    }
     for (const auto &var : nodeTree.persistent) {
       std::string varName = ASTQuery::getNodeName(var.first);
       llvm::Type *varType = nullptr;
-      if (!var.second.empty() && typesMap.find(var.second) != typesMap.end() &&
+      if (var.first &&
+          (var.first->getNodeType() == AST::Declaration ||
+           var.first->getNodeType() == AST::ArrayDeclaration)) {
+        auto varDecl = std::static_pointer_cast<DeclarationNode>(var.first);
+        if (var.first->getNodeType() == AST::ArrayDeclaration ||
+            varDecl->getEntityType() == "table" ||
+            varDecl->getEntityType() == "buffer") {
+          varType = getLLVMType(varDecl, moduleScope);
+        }
+      }
+      if (!varType && !var.second.empty() && typesMap.find(var.second) != typesMap.end() &&
           !typesMap[var.second]->isVoidTy()) {
         varType = typesMap[var.second];
-      } else if (var.first &&
+      } else if (!varType && var.first &&
                  (var.first->getNodeType() == AST::Declaration ||
                   var.first->getNodeType() == AST::ArrayDeclaration)) {
         varType =
-            getLLVMType(std::static_pointer_cast<DeclarationNode>(var.first));
+            getLLVMType(std::static_pointer_cast<DeclarationNode>(var.first),
+                        moduleScope);
       }
       if (!varType || varType->isVoidTy()) {
         varType = realType();
@@ -1279,7 +1475,8 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
           var.first->getNodeType() == AST::ArrayDeclaration) {
         auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
         defaultVal =
-            makeDefaultConstant(decl->getPropertyValue("default"), varType);
+            makeDefaultConstant(decl->getPropertyValue("default"), varType,
+                                moduleScope);
         auto resetProp = decl->getPropertyValue("reset");
         if (resetProp) {
           info.varResetSignals[varName] = ASTQuery::getNodeName(resetProp);

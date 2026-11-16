@@ -28,9 +28,13 @@
 #include "stride/stridejit/numberexprast.hpp"
 #include "stride/stridejit/stridecompiler.hpp"
 
+#include "stride/parser/arraynode.h"
 #include "stride/parser/ast.h"
 #include "stride/parser/entitynode.h"
+#include "stride/parser/expressionnode.h"
+#include "stride/parser/memberaccessnode.h"
 #include "stride/parser/valuenode.h"
+#include "stride/stridejit/bufferspec.hpp"
 
 #include "stride/utils/astquery.h"
 
@@ -507,9 +511,38 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   std::map<std::string, llvm::Value *> OldVals;
   std::map<std::string, llvm::PHINode *> PHIVariables;
   llvm::BasicBlock *LoopBB = nullptr;
+  llvm::BasicBlock *LoopAfterBB = nullptr;
   llvm::BasicBlock *ReactionExitBB = nullptr;
   int64_t itStart = 0, itLimit = 0, itIncrement = 0;
   std::string itName;
+
+  struct LoopArrayIteratorInfo {
+    std::string name;
+    std::string targetEntityName;
+    llvm::Type *elemType = nullptr;
+    llvm::Value *basePtr = nullptr;
+    llvm::Value *offsetVal = nullptr;
+    llvm::Value *strideVal = nullptr;
+    llvm::Value *tripCountVal = nullptr;
+    std::string doneName;
+    bool isUnitStride = false;
+    std::shared_ptr<DeclarationNode> decl;
+  };
+  struct LoopSequenceInfo {
+    std::string name;
+    llvm::Type *valType = nullptr;
+    llvm::Value *fromVal = nullptr;
+    llvm::Value *limitVal = nullptr;
+    llvm::Value *stepVal = nullptr;
+    llvm::Value *tripCountVal = nullptr;
+    llvm::PHINode *phiNode = nullptr;
+    std::string doneName;
+    std::shared_ptr<DeclarationNode> decl;
+  };
+  std::vector<LoopArrayIteratorInfo> loopArrayIterators;
+  std::vector<LoopSequenceInfo> loopSequences;
+  llvm::PHINode *loopIndexPHI = nullptr;
+  llvm::Value *loopTripCount = nullptr;
 
   if (callType == CallableType::DomainFunction) {
     allocateInternalVariables(state, TheFunction);
@@ -550,85 +583,596 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     llvm::BasicBlock *PreheaderBB = state.Builder->GetInsertBlock();
     LoopBB = llvm::BasicBlock::Create(*state.TheContext, "loop", TheFunction);
 
+    std::shared_ptr<DeclarationNode> loopDecl;
+    if (funcInstance && funcInstance->getNodeType() == AST::Declaration) {
+      loopDecl = std::static_pointer_cast<DeclarationNode>(funcInstance);
+    } else {
+      if (funcInstance) {
+        if (auto declProp = funcInstance->getCompilerProperty("declaration")) {
+          if (declProp->getNodeType() == AST::Declaration) {
+            loopDecl = std::static_pointer_cast<DeclarationNode>(declProp);
+          }
+        }
+      }
+      if (!loopDecl && funcInstance && funcInstance->getNodeType() == AST::Function &&
+          state.m_tree) {
+        loopDecl = ASTQuery::findDeclarationByName(
+            std::static_pointer_cast<FunctionNode>(funcInstance)->getName(), {},
+            state.m_tree, {});
+      }
+      if (!loopDecl && state.m_tree) {
+        loopDecl =
+            ASTQuery::findDeclarationByName(P.getName(), {}, state.m_tree, {});
+      }
+    }
+    auto entitiesNode =
+        loopDecl ? loopDecl->getPropertyValue("entities") : nullptr;
+    ScopeStack loopScope;
+    if (loopDecl && entitiesNode && entitiesNode->getNodeType() == AST::List) {
+      loopScope.push_back({loopDecl, entitiesNode->getChildren()});
+    }
+
+    // Alias port names and port entity names for _size and _rate in NamedValues
+    if (loopDecl) {
+      if (auto portsNode = loopDecl->getPropertyValue("ports")) {
+        for (const auto &port : portsNode->getChildren()) {
+          if (port->getNodeType() == AST::Declaration) {
+            auto portDecl = std::static_pointer_cast<DeclarationNode>(port);
+            std::string portName = portDecl->getName();
+            auto portEntity = portDecl->getPropertyValue("entity");
+            std::string entityName =
+                portEntity ? ASTQuery::getNodeName(portEntity) : "";
+            if (!portName.empty() && !entityName.empty()) {
+              for (const std::string &suffix : {"_size", "_rate"}) {
+                auto pIt = state.NamedValues.find(portName + suffix);
+                auto eIt = state.NamedValues.find(entityName + suffix);
+                if (pIt != state.NamedValues.end() &&
+                    eIt == state.NamedValues.end()) {
+                  state.NamedValues[entityName + suffix] = pIt->second;
+                } else if (eIt != state.NamedValues.end() &&
+                           pIt == state.NamedValues.end()) {
+                  state.NamedValues[portName + suffix] = eIt->second;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
     // Output ports are caller-allocated pointers, so they don't go through the
     // internal variable default initialization. A loop is reset on every
     // execution, so write the declared default of each output entity into its
     // pointer before entering the loop body.
-    {
-      std::shared_ptr<DeclarationNode> loopDecl;
-      if (funcInstance && funcInstance->getNodeType() == AST::Declaration) {
-        loopDecl = std::static_pointer_cast<DeclarationNode>(funcInstance);
-      } else if (state.m_tree) {
-        loopDecl = ASTQuery::findDeclarationByName(P.getName(), {},
-                                                   state.m_tree, {});
-      }
-      auto blocksNode = loopDecl ? loopDecl->getPropertyValue("entities")
-                                 : nullptr;
-      if (blocksNode) {
-        for (const auto &outArg : P.getOutArgs()) {
-          auto outIt = state.NamedValues.find(outArg.name);
-          if (outIt == state.NamedValues.end() ||
-              !outIt->second.first->getType()->isPointerTy()) {
-            continue;
+    if (entitiesNode) {
+      for (const auto &outArg : P.getOutArgs()) {
+        auto outIt = state.NamedValues.find(outArg.name);
+        if (outIt == state.NamedValues.end() ||
+            !outIt->second.first->getType()->isPointerTy()) {
+          continue;
+        }
+        auto outDecl =
+            ASTQuery::findDeclarationByName(outArg.name, loopScope, nullptr);
+        auto defaultNode =
+            outDecl ? outDecl->getPropertyValue("default") : nullptr;
+        llvm::Type *outType = outArg.llvmType;
+        // An array output (Output[OutputPort.size]) is the caller's array,
+        // passed as a pointer to its first element: it is not prefilled, so
+        // entries the loop does not write keep their values
+        if (!defaultNode || !outType || outType->isArrayTy() ||
+            (outDecl && outDecl->getNodeType() == AST::ArrayDeclaration)) {
+          continue;
+        }
+        llvm::Constant *defaultVal = nullptr;
+        if (defaultNode->getNodeType() == AST::Switch) {
+          bool v = std::static_pointer_cast<ValueNode>(defaultNode)
+                       ->getSwitchValue();
+          if (outType->isFloatingPointTy()) {
+            defaultVal = llvm::ConstantFP::get(outType, v ? 1.0 : 0.0);
+          } else if (outType->isIntegerTy()) {
+            defaultVal = llvm::ConstantInt::get(outType, v ? 1 : 0);
           }
-          auto outDecl = ASTQuery::findDeclarationByName(
-              outArg.name, {{loopDecl, blocksNode->getChildren()}}, nullptr);
-          auto defaultNode =
-              outDecl ? outDecl->getPropertyValue("default") : nullptr;
-          llvm::Type *outType = outArg.llvmType;
-          // An array output (Output[OutputPort.size]) is the caller's array,
-          // passed as a pointer to its first element: it is not prefilled, so
-          // entries the loop does not write keep their values
-          if (!defaultNode || !outType || outType->isArrayTy() ||
-              (outDecl &&
-               outDecl->getNodeType() == AST::ArrayDeclaration)) {
-            continue;
+        } else if (defaultNode->getNodeType() == AST::Int) {
+          int64_t v =
+              std::static_pointer_cast<ValueNode>(defaultNode)->getIntValue();
+          if (outType->isFloatingPointTy()) {
+            defaultVal = llvm::ConstantFP::get(outType, double(v));
+          } else if (outType->isIntegerTy()) {
+            defaultVal = llvm::ConstantInt::get(outType, v, true);
           }
-          llvm::Constant *defaultVal = nullptr;
-          if (defaultNode->getNodeType() == AST::Switch) {
-            bool v = std::static_pointer_cast<ValueNode>(defaultNode)
-                         ->getSwitchValue();
-            if (outType->isFloatingPointTy()) {
-              defaultVal = llvm::ConstantFP::get(outType, v ? 1.0 : 0.0);
-            } else if (outType->isIntegerTy()) {
-              defaultVal = llvm::ConstantInt::get(outType, v ? 1 : 0);
-            }
-          } else if (defaultNode->getNodeType() == AST::Int) {
-            int64_t v = std::static_pointer_cast<ValueNode>(defaultNode)
-                            ->getIntValue();
-            if (outType->isFloatingPointTy()) {
-              defaultVal = llvm::ConstantFP::get(outType, double(v));
-            } else if (outType->isIntegerTy()) {
-              defaultVal = llvm::ConstantInt::get(outType, v, true);
-            }
-          } else if (defaultNode->getNodeType() == AST::Real) {
-            double v = std::static_pointer_cast<ValueNode>(defaultNode)
-                           ->getRealValue();
-            if (outType->isFloatingPointTy()) {
-              defaultVal = llvm::ConstantFP::get(outType, v);
-            } else if (outType->isIntegerTy()) {
-              defaultVal = llvm::ConstantInt::get(outType, int64_t(v), true);
-            }
-          }
-          if (defaultVal) {
-            state.Builder->CreateStore(defaultVal, outIt->second.first);
+        } else if (defaultNode->getNodeType() == AST::Real) {
+          double v =
+              std::static_pointer_cast<ValueNode>(defaultNode)->getRealValue();
+          if (outType->isFloatingPointTy()) {
+            defaultVal = llvm::ConstantFP::get(outType, v);
+          } else if (outType->isIntegerTy()) {
+            defaultVal = llvm::ConstantInt::get(outType, int64_t(v), true);
           }
         }
+        if (defaultVal) {
+          state.Builder->CreateStore(defaultVal, outIt->second.first);
+        }
       }
+    }
+
+    // Allocate any local non-port ArrayDeclarations in PreheaderBB
+    for (const auto &decl : internalVariables) {
+      if (decl && decl->getNodeType() == AST::ArrayDeclaration) {
+        std::string varName = decl->getName();
+        if (state.NamedValues.find(varName) != state.NamedValues.end()) {
+          continue;
+        }
+        int sz = ASTQuery::getEntityDeclaredSize(decl, loopScope, state.m_tree);
+        if (sz <= 0)
+          sz = 1;
+        llvm::Type *elemTy = state.getLLVMType(decl);
+        llvm::AllocaInst *alloca = state.CreateEntryBlockAllocaArray(
+            TheFunction, varName, elemTy, sz);
+        OldVals[varName] = nullptr;
+        state.NamedValues[varName] = {alloca, elemTy};
+      }
+    }
+
+    llvm::Type *i32Ty = llvm::Type::getInt32Ty(*state.TheContext);
+
+    auto castToTarget = [&](llvm::Value *val,
+                            llvm::Type *targetType) -> llvm::Value * {
+      if (!val || !targetType || val->getType() == targetType)
+        return val;
+      if (val->getType()->isIntegerTy() && targetType->isFloatingPointTy()) {
+        return state.Builder->CreateSIToFP(val, targetType, "loop.sitofp");
+      }
+      if (val->getType()->isFloatingPointTy() && targetType->isIntegerTy()) {
+        return state.Builder->CreateFPToSI(val, targetType, "loop.fptosi");
+      }
+      if (val->getType()->isIntegerTy() && targetType->isIntegerTy()) {
+        return state.Builder->CreateIntCast(val, targetType, true,
+                                            "loop.intcast");
+      }
+      if (val->getType()->isFloatingPointTy() &&
+          targetType->isFloatingPointTy()) {
+        return state.Builder->CreateFPCast(val, targetType, "loop.fpcast");
+      }
+      return val;
+    };
+
+    // Evaluate loop bound/step/offset/stride expressions once in PreheaderBB
+    std::function<llvm::Value *(ASTNode, llvm::Type *)> evalLoopPropExpr =
+        [&](ASTNode exprNode, llvm::Type *targetType) -> llvm::Value * {
+      if (!exprNode || exprNode->getNodeType() == AST::None)
+        return nullptr;
+      if (exprNode->getNodeType() == AST::Int) {
+        int64_t v =
+            std::static_pointer_cast<ValueNode>(exprNode)->getIntValue();
+        if (targetType->isFloatingPointTy())
+          return llvm::ConstantFP::get(targetType, static_cast<double>(v));
+        return llvm::ConstantInt::get(targetType, v, true);
+      }
+      if (exprNode->getNodeType() == AST::Real) {
+        double v =
+            std::static_pointer_cast<ValueNode>(exprNode)->getRealValue();
+        if (targetType->isFloatingPointTy())
+          return llvm::ConstantFP::get(targetType, v);
+        return llvm::ConstantInt::get(targetType, static_cast<int64_t>(v),
+                                      true);
+      }
+      if (exprNode->getNodeType() == AST::MemberAccess) {
+        auto ma = std::static_pointer_cast<MemberAccessNode>(exprNode);
+        std::string key = ma->getEntity() + "_" + ma->getPropertyName();
+        auto it = state.NamedValues.find(key);
+        if (it != state.NamedValues.end()) {
+          llvm::Value *v = it->second.first;
+          if (v && v->getType()->isPointerTy()) {
+            llvm::Type *loadTy = it->second.second.value_or(targetType);
+            v = state.Builder->CreateLoad(loadTy, v, key + ".val");
+          }
+          return castToTarget(v, targetType);
+        }
+        if (ma->getPropertyName() == "size") {
+          auto targetDecl = ASTQuery::findDeclarationByName(
+              ma->getEntity(), loopScope, state.m_tree);
+          if (targetDecl) {
+            if (targetDecl->getNodeType() == AST::ArrayDeclaration) {
+              if (auto arrIdx = targetDecl->getArrayIndex()) {
+                if (arrIdx->index() &&
+                    !arrIdx->index()->getChildren().empty()) {
+                  auto idxChild = arrIdx->index()->getChildren()[0];
+                  if (idxChild != exprNode) {
+                    if (llvm::Value *v =
+                            evalLoopPropExpr(idxChild, targetType)) {
+                      return v;
+                    }
+                  }
+                }
+              }
+              std::vector<LangError> errs;
+              int sz = ASTQuery::getEntityDeclaredSize(
+                  targetDecl, loopScope, state.m_tree, &errs);
+              if (errs.empty() && sz > 0) {
+                return castToTarget(state.Builder->getInt32(sz), targetType);
+              }
+            } else if (targetDecl->getEntityType() == "buffer") {
+              auto spec = BufferSpec::fromDeclaration(targetDecl, state.m_tree);
+              int64_t bufSize =
+                  spec.frameSize > 0 ? spec.frameSize : spec.capacity;
+              if (bufSize > 0) {
+                return castToTarget(state.Builder->getInt32(bufSize),
+                                    targetType);
+              }
+            }
+          }
+        }
+        return nullptr;
+      }
+      if (exprNode->getNodeType() == AST::Entity) {
+        std::string entName = ASTQuery::getNodeName(exprNode);
+        auto it = state.NamedValues.find(entName);
+        if (it != state.NamedValues.end() && it->second.first) {
+          llvm::Value *v = it->second.first;
+          if (v->getType()->isPointerTy()) {
+            llvm::Type *loadTy = it->second.second.value_or(targetType);
+            v = state.Builder->CreateLoad(loadTy, v, entName + ".snap");
+          }
+          return castToTarget(v, targetType);
+        }
+        if (state.globalExists(entName)) {
+          auto global = state.getGlobal(entName);
+          llvm::Type *loadTy = global.second.value_or(targetType);
+          llvm::Value *v = state.Builder->CreateLoad(
+              loadTy, global.first, entName + ".snap");
+          return castToTarget(v, targetType);
+        }
+        if (auto cDecl = ASTQuery::findDeclarationByName(entName, loopScope,
+                                                         state.m_tree)) {
+          if (cDecl->getEntityType() == "constant") {
+            if (auto valProp = cDecl->getPropertyValue("value")) {
+              return evalLoopPropExpr(valProp, targetType);
+            }
+          }
+        }
+        return nullptr;
+      }
+      if (exprNode->getNodeType() == AST::Expression) {
+        auto expr = std::static_pointer_cast<ExpressionNode>(exprNode);
+        if (expr->isUnary()) {
+          if (expr->getExpressionType() == ExpressionNode::UnaryMinus) {
+            llvm::Value *op = evalLoopPropExpr(expr->getValue(), targetType);
+            if (!op)
+              return nullptr;
+            return targetType->isFloatingPointTy()
+                       ? state.Builder->CreateFNeg(op, "loop.fneg")
+                       : state.Builder->CreateNeg(op, "loop.neg");
+          }
+          return nullptr;
+        }
+        llvm::Value *L = evalLoopPropExpr(expr->getLeft(), targetType);
+        llvm::Value *R = evalLoopPropExpr(expr->getRight(), targetType);
+        if (!L || !R)
+          return nullptr;
+        bool isFloat = targetType->isFloatingPointTy();
+        switch (expr->getExpressionType()) {
+        case ExpressionNode::Add:
+          return isFloat ? state.Builder->CreateFAdd(L, R, "loop.fadd")
+                         : state.Builder->CreateAdd(L, R, "loop.add");
+        case ExpressionNode::Subtract:
+          return isFloat ? state.Builder->CreateFSub(L, R, "loop.fsub")
+                         : state.Builder->CreateSub(L, R, "loop.sub");
+        case ExpressionNode::Multiply:
+          return isFloat ? state.Builder->CreateFMul(L, R, "loop.fmul")
+                         : state.Builder->CreateMul(L, R, "loop.mul");
+        case ExpressionNode::Divide:
+          return isFloat ? state.Builder->CreateFDiv(L, R, "loop.fdiv")
+                         : state.Builder->CreateSDiv(L, R, "loop.sdiv");
+        default:
+          return nullptr;
+        }
+      }
+      return nullptr;
+    };
+
+    auto getPreferredProp = [](const std::shared_ptr<DeclarationNode> &d,
+                               const std::string &primary,
+                               const std::string &fallback) -> ASTNode {
+      ASTNode p1 = d->getPropertyValue(primary);
+      ASTNode p2 = d->getPropertyValue(fallback);
+      bool p1Default = !p1 || p1->getNodeType() == AST::None ||
+                       p1->getCompilerProperty("defaultFilled") != nullptr;
+      bool p2Default = !p2 || p2->getNodeType() == AST::None ||
+                       p2->getCompilerProperty("defaultFilled") != nullptr;
+      if (!p1Default)
+        return p1;
+      if (!p2Default)
+        return p2;
+      return (p1 && p1->getNodeType() != AST::None) ? p1 : p2;
+    };
+
+    // Collect and pre-evaluate array iterators and sequences in PreheaderBB
+    for (const auto &decl : internalVariables) {
+      if (!decl)
+        continue;
+      if (decl->getEntityType() == "iterator") {
+        auto entityProp = decl->getPropertyValue("entity");
+        if (entityProp && entityProp->getNodeType() != AST::None) {
+          LoopArrayIteratorInfo info;
+          info.name = decl->getName();
+          info.targetEntityName = ASTQuery::getNodeName(entityProp);
+          info.decl = decl;
+          if (auto doneProp = decl->getPropertyValue("done")) {
+            if (doneProp->getNodeType() == AST::Entity) {
+              info.doneName = ASTQuery::getNodeName(doneProp);
+            }
+          }
+          auto targetIt = state.NamedValues.find(info.targetEntityName);
+          if (targetIt != state.NamedValues.end()) {
+            info.basePtr = targetIt->second.first;
+            info.elemType = targetIt->second.second.value_or(nullptr);
+          } else if (state.globalExists(info.targetEntityName)) {
+            auto global = state.getGlobal(info.targetEntityName);
+            info.basePtr = global.first;
+            info.elemType = global.second.value_or(nullptr);
+          }
+          if (info.elemType && info.elemType->isArrayTy()) {
+            info.elemType = info.elemType->getArrayElementType();
+          }
+          if (!info.elemType) {
+            info.elemType =
+                state.getLLVMTypeForCodegenEntity(decl, loopDecl, nullptr);
+          }
+          info.offsetVal =
+              evalLoopPropExpr(decl->getPropertyValue("offset"), i32Ty);
+          if (!info.offsetVal) {
+            info.offsetVal = state.Builder->getInt32(0);
+          }
+          info.strideVal =
+              evalLoopPropExpr(decl->getPropertyValue("stride"), i32Ty);
+          if (!info.strideVal) {
+            info.strideVal = state.Builder->getInt32(1);
+          }
+          if (auto *ci = llvm::dyn_cast<llvm::ConstantInt>(info.strideVal)) {
+            info.isUnitStride = (ci->getSExtValue() == 1);
+          }
+
+          // Resolve target array size in PreheaderBB
+          llvm::Value *entitySizeVal = nullptr;
+          auto szIt = state.NamedValues.find(info.targetEntityName + "_size");
+          if (szIt != state.NamedValues.end() && szIt->second.first) {
+            entitySizeVal = szIt->second.first;
+            if (entitySizeVal->getType()->isPointerTy()) {
+              entitySizeVal = state.Builder->CreateLoad(
+                  i32Ty, entitySizeVal, info.targetEntityName + ".sz");
+            }
+            entitySizeVal = castToTarget(entitySizeVal, i32Ty);
+          }
+          if (!entitySizeVal) {
+            if (auto targetDecl = ASTQuery::findDeclarationByName(
+                    info.targetEntityName, loopScope, state.m_tree)) {
+              if (targetDecl->getNodeType() == AST::ArrayDeclaration) {
+                if (auto arrIdx = targetDecl->getArrayIndex()) {
+                  if (arrIdx->index() &&
+                      !arrIdx->index()->getChildren().empty()) {
+                    entitySizeVal = evalLoopPropExpr(
+                        arrIdx->index()->getChildren()[0], i32Ty);
+                  }
+                }
+                if (!entitySizeVal) {
+                  std::vector<LangError> errs;
+                  int sz = ASTQuery::getEntityDeclaredSize(
+                      targetDecl, loopScope, state.m_tree, &errs);
+                  if (errs.empty() && sz > 0) {
+                    entitySizeVal = state.Builder->getInt32(sz);
+                  }
+                }
+              } else if (targetDecl->getEntityType() == "buffer") {
+                auto spec =
+                    BufferSpec::fromDeclaration(targetDecl, state.m_tree);
+                int64_t bufSize =
+                    spec.frameSize > 0 ? spec.frameSize : spec.capacity;
+                if (bufSize > 0) {
+                  entitySizeVal = state.Builder->getInt32(bufSize);
+                }
+              }
+            }
+          }
+          if (entitySizeVal) {
+            llvm::Value *rem = state.Builder->CreateSub(
+                entitySizeVal, info.offsetVal, info.name + ".rem");
+            llvm::Value *rawTrips = rem;
+            if (!info.isUnitStride) {
+              llvm::Value *strideMinus1 = state.Builder->CreateSub(
+                  info.strideVal, state.Builder->getInt32(1));
+              llvm::Value *num = state.Builder->CreateAdd(rem, strideMinus1);
+              rawTrips = state.Builder->CreateSDiv(num, info.strideVal,
+                                                   info.name + ".trips");
+            }
+            llvm::Value *posCond = state.Builder->CreateICmpSGT(
+                rem, state.Builder->getInt32(0));
+            info.tripCountVal = state.Builder->CreateSelect(
+                posCond, rawTrips, state.Builder->getInt32(0),
+                info.name + ".tripcount");
+            if (!loopTripCount) {
+              loopTripCount = info.tripCountVal;
+            }
+          }
+          loopArrayIterators.push_back(std::move(info));
+          continue;
+        }
+      }
+      if (decl->getEntityType() == "sequence" ||
+          decl->getEntityType() == "iterator") {
+        LoopSequenceInfo seq;
+        seq.name = decl->getName();
+        seq.decl = decl;
+        seq.valType = state.getLLVMType(decl);
+        if (!seq.valType || seq.valType->isVoidTy()) {
+          seq.valType = i32Ty;
+        }
+        if (auto doneProp = decl->getPropertyValue("done")) {
+          if (doneProp->getNodeType() == AST::Entity) {
+            seq.doneName = ASTQuery::getNodeName(doneProp);
+          }
+        }
+        ASTNode fromNode = getPreferredProp(decl, "from", "default");
+        ASTNode stepNode = getPreferredProp(decl, "step", "increment");
+        ASTNode limitNode = decl->getPropertyValue("limit");
+        seq.fromVal = evalLoopPropExpr(fromNode, seq.valType);
+        if (!seq.fromVal) {
+          seq.fromVal = seq.valType->isFloatingPointTy()
+                            ? llvm::ConstantFP::get(seq.valType, 0.0)
+                            : llvm::ConstantInt::get(seq.valType, 0, true);
+        }
+        seq.stepVal = evalLoopPropExpr(stepNode, seq.valType);
+        if (!seq.stepVal) {
+          seq.stepVal = seq.valType->isFloatingPointTy()
+                            ? llvm::ConstantFP::get(seq.valType, 1.0)
+                            : llvm::ConstantInt::get(seq.valType, 1, true);
+        }
+        seq.limitVal = evalLoopPropExpr(limitNode, seq.valType);
+        if (seq.limitVal) {
+          if (seq.valType->isIntegerTy()) {
+            llvm::Value *fromI32 = castToTarget(seq.fromVal, i32Ty);
+            llvm::Value *limitI32 = castToTarget(seq.limitVal, i32Ty);
+            llvm::Value *stepI32 = castToTarget(seq.stepVal, i32Ty);
+            if (auto *cStep = llvm::dyn_cast<llvm::ConstantInt>(stepI32)) {
+              int64_t stepConst = cStep->getSExtValue();
+              if (stepConst > 0) {
+                llvm::Value *diff = state.Builder->CreateSub(
+                    limitI32, fromI32, seq.name + ".diff");
+                llvm::Value *rawTrips =
+                    (stepConst == 1)
+                        ? diff
+                        : state.Builder->CreateSDiv(
+                              state.Builder->CreateAdd(
+                                  diff, state.Builder->getInt32(stepConst - 1)),
+                              stepI32, seq.name + ".trips");
+                llvm::Value *posCond = state.Builder->CreateICmpSGT(
+                    diff, state.Builder->getInt32(0));
+                seq.tripCountVal = state.Builder->CreateSelect(
+                    posCond, rawTrips, state.Builder->getInt32(0),
+                    seq.name + ".tripcount");
+              } else if (stepConst < 0) {
+                int64_t absStep = -stepConst;
+                llvm::Value *diff = state.Builder->CreateSub(
+                    fromI32, limitI32, seq.name + ".diff");
+                llvm::Value *rawTrips =
+                    (absStep == 1)
+                        ? diff
+                        : state.Builder->CreateSDiv(
+                              state.Builder->CreateAdd(
+                                  diff, state.Builder->getInt32(absStep - 1)),
+                              state.Builder->getInt32(absStep),
+                              seq.name + ".trips");
+                llvm::Value *posCond = state.Builder->CreateICmpSGT(
+                    diff, state.Builder->getInt32(0));
+                seq.tripCountVal = state.Builder->CreateSelect(
+                    posCond, rawTrips, state.Builder->getInt32(0),
+                    seq.name + ".tripcount");
+              } else {
+                seq.tripCountVal = state.Builder->getInt32(0);
+              }
+            } else {
+              llvm::Value *stepPos = state.Builder->CreateICmpSGT(
+                  stepI32, state.Builder->getInt32(0));
+              llvm::Value *absStep = state.Builder->CreateSelect(
+                  stepPos, stepI32, state.Builder->CreateNeg(stepI32));
+              llvm::Value *safeStep = state.Builder->CreateSelect(
+                  state.Builder->CreateICmpEQ(absStep,
+                                              state.Builder->getInt32(0)),
+                  state.Builder->getInt32(1), absStep);
+              llvm::Value *diff = state.Builder->CreateSelect(
+                  stepPos, state.Builder->CreateSub(limitI32, fromI32),
+                  state.Builder->CreateSub(fromI32, limitI32));
+              llvm::Value *num = state.Builder->CreateAdd(
+                  diff,
+                  state.Builder->CreateSub(safeStep, state.Builder->getInt32(1)));
+              llvm::Value *rawTrips = state.Builder->CreateSDiv(num, safeStep);
+              llvm::Value *validCond = state.Builder->CreateAnd(
+                  state.Builder->CreateICmpNE(stepI32,
+                                              state.Builder->getInt32(0)),
+                  state.Builder->CreateICmpSGT(diff,
+                                               state.Builder->getInt32(0)));
+              seq.tripCountVal = state.Builder->CreateSelect(
+                  validCond, rawTrips, state.Builder->getInt32(0),
+                  seq.name + ".tripcount");
+            }
+          } else if (seq.valType->isFloatingPointTy()) {
+            llvm::Value *diff = state.Builder->CreateFSub(
+                seq.limitVal, seq.fromVal, seq.name + ".fdiff");
+            llvm::Value *div = state.Builder->CreateFDiv(
+                diff, seq.stepVal, seq.name + ".fdiv");
+            llvm::Value *rawTrips =
+                state.Builder->CreateFPToSI(div, i32Ty, seq.name + ".ftrips");
+            llvm::Value *remCheck = state.Builder->CreateFCmpOGT(
+                div, state.Builder->CreateSIToFP(rawTrips, seq.valType));
+            rawTrips = state.Builder->CreateAdd(
+                rawTrips,
+                state.Builder->CreateZExt(remCheck, i32Ty));
+            llvm::Value *posCond = state.Builder->CreateICmpSGT(
+                rawTrips, state.Builder->getInt32(0));
+            seq.tripCountVal = state.Builder->CreateSelect(
+                posCond, rawTrips, state.Builder->getInt32(0),
+                seq.name + ".tripcount");
+          }
+        }
+        loopSequences.push_back(std::move(seq));
+      }
+    }
+
+    if (!loopTripCount) {
+      for (const auto &seq : loopSequences) {
+        if (seq.tripCountVal) {
+          loopTripCount = seq.tripCountVal;
+          break;
+        }
+      }
+    }
+
+    if (!terminateWhenName.empty() || loopTripCount) {
+      LoopAfterBB =
+          llvm::BasicBlock::Create(*state.TheContext, "afterloop", TheFunction);
+    }
+
+    // Emit zero-trip guard in PreheaderBB if trip count is known/computed
+    if (loopTripCount) {
+      llvm::BasicBlock *LoopStartBB = llvm::BasicBlock::Create(
+          *state.TheContext, "loop.preheader", TheFunction);
+      llvm::Value *hasTrips = state.Builder->CreateICmpSGT(
+          loopTripCount, state.Builder->getInt32(0), "loop.has_trips");
+      state.Builder->CreateCondBr(hasTrips, LoopStartBB, LoopAfterBB);
+      state.Builder->SetInsertPoint(LoopStartBB);
+      PreheaderBB = LoopStartBB;
     }
 
     // Insert an explicit fall through from the current block to the LoopBB.
     state.Builder->CreateBr(LoopBB);
     // Start insertion in LoopBB.
     state.Builder->SetInsertPoint(LoopBB);
-    { // Define internal vars as PHI, needed for SSA (single static assignment)
-      // when having branching code.
+    { // Define all PHI nodes at the top of LoopBB before any non-PHI instructions
+      if (!loopArrayIterators.empty() || !loopSequences.empty() ||
+          loopTripCount) {
+        loopIndexPHI = state.Builder->CreatePHI(i32Ty, 2, "loop.idx");
+        loopIndexPHI->addIncoming(state.Builder->getInt32(0), PreheaderBB);
+      }
+
+      for (auto &seq : loopSequences) {
+        llvm::PHINode *seqPhi =
+            state.Builder->CreatePHI(seq.valType, 2, seq.name);
+        seqPhi->addIncoming(seq.fromVal, PreheaderBB);
+        seq.phiNode = seqPhi;
+        OldVals[seq.name] = state.NamedValues.count(seq.name)
+                                ? state.NamedValues[seq.name].first
+                                : nullptr;
+        state.NamedValues[seq.name] = {seqPhi, seq.valType};
+      }
+
       for (const auto &decl : internalVariables) {
-        llvm::Type *type;
+        if (!decl || decl->getNodeType() == AST::ArrayDeclaration ||
+            decl->getEntityType() == "iterator" ||
+            decl->getEntityType() == "sequence") {
+          continue;
+        }
+        llvm::Type *type = nullptr;
         llvm::Value *defaultValue = nullptr;
         if (decl->getEntityType() == "signal") {
-          //  Local signals in loops are reset on every trigger, so they are
-          //  allocated and set to their default value
           auto defaultNode = decl->getPropertyValue("default");
           if (!defaultNode) {
             LOG_ERROR() << "No default provided for internal variable."
@@ -649,7 +1193,6 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
               double val =
                   std::static_pointer_cast<ValueNode>(defaultNode)->toReal();
               defaultValue = llvm::ConstantFP::get(type, val);
-
             } else if (typeInfo.isInteger()) {
               if (defaultNode->getNodeType() == AST::Int) {
                 int64_t val = std::static_pointer_cast<ValueNode>(defaultNode)
@@ -659,38 +1202,33 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
               } else if (defaultNode->getNodeType() == AST::Real) {
                 double val = std::static_pointer_cast<ValueNode>(defaultNode)
                                  ->getRealValue();
-
                 defaultValue = llvm::ConstantInt::get(
                     type, static_cast<uint64_t>(static_cast<int64_t>(val)),
                     typeInfo.isSigned);
               } else {
-                LOG_ERROR()
-                    << "Unsupported type. Falling back on double" << std::endl;
-                assert(0 == 1);
                 type = state.realType();
                 defaultValue = llvm::ConstantFP::get(type, 0.0);
               }
-            } else {
-              LOG_ERROR() << "Unsupported type. Falling back on double"
-                          << std::endl;
-              assert(0 == 1);
-              // type = state.realType();
-              // defaultValue = llvm::ConstantFP::get(
-              //     state.realType(),
-              //     llvm::APFloat(0.0));
             }
-          } else {
-            LOG_ERROR() << "Unsupported type. Falling back on double"
-                        << std::endl;
-            assert(0 == 1);
-            type = state.realType();
-            defaultValue = llvm::ConstantFP::get(type, 0.0);
           }
-          assert(defaultValue);
+          if (!type || !defaultValue) {
+            type = state.getLLVMTypeForCodegenEntity(decl, loopDecl, nullptr);
+            if (!type || type->isVoidTy()) {
+              type = state.realType();
+            }
+            double val =
+                (defaultNode->getNodeType() == AST::Int ||
+                 defaultNode->getNodeType() == AST::Real)
+                    ? std::static_pointer_cast<ValueNode>(defaultNode)->toReal()
+                    : 0.0;
+            defaultValue =
+                type->isFloatingPointTy()
+                    ? static_cast<llvm::Value *>(llvm::ConstantFP::get(type, val))
+                    : static_cast<llvm::Value *>(llvm::ConstantInt::get(
+                          type, static_cast<int64_t>(val), true));
+          }
         } else if (decl->getEntityType() == "switch" ||
                    decl->getEntityType() == "trigger") {
-          //  Local switches in loops are reset on every trigger, so they are
-          //  allocated and set to their default value
           type = state.typesMap[DataTypes::Switch];
           auto defaultNode = decl->getPropertyValue("default");
           if (defaultNode && defaultNode->getNodeType() == AST::Switch) {
@@ -703,39 +1241,19 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
             defaultValue = llvm::ConstantInt::get(
                 llvm::Type::getInt1Ty(*state.TheContext), llvm::APInt(1, 0));
           }
-        } else if (decl->getEntityType() == "iterator") {
-          LOG_INFO() << "iterator" << std::endl;
-          auto startNode = decl->getPropertyValue("default");
-          auto limitNode = decl->getPropertyValue("limit");
-          auto incrementNode = decl->getPropertyValue("increment");
-          if (startNode && startNode->getNodeType() == AST::Int && limitNode &&
-              limitNode->getNodeType() == AST::Int && incrementNode &&
-              incrementNode->getNodeType() == AST::Int) {
-            itName = decl->getName();
-            itStart =
-                std::static_pointer_cast<ValueNode>(startNode)->getIntValue();
-            itLimit =
-                std::static_pointer_cast<ValueNode>(limitNode)->getIntValue();
-            itIncrement = std::static_pointer_cast<ValueNode>(incrementNode)
-                              ->getIntValue();
-          }
-
-          type = llvm::IntegerType::get(*state.TheContext, 32);
-          defaultValue =
-              llvm::ConstantInt::get(llvm::Type::getInt32Ty(*state.TheContext),
-                                     llvm::APInt(32, int32_t(itStart)));
         } else {
           LOG_ERROR() << "Invalid declaration for entity '" << decl->getName()
                       << "' . Ignoring" << std::endl;
           continue;
         }
-        // Start the PHI node with an entry for Start.
         std::string VarName = decl->getName();
         llvm::PHINode *Variable = state.Builder->CreatePHI(type, 2, VarName);
         Variable->addIncoming(defaultValue, PreheaderBB);
 
         PHIVariables[VarName] = Variable;
-        OldVals[VarName] = state.NamedValues[VarName].first;
+        OldVals[VarName] = state.NamedValues.count(VarName)
+                               ? state.NamedValues[VarName].first
+                               : nullptr;
         state.NamedValues[VarName] = {Variable, type};
 
         if (state.debugEmitter && subprogram && decl) {
@@ -750,9 +1268,30 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
         }
       }
 
-      for (const auto &portPropArg : P.getUsedMemberAccesses()) {
-        // state.NamedValues[externalArg.name] = {externalArg,
-        // externalArg.llvmType};
+      // After all PHI nodes are created in LoopBB, compute element pointers for
+      // array-bound iterators
+      for (auto &it : loopArrayIterators) {
+        if (!it.basePtr || !it.elemType || !loopIndexPHI)
+          continue;
+        llvm::Value *scaledIdx =
+            it.isUnitStride
+                ? static_cast<llvm::Value *>(loopIndexPHI)
+                : state.Builder->CreateMul(loopIndexPHI, it.strideVal,
+                                           it.name + ".scaled");
+        bool zeroOff = false;
+        if (auto *ci = llvm::dyn_cast<llvm::ConstantInt>(it.offsetVal)) {
+          zeroOff = (ci->getSExtValue() == 0);
+        }
+        llvm::Value *elemIdx =
+            zeroOff ? scaledIdx
+                    : state.Builder->CreateAdd(it.offsetVal, scaledIdx,
+                                               it.name + ".idx");
+        llvm::Value *elemPtr = state.Builder->CreateInBoundsGEP(
+            it.elemType, it.basePtr, elemIdx, it.name + ".ptr");
+        OldVals[it.name] = state.NamedValues.count(it.name)
+                               ? state.NamedValues[it.name].first
+                               : nullptr;
+        state.NamedValues[it.name] = {elemPtr, it.elemType};
       }
     }
   } else {
@@ -763,11 +1302,12 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   // on: a reaction returns, and a loop leaves without finishing the iteration.
   // Loop variables only need values on the back edge, so leaving from the
   // middle of the body keeps the loop's PHI nodes valid.
-  llvm::BasicBlock *LoopAfterBB = nullptr;
   if (!terminateWhenName.empty()) {
     if (callType == CallableType::Loop) {
-      LoopAfterBB =
-          llvm::BasicBlock::Create(*state.TheContext, "afterloop", TheFunction);
+      if (!LoopAfterBB) {
+        LoopAfterBB = llvm::BasicBlock::Create(*state.TheContext, "afterloop",
+                                               TheFunction);
+      }
     } else {
       ReactionExitBB = llvm::BasicBlock::Create(
           *state.TheContext, TheFunction->getName() + ".exit", TheFunction);
@@ -844,6 +1384,54 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
 
   // Post Body
   if (callType == CallableType::Loop) {
+    llvm::Value *nextLoopIdx = nullptr;
+    if (loopIndexPHI) {
+      nextLoopIdx = state.Builder->CreateAdd(
+          loopIndexPHI, state.Builder->getInt32(1), "loop.next_idx");
+    }
+
+    std::vector<std::pair<llvm::PHINode *, llvm::Value *>> nextSeqVals;
+    for (auto &seq : loopSequences) {
+      if (seq.phiNode && seq.stepVal) {
+        llvm::Value *nextVal =
+            seq.valType->isFloatingPointTy()
+                ? state.Builder->CreateFAdd(seq.phiNode, seq.stepVal,
+                                            seq.name + ".next")
+                : state.Builder->CreateAdd(seq.phiNode, seq.stepVal,
+                                           seq.name + ".next");
+        nextSeqVals.push_back({seq.phiNode, nextVal});
+      }
+    }
+
+    llvm::Value *reachedLimit = nullptr;
+    if (loopTripCount && nextLoopIdx) {
+      reachedLimit = state.Builder->CreateICmpSGE(
+          nextLoopIdx, loopTripCount, "loop.reached_limit");
+    }
+
+    auto updateDoneSignal = [&](const std::string &doneName) {
+      if (doneName.empty() || !reachedLimit)
+        return;
+      auto dIt = state.NamedValues.find(doneName);
+      if (dIt != state.NamedValues.end()) {
+        if (dIt->second.first && dIt->second.first->getType()->isPointerTy()) {
+          state.Builder->CreateStore(reachedLimit, dIt->second.first);
+        } else {
+          state.NamedValues[doneName] = {
+              reachedLimit, llvm::Type::getInt1Ty(*state.TheContext)};
+        }
+      } else if (state.globalExists(doneName)) {
+        auto global = state.getGlobal(doneName);
+        state.Builder->CreateStore(reachedLimit, global.first);
+      }
+    };
+    for (const auto &it : loopArrayIterators) {
+      updateDoneSignal(it.doneName);
+    }
+    for (const auto &seq : loopSequences) {
+      updateDoneSignal(seq.doneName);
+    }
+
     llvm::Value *EndCond = nullptr;
     if (terminateWhenName.size() > 0) {
       if (state.NamedValues.find(terminateWhenName) !=
@@ -880,17 +1468,14 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
                     << "' not found in loop NamedValues or globals"
                     << std::endl;
       }
-    } else if (itIncrement != 0) {
-      auto *newIteratorValue = state.Builder->CreateAdd(
-          PHIVariables[itName],
-          llvm::ConstantInt::get(*state.TheContext,
-                                 llvm::APInt(32, itIncrement)));
-      EndCond = state.Builder->CreateICmpEQ(
-          newIteratorValue,
-          llvm::ConstantInt::get(*state.TheContext,
-                                 llvm::APInt(itLimit, itLimit)));
-    } else {
-      assert(0 == 1);
+    }
+    if (reachedLimit) {
+      EndCond = EndCond ? state.Builder->CreateOr(EndCond, reachedLimit,
+                                                  "loop.end_cond")
+                        : reachedLimit;
+    }
+    if (!EndCond) {
+      EndCond = llvm::ConstantInt::getTrue(*state.TheContext);
     }
 
     // Create the "after loop" block and insert it.
@@ -904,22 +1489,52 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     }
 
     // Insert the conditional branch into the end of LoopEndBB.
-    state.Builder->CreateCondBr(EndCond, AfterBB, LoopBB);
+    llvm::BranchInst *backedgeBr =
+        state.Builder->CreateCondBr(EndCond, AfterBB, LoopBB);
+
+    // Attach SIMD loop vectorization metadata when all array iterators are unit-stride
+    bool allUnitStride = !loopArrayIterators.empty();
+    for (const auto &it : loopArrayIterators) {
+      if (!it.isUnitStride) {
+        allUnitStride = false;
+        break;
+      }
+    }
+    if (allUnitStride) {
+      llvm::LLVMContext &ctx = *state.TheContext;
+      llvm::Metadata *enableArgs[] = {
+          llvm::MDString::get(ctx, "llvm.loop.vectorize.enable"),
+          llvm::ConstantAsMetadata::get(
+              llvm::ConstantInt::get(llvm::Type::getInt1Ty(ctx), 1))};
+      llvm::MDNode *enableNode = llvm::MDNode::get(ctx, enableArgs);
+      llvm::Metadata *loopArgs[] = {nullptr, enableNode};
+      llvm::MDNode *loopId = llvm::MDNode::getDistinct(ctx, loopArgs);
+      loopId->replaceOperandWith(0, loopId);
+      backedgeBr->setMetadata(llvm::LLVMContext::MD_loop, loopId);
+    }
+
     // Any new code will be inserted in AfterBB.
     state.Builder->SetInsertPoint(AfterBB);
+    if (loopIndexPHI && nextLoopIdx) {
+      loopIndexPHI->addIncoming(nextLoopIdx, LoopEndBB);
+    }
+    for (const auto &[phiNode, nextVal] : nextSeqVals) {
+      phiNode->addIncoming(nextVal, LoopEndBB);
+    }
     for (const auto &oldVal : OldVals) {
-      // Add a new entry to the PHI node for the backedge.
-      PHIVariables[oldVal.first]->addIncoming(
-          state.NamedValues[oldVal.first].first, LoopEndBB);
+      auto phiIt = PHIVariables.find(oldVal.first);
+      if (phiIt != PHIVariables.end()) {
+        phiIt->second->addIncoming(
+            state.NamedValues[oldVal.first].first, LoopEndBB);
+        if (state.debugEmitter && subprogram) {
+          state.debugEmitter->popElementContext();
+        }
+      }
       // Restore the unshadowed variable.
       if (oldVal.second)
         state.NamedValues[oldVal.first] = {oldVal.second, std::nullopt};
       else
         state.NamedValues.erase(oldVal.first);
-
-      if (state.debugEmitter && subprogram) {
-        state.debugEmitter->popElementContext();
-      }
     }
   }
 
@@ -1250,25 +1865,7 @@ void processArgGroup(
         if (auto *varExpr = dynamic_cast<VariableExprAST *>(expr.get())) {
           auto indeces = varExpr->getIndices();
           if (!indeces.empty() && val->getType()->isPointerTy()) {
-            std::vector<llvm::Value *> idxList;
-            auto idx = indeces[0];
-            const size_t *intIdx = std::get_if<size_t>(&idx);
-            if (intIdx) {
-              idxList.push_back(llvm::ConstantInt::get(
-                  *state.TheContext, llvm::APInt(64, *intIdx)));
-            }
-            const std::string *strIdx = std::get_if<std::string>(&idx);
-            if (strIdx) {
-              auto it = state.NamedValues.find(*strIdx);
-              if (it != state.NamedValues.end()) {
-                llvm::Value *indexVal = it->second.first;
-                if (indexVal->getType()->isPointerTy()) {
-                  indexVal = state.Builder->CreateLoad(
-                      it->second.second.value(), indexVal, *strIdx);
-                }
-                idxList.push_back(indexVal);
-              }
-            }
+            auto idxList = state.resolveGepIndices(indeces);
             if (!idxList.empty()) {
               llvm::Type *gepElemType =
                   elemType.value_or(state.realType());
@@ -1310,27 +1907,7 @@ void processArgGroup(
         auto indeces = varExpr->getIndices();
         if (indeces.size() > 0) {
           // FIXME support ranges
-          std::vector<llvm::Value *> idxList;
-          auto idx = indeces[0];
-          const size_t *intIdx = std::get_if<size_t>(&idx);
-          if (intIdx) {
-            idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
-                                                     llvm::APInt(64, *intIdx)));
-          }
-          const std::string *strIdx = std::get_if<std::string>(&idx);
-          if (strIdx) {
-            auto it = state.NamedValues.find(*strIdx);
-            if (it != state.NamedValues.end()) {
-              llvm::Value *indexVal = it->second.first;
-              if (indexVal->getType()->isPointerTy()) {
-                indexVal = state.Builder->CreateLoad(it->second.second.value(),
-                                                     indexVal, *strIdx);
-              }
-              idxList.push_back(indexVal);
-            } else {
-              assert(0 == 1);
-            }
-          }
+          auto idxList = state.resolveGepIndices(indeces);
           if (!type.has_value()) {
             LOG_ERROR() << "No type for: " << std::string(value->getName())
                         << std::endl;
@@ -1355,7 +1932,9 @@ void processArgGroup(
         }
         newArgVal = value;
       } else {
-        newArgVal = calleeArg ? func(value, type, calleeArg, state) : value;
+        newArgVal = (calleeArg && !calleeArg->getType()->isPointerTy())
+                        ? func(value, type, calleeArg, state)
+                        : value;
       }
 
       if (calleeArg && calleeArg->getType()->isPointerTy()) {
@@ -1368,26 +1947,68 @@ void processArgGroup(
         if (!newArgVal->getType()->isPointerTy()) {
           llvm::Function *TheFunction =
               state.Builder->GetInsertBlock()->getParent();
-          llvm::Type *elemTy =
-              targetElemTy ? targetElemTy : newArgVal->getType();
-          if (newArgVal->getType() != elemTy) {
-            newArgVal = convertScalar(state, newArgVal, elemTy);
-          }
           auto *varExpr = dynamic_cast<VariableExprAST *>(ArgGroup[i].get());
           std::string varName = varExpr ? varExpr->getName() : "call_tmp";
-          llvm::AllocaInst *tempAlloc =
-              state.CreateEntryBlockAlloca(TheFunction, varName + "_tmp", elemTy);
 
-          if (isOutputGroup) {
-            newArgVal = tempAlloc;
-            if (tempOuts && varExpr) {
-              tempOuts->push_back({varExpr->getName(), tempAlloc, elemTy});
+          if (auto *arrTy = llvm::dyn_cast<llvm::ArrayType>(newArgVal->getType())) {
+            llvm::Type *dstElemTy =
+                (targetElemTy && !targetElemTy->isArrayTy())
+                    ? targetElemTy
+                    : arrTy->getElementType();
+            llvm::Type *allocTy =
+                (dstElemTy == arrTy->getElementType())
+                    ? static_cast<llvm::Type *>(arrTy)
+                    : llvm::ArrayType::get(dstElemTy, arrTy->getNumElements());
+            llvm::AllocaInst *tempAlloc = state.CreateEntryBlockAlloca(
+                TheFunction, varName + "_tmp", allocTy);
+            if (isOutputGroup) {
+              newArgVal = tempAlloc;
+              if (tempOuts && varExpr) {
+                tempOuts->push_back({varExpr->getName(), tempAlloc, allocTy});
+              }
+            } else if (dstElemTy == arrTy->getElementType()) {
+              state.Builder->CreateStore(newArgVal, tempAlloc);
+              newArgVal = tempAlloc;
+            } else {
+              for (uint64_t idx = 0; idx < arrTy->getNumElements(); ++idx) {
+                llvm::Value *elem = state.Builder->CreateExtractValue(
+                    newArgVal, static_cast<unsigned>(idx), "arr_elem");
+                elem = convertScalar(state, elem, dstElemTy);
+                llvm::Value *elemPtr = state.Builder->CreateInBoundsGEP(
+                    allocTy, tempAlloc,
+                    {state.Builder->getInt32(0),
+                     state.Builder->getInt32(static_cast<uint32_t>(idx))},
+                    "arr_elem_ptr");
+                state.Builder->CreateStore(elem, elemPtr);
+              }
+              newArgVal = tempAlloc;
             }
+            type = allocTy;
           } else {
-            state.Builder->CreateStore(newArgVal, tempAlloc);
-            newArgVal = tempAlloc;
+            llvm::Type *elemTy =
+                targetElemTy ? targetElemTy : newArgVal->getType();
+            if (newArgVal->getType() != elemTy) {
+              newArgVal = convertScalar(state, newArgVal, elemTy);
+            }
+            llvm::AllocaInst *tempAlloc = state.CreateEntryBlockAlloca(
+                TheFunction, varName + "_tmp", elemTy);
+
+            if (isOutputGroup) {
+              newArgVal = tempAlloc;
+              if (tempOuts && varExpr) {
+                tempOuts->push_back({varExpr->getName(), tempAlloc, elemTy});
+              }
+            } else {
+              state.Builder->CreateStore(newArgVal, tempAlloc);
+              newArgVal = tempAlloc;
+              if (tempOuts && varExpr && varExpr->getIndices().empty() &&
+                  state.NamedValues.find(varExpr->getName()) !=
+                      state.NamedValues.end()) {
+                tempOuts->push_back({varExpr->getName(), tempAlloc, elemTy});
+              }
+            }
+            type = elemTy;
           }
-          type = elemTy;
         }
       } else if (calleeArg && !calleeArg->getType()->isPointerTy() &&
                  newArgVal->getType()->isPointerTy()) {
@@ -1699,23 +2320,7 @@ CallExprAST::codegen(StrideCompiler &state) {
                     dynamic_cast<VariableExprAST *>(InArgs[argIdx].get())) {
               auto indeces = varExpr->getIndices();
               if (!indeces.empty()) {
-                std::vector<llvm::Value *> idxList;
-                auto idx = indeces[0];
-                if (const size_t *intIdx = std::get_if<size_t>(&idx)) {
-                  idxList.push_back(llvm::ConstantInt::get(
-                      *state.TheContext, llvm::APInt(64, *intIdx)));
-                } else if (const std::string *strIdx =
-                               std::get_if<std::string>(&idx)) {
-                  auto it = state.NamedValues.find(*strIdx);
-                  if (it != state.NamedValues.end()) {
-                    llvm::Value *indexVal = it->second.first;
-                    if (indexVal->getType()->isPointerTy()) {
-                      indexVal = state.Builder->CreateLoad(
-                          it->second.second.value(), indexVal, *strIdx);
-                    }
-                    idxList.push_back(indexVal);
-                  }
-                }
+                auto idxList = state.resolveGepIndices(indeces);
                 llvm::Type *gepElemType = valType;
                 if (gepElemType->isArrayTy()) {
                   gepElemType = static_cast<llvm::ArrayType *>(gepElemType)
@@ -1832,25 +2437,7 @@ CallExprAST::codegen(StrideCompiler &state) {
         outVarName = varExpr->getName();
         auto indeces = varExpr->getIndices();
         if (!indeces.empty() && outPtr && outPtr->getType()->isPointerTy()) {
-          std::vector<llvm::Value *> idxList;
-          auto idx = indeces[0];
-          const size_t *intIdx = std::get_if<size_t>(&idx);
-          if (intIdx) {
-            idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
-                                                     llvm::APInt(64, *intIdx)));
-          }
-          const std::string *strIdx = std::get_if<std::string>(&idx);
-          if (strIdx) {
-            auto it = state.NamedValues.find(*strIdx);
-            if (it != state.NamedValues.end()) {
-              llvm::Value *indexVal = it->second.first;
-              if (indexVal->getType()->isPointerTy()) {
-                indexVal = state.Builder->CreateLoad(it->second.second.value(),
-                                                     indexVal, *strIdx);
-              }
-              idxList.push_back(indexVal);
-            }
-          }
+          auto idxList = state.resolveGepIndices(indeces);
           if (!idxList.empty()) {
             llvm::Type *gepElemType =
                 outTy.value_or(state.typesMap[DataTypes::String]);
@@ -1951,7 +2538,7 @@ CallExprAST::codegen(StrideCompiler &state) {
   }
 
   if (callType == CallableType::Reaction || !ExternalArgs.empty()) {
-    processArgGroup(state, ExternalArgs, CalleeF, CallArgs);
+    processArgGroup(state, ExternalArgs, CalleeF, CallArgs, false, &tempOuts);
   }
 
   for (unsigned i = 0, e = PortPropArgs.size(); i != e; ++i) {
@@ -2183,25 +2770,7 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
     if (auto *varExpr = dynamic_cast<VariableExprAST *>(expr)) {
       auto indeces = varExpr->getIndices();
       if (!indeces.empty() && val->getType()->isPointerTy()) {
-        std::vector<llvm::Value *> idxList;
-        auto idx = indeces[0];
-        const size_t *intIdx = std::get_if<size_t>(&idx);
-        if (intIdx) {
-          idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
-                                                   llvm::APInt(64, *intIdx)));
-        }
-        const std::string *strIdx = std::get_if<std::string>(&idx);
-        if (strIdx) {
-          auto it = state.NamedValues.find(*strIdx);
-          if (it != state.NamedValues.end()) {
-            llvm::Value *indexVal = it->second.first;
-            if (indexVal->getType()->isPointerTy()) {
-              indexVal = state.Builder->CreateLoad(it->second.second.value(),
-                                                   indexVal, *strIdx);
-            }
-            idxList.push_back(indexVal);
-          }
-        }
+        auto idxList = state.resolveGepIndices(indeces);
         if (!idxList.empty()) {
           llvm::Type *gepElemType =
               elemType.value_or(state.realType());

@@ -617,6 +617,11 @@ strd::StateMachineExprAST::codegen(strd::StrideCompiler &state) {
                       indexVal = state.Builder->CreateLoad(
                           it->second.second.value(), indexVal, *strIdx);
                     }
+                    if (indexVal->getType()->isFloatingPointTy()) {
+                      indexVal = state.Builder->CreateFPToSI(
+                          indexVal, state.Builder->getInt64Ty(),
+                          *strIdx + "_idx");
+                    }
                     idxList.push_back(indexVal);
                   }
                 }

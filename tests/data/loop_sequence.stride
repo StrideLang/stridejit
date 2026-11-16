@@ -1,0 +1,83 @@
+_domainDefinition RootDomain {
+    framework: _JitFramework
+    rate: -1
+    substitutions: []
+    domainIncludes: []
+    inputs: [
+        signal StartSig { domain: RootDomain default: 2 type: Int }
+        signal CountSig { domain: RootDomain default: 4 type: Int }
+        signal StepSig { domain: RootDomain default: 3 type: Int }
+    ]
+    outputs: [
+        signal EvenSeq[6] { domain: RootDomain default: -1 type: Int }
+        signal PortEntitySeq[5] { domain: RootDomain default: -1 type: Int }
+        signal DynamicSum { domain: RootDomain default: 0 type: Int }
+    ]
+    domainFunctionCode: ''
+}
+
+# Sequence using OutputPort.size * 2 stepping by 2 alongside an output iterator
+loop FillEvenSequence {
+    ports: [
+        mainOutputPort OutputPort {
+            entity: Output
+        }
+    ]
+    entities: [
+        signal Output[OutputPort.size] { type: Int }
+        iterator OutItem { entity: Output }
+        sequence Seq {
+            from: 0
+            limit: OutputPort.size * 2
+            step: 2
+        }
+    ]
+    streams: [
+        Seq >> OutItem;
+    ]
+}
+
+# Sequence using port entity size (Output.size) directly in arithmetic expression
+loop FillPortEntitySizeSequence {
+    ports: [
+        mainOutputPort OutputPort {
+            entity: Output
+        }
+    ]
+    entities: [
+        signal Output[OutputPort.size] { type: Int }
+        iterator OutItem { entity: Output }
+        sequence Seq {
+            from: 10
+            limit: Output.size + 10
+            step: 1
+        }
+    ]
+    streams: [
+        Seq >> OutItem;
+    ]
+}
+
+# Sequence with dynamic signals captured on loop execution (snapshot semantics)
+loop SumDynamicSequence {
+    ports: [
+        mainOutputPort OutputPort {
+            entity: SumOut
+        }
+    ]
+    entities: [
+        signal SumOut { default: 0 type: Int }
+        sequence DynSeq {
+            from: StartSig
+            limit: StartSig + CountSig * StepSig
+            step: StepSig
+        }
+    ]
+    streams: [
+        SumOut + DynSeq >> SumOut;
+    ]
+}
+
+FillEvenSequence() >> EvenSeq;
+FillPortEntitySizeSequence() >> PortEntitySeq;
+SumDynamicSequence() >> DynamicSum;

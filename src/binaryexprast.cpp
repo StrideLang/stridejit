@@ -156,27 +156,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         auto indeces = varExpr->getIndices();
         if (indeces.size() > 0) {
           // FIXME support ranges
-          std::vector<llvm::Value *> idxList;
-          auto idx = indeces[0];
-          const size_t *intIdx = std::get_if<size_t>(&idx);
-          if (intIdx) {
-            idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
-                                                     llvm::APInt(64, *intIdx)));
-          }
-          const std::string *strIdx = std::get_if<std::string>(&idx);
-          if (strIdx) {
-            auto it = state.NamedValues.find(*strIdx);
-            if (it != state.NamedValues.end()) {
-              llvm::Value *indexVal = it->second.first;
-              if (indexVal->getType()->isPointerTy()) {
-                indexVal = state.Builder->CreateLoad(
-                    it->second.second.value(), indexVal, *strIdx);
-              }
-              idxList.push_back(indexVal);
-            } else {
-              assert(0 == 1);
-            }
-          }
+          auto idxList = state.resolveGepIndices(indeces);
           llvm::Type *gepElemType = Type;
           if (gepElemType->isArrayTy()) {
             gepElemType = static_cast<llvm::ArrayType *>(gepElemType)->getElementType();
@@ -229,28 +209,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         auto indeces = varExpr->getIndices();
         if (indeces.size() > 0) {
           // FIXME support ranges
-          std::vector<llvm::Value *> idxList;
-          auto idx = indeces[0];
-
-          const size_t *intIdx = std::get_if<size_t>(&idx);
-          if (intIdx) {
-            idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
-                                                     llvm::APInt(64, *intIdx)));
-          }
-          const std::string *strIdx = std::get_if<std::string>(&idx);
-          if (strIdx) {
-            auto it = state.NamedValues.find(*strIdx);
-            if (it != state.NamedValues.end()) {
-              llvm::Value *indexVal = it->second.first;
-              if (indexVal->getType()->isPointerTy()) {
-                indexVal = state.Builder->CreateLoad(
-                    it->second.second.value(), indexVal, *strIdx);
-              }
-              idxList.push_back(indexVal);
-            } else {
-              assert(0 == 1);
-            }
-          }
+          auto idxList = state.resolveGepIndices(indeces);
           if (Type->isArrayTy()) {
             Type = static_cast<llvm::ArrayType *>(Type)->getElementType();
           }
@@ -363,27 +322,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         auto indeces = varExpr->getIndices();
         if (indeces.size() > 0) {
           // FIXME support ranges
-          std::vector<llvm::Value *> idxList;
-          auto idx = indeces[0];
-          const size_t *intIdx = std::get_if<size_t>(&idx);
-          if (intIdx) {
-            idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
-                                                     llvm::APInt(64, *intIdx)));
-          }
-          const std::string *strIdx = std::get_if<std::string>(&idx);
-          if (strIdx) {
-            auto it = state.NamedValues.find(*strIdx);
-            if (it != state.NamedValues.end()) {
-              llvm::Value *indexVal = it->second.first;
-              if (indexVal->getType()->isPointerTy()) {
-                indexVal = state.Builder->CreateLoad(
-                    it->second.second.value(), indexVal, *strIdx);
-              }
-              idxList.push_back(indexVal);
-            } else {
-              assert(0 == 1); // we shouldn't get here
-            }
-          }
+          auto idxList = state.resolveGepIndices(indeces);
           llvm::Type *gepElemType = LType.value();
           if (gepElemType->isArrayTy()) {
             gepElemType = static_cast<llvm::ArrayType *>(gepElemType)->getElementType();
@@ -408,27 +347,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         auto indeces = varExpr->getIndices();
         if (indeces.size() > 0) {
           // FIXME support ranges
-          std::vector<llvm::Value *> idxList;
-          auto idx = indeces[0];
-          const size_t *intIdx = std::get_if<size_t>(&idx);
-          if (intIdx) {
-            idxList.push_back(llvm::ConstantInt::get(*state.TheContext,
-                                                     llvm::APInt(64, *intIdx)));
-          }
-          const std::string *strIdx = std::get_if<std::string>(&idx);
-          if (strIdx) {
-            auto it = state.NamedValues.find(*strIdx);
-            if (it != state.NamedValues.end()) {
-              llvm::Value *indexVal = it->second.first;
-              if (indexVal->getType()->isPointerTy()) {
-                indexVal = state.Builder->CreateLoad(
-                    it->second.second.value(), indexVal, *strIdx);
-              }
-              idxList.push_back(indexVal);
-            } else {
-              assert(0 == 1);
-            }
-          }
+          auto idxList = state.resolveGepIndices(indeces);
           llvm::Type *gepElemType = RType.value();
           if (gepElemType->isArrayTy()) {
             gepElemType = static_cast<llvm::ArrayType *>(gepElemType)->getElementType();

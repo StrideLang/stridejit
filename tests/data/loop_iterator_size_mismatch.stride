@@ -1,0 +1,35 @@
+_domainDefinition RootDomain {
+    framework: _JitFramework
+    rate: -1
+    substitutions: []
+    domainIncludes: []
+    inputs: [
+        signal InA[6] { domain: RootDomain default: 0 type: Int }
+    ]
+    outputs: [
+        signal OutB[4] { domain: RootDomain default: 0 type: Int }
+    ]
+    domainFunctionCode: ''
+}
+
+loop MismatchedIterators {
+    ports: [
+        mainInputPort InputPort {
+            entity: Input
+        }
+        mainOutputPort OutputPort {
+            entity: Output
+        }
+    ]
+    entities: [
+        signal Input[InputPort.size] { type: Int }
+        signal Output[OutputPort.size] { type: Int }
+        iterator InItem { entity: Input }
+        iterator OutItem { entity: Output }
+    ]
+    streams: [
+        InItem >> OutItem;
+    ]
+}
+
+InA >> MismatchedIterators() >> OutB;
