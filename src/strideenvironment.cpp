@@ -88,6 +88,52 @@ StrideEnvironment::StrideEnvironment(std::string strideRoot)
 }
 
 void StrideEnvironment::initializeJIT() {
+  if (!m_targetTriple.empty()) {
+    llvm::InitializeAllTargetInfos();
+    llvm::InitializeAllTargets();
+    llvm::InitializeAllTargetMCs();
+    llvm::InitializeAllAsmParsers();
+    llvm::InitializeAllAsmPrinters();
+
+    llvm::Triple theTriple(m_targetTriple);
+    std::string error;
+#if LLVM_VERSION_MAJOR >= 20
+    const llvm::Target *target =
+        llvm::TargetRegistry::lookupTarget(theTriple, error);
+#else
+    const llvm::Target *target =
+        llvm::TargetRegistry::lookupTarget(theTriple.str(), error);
+#endif
+    if (target) {
+      std::string targetCPU = m_targetCPU.empty() ? "generic" : m_targetCPU;
+      if (targetCPU == "x86_64") {
+        targetCPU = "x86-64";
+      }
+      llvm::TargetOptions opt;
+  opt.FunctionSections = true;
+  opt.DataSections = true;
+#if LLVM_VERSION_MAJOR >= 20
+      auto TM = target->createTargetMachine(theTriple, targetCPU,
+                                            m_targetFeatures, opt, std::nullopt);
+#else
+      auto TM = target->createTargetMachine(theTriple.str(), targetCPU,
+                                            m_targetFeatures, opt, std::nullopt);
+#endif
+      if (TM) {
+        m_dataLayout = TM->createDataLayout();
+        if (mStrideEnv.TheModule) {
+          mStrideEnv.TheModule->setDataLayout(*m_dataLayout);
+#if LLVM_VERSION_MAJOR >= 20
+          mStrideEnv.TheModule->setTargetTriple(TM->getTargetTriple());
+#else
+          mStrideEnv.TheModule->setTargetTriple(TM->getTargetTriple().str());
+#endif
+        }
+        return;
+      }
+    }
+  }
+
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
   if (auto JTMB = llvm::orc::JITTargetMachineBuilder::detectHost()) {
@@ -340,6 +386,10 @@ bool StrideEnvironment::prepareTree(ASTNode tree) {
     auto systemNode =
         std::make_shared<SystemNode>("JIT", 1, 0, __FILE__, __LINE__);
     tree->addChild(systemNode);
+    systemNodes.push_back(systemNode);
+  }
+  if (!m_boardOverride.empty() && !systemNodes.empty()) {
+    systemNodes.front()->setHwPlatforms({m_boardOverride});
   }
 
   CodeResolver resolver(tree,
@@ -519,8 +569,8 @@ bool StrideEnvironment::generateIr(std::string path, bool emitAllFunctions) {
     }
   }
 
-  ASTNode tree =
-      CacheManager::instance().loadCachedAST(filePath, {}, "prepared_JIT");
+  ASTNode tree = CacheManager::instance().loadCachedAST(
+      filePath, {}, getPreparedAstCacheTag());
   if (!tree) {
     tree = AST::parseFile(path.c_str());
     if (!tree) {
@@ -557,9 +607,11 @@ bool StrideEnvironment::generateIr(const std::vector<std::string> &paths,
     }
   }
 
+  initializeJIT();
+
   for (const auto &p : paths) {
-    ASTNode tree =
-        CacheManager::instance().loadCachedAST(p, {}, "prepared_JIT");
+    ASTNode tree = CacheManager::instance().loadCachedAST(
+        p, {}, getPreparedAstCacheTag());
     if (!tree) {
       tree = AST::parseFile(p.c_str());
       if (!tree) {
@@ -591,7 +643,8 @@ bool StrideEnvironment::generateIr(const std::vector<std::string> &paths,
       return false;
     }
     if (!wasPreprocessed && ASTQuery::getImportNodes(tree).empty()) {
-      CacheManager::instance().saveCachedAST(p, tree, {}, "prepared_JIT");
+      CacheManager::instance().saveCachedAST(p, tree, {},
+                                             getPreparedAstCacheTag());
     }
 
     StrideGenerator::compile(tree, globalScope, mStrideEnv);
@@ -643,7 +696,7 @@ bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
   if (!wasPreprocessed && !root->getFilename().empty() &&
       ASTQuery::getImportNodes(root).empty()) {
     CacheManager::instance().saveCachedAST(root->getFilename(), root, {},
-                                           "prepared_JIT");
+                                           getPreparedAstCacheTag());
   }
   m_trees.push_back(root);
 
@@ -2402,9 +2455,29 @@ int32_t StrideEnvironment::stepTick(const std::string &domainOrFuncName,
   return invoke(targetFunc, callArgs.data());
 }
 
+std::string StrideEnvironment::getPreparedAstCacheTag() const {
+  std::string tag = "prepared_JIT";
+  if (!m_boardOverride.empty()) {
+    tag += "_board_" + m_boardOverride;
+  }
+  if (!m_targetTriple.empty()) {
+    tag += "_target_" + m_targetTriple;
+    if (!m_targetCPU.empty()) {
+      tag += "_" + m_targetCPU;
+    }
+  }
+  return tag;
+}
+
 std::string StrideEnvironment::getJitObjectTag() const {
-  return "jit_obj_" + llvm::sys::getDefaultTargetTriple() + "_" +
-         (m_optimizeCode ? "O2" : "O0");
+  std::string triple = m_targetTriple.empty()
+                           ? llvm::sys::getDefaultTargetTriple()
+                           : m_targetTriple;
+  std::string tag = "jit_obj_" + triple + "_" + (m_optimizeCode ? "O2" : "O0");
+  if (!m_boardOverride.empty()) {
+    tag += "_board_" + m_boardOverride;
+  }
+  return tag;
 }
 
 bool StrideEnvironment::compileInMemory() {
@@ -2768,6 +2841,8 @@ bool StrideEnvironment::generateCompiledObject(std::string path,
     return false;
   }
   llvm::TargetOptions opt;
+  opt.FunctionSections = true;
+  opt.DataSections = true;
 #if LLVM_VERSION_MAJOR >= 16
   auto RM = std::optional<llvm::Reloc::Model>();
   auto CM = std::nullopt;
@@ -3014,6 +3089,36 @@ template bool StrideEnvironment::setStateVar<StrideStringView>(
     void *, const std::string &, StrideStringView, std::optional<int>,
     const std::string &);
 
+void StrideEnvironment::emitDomainStateBuffers() {
+  if (!mStrideEnv.TheModule || !mStrideEnv.TheContext) {
+    return;
+  }
+  auto &ctx = *mStrideEnv.TheContext;
+  auto *i8 = llvm::Type::getInt8Ty(ctx);
+  for (const auto &[instance, info] : mStrideEnv.stateStructMap) {
+    if (!instance || info.allocSize == 0) {
+      continue;
+    }
+    if (instance->getNodeType() != AST::Declaration) {
+      continue;
+    }
+    auto decl = std::static_pointer_cast<DeclarationNode>(instance);
+    const std::string &entType = decl->getEntityType();
+    if (entType != "domain" && entType != "_domainDefinition") {
+      continue;
+    }
+    std::string symName = "__stride_" + decl->getName() + "_state";
+    if (mStrideEnv.TheModule->getGlobalVariable(symName)) {
+      continue;
+    }
+    auto *arrTy = llvm::ArrayType::get(i8, info.allocSize);
+    auto *gv = new llvm::GlobalVariable(
+        *mStrideEnv.TheModule, arrTy, false, llvm::GlobalValue::ExternalLinkage,
+        llvm::ConstantAggregateZero::get(arrTy), symName);
+    gv->setAlignment(llvm::MaybeAlign(1));
+  }
+}
+
 bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
                                        const std::string &targetTriple,
                                        const std::string &cpu,
@@ -3055,6 +3160,8 @@ bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
   std::string targetFeatures = features;
 
   llvm::TargetOptions opt;
+  opt.FunctionSections = true;
+  opt.DataSections = true;
 #if LLVM_VERSION_MAJOR >= 16
   std::optional<llvm::Reloc::Model> rm;
 #else
@@ -3299,6 +3406,7 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
 
   for (const auto &dom : domains) {
     std::string initFunc = dom + "_init";
+    std::string resetFunc = dom + "_reset";
     std::string processFunc = dom + "_process";
 
     std::shared_ptr<DeclarationNode> domDecl;
@@ -3384,6 +3492,54 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
       }
     }
 
+    // 1b. Emit reset function prototype
+    auto resetIt = mStrideEnv.FunctionProtos.find(resetFunc);
+    auto *resetLlvm = mStrideEnv.TheModule
+                          ? mStrideEnv.TheModule->getFunction(resetFunc)
+                          : nullptr;
+    if (resetIt != mStrideEnv.FunctionProtos.end()) {
+      ss << "/**\n";
+      ss << " * @brief Resets the " << dom
+         << " domain state and runs onReset streams.\n";
+      ss << " */\n";
+      const auto &proto = resetIt->second;
+      auto extArgs = proto->getExternalArgs();
+      auto inArgs = proto->getInArgs();
+      auto outArgs = proto->getOutArgs();
+      if (extArgs.empty() && inArgs.empty() && outArgs.empty()) {
+        ss << "void " << resetFunc << "(void);\n\n";
+      } else {
+        ss << "void " << resetFunc << "(";
+        bool first = true;
+        for (const auto &arg : extArgs) {
+          if (!first)
+            ss << ", ";
+          first = false;
+          std::string typeName = llvmTypeToCType(arg.llvmType);
+          ss << typeName << "* " << arg.name;
+        }
+        ss << ");\n\n";
+      }
+    } else if (resetLlvm) {
+      ss << "/**\n";
+      ss << " * @brief Resets the " << dom
+         << " domain state and runs onReset streams.\n";
+      ss << " */\n";
+      if (resetLlvm->arg_empty()) {
+        ss << "void " << resetFunc << "(void);\n\n";
+      } else {
+        ss << "void " << resetFunc << "(";
+        bool first = true;
+        for (const auto &arg : resetLlvm->args()) {
+          if (!first)
+            ss << ", ";
+          first = false;
+          ss << "void* " << arg.getName().str();
+        }
+        ss << ");\n\n";
+      }
+    }
+
     // 2. Emit process function prototype
     auto procIt = mStrideEnv.FunctionProtos.find(processFunc);
     auto *procLlvm = mStrideEnv.TheModule
@@ -3459,6 +3615,7 @@ StrideEnvironment::generateCHeaderString(const std::string &domainName) const {
     const std::string &fname = protoPair.first;
     // Internal functions (__<Domain>_onLoad) are not part of the interface
     if (fname.find("_init") != std::string::npos ||
+        fname.find("_reset") != std::string::npos ||
         fname.find("_process") != std::string::npos ||
         fname.find("_invoker") != std::string::npos ||
         fname.rfind("__", 0) == 0) {

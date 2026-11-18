@@ -227,12 +227,26 @@ public:
   }
   int getOptimizationLevel() const { return m_optimizationLevel; }
   void setPrimarySourcePath(const std::string &path) { m_primarySourcePath = path; }
+  // Target triple/CPU/features used during IR generation (DataLayout) and AOT emission.
+  void setTarget(const std::string &targetTriple, const std::string &cpu = "",
+                 const std::string &features = "") {
+    m_targetTriple = targetTriple;
+    m_targetCPU = cpu;
+    m_targetFeatures = features;
+  }
+  void setBoardOverride(const std::string &boardName) {
+    m_boardOverride = boardName;
+  }
+  // Emits global `__stride_<Domain>_state` zero-initialized byte arrays for each
+  // stateful domain in the module so C runtimes (e.g. AVR) can pass them directly.
+  void emitDomainStateBuffers();
   // Whether constants filled by streams are filled while compiling (the
   // default) or by their streams at load time
   void setConstantEvaluation(bool enabled) { m_evaluateConstants = enabled; }
   bool isConstantEvaluationEnabled() const { return m_evaluateConstants; }
   const std::string &getPrimarySourcePath() const { return m_primarySourcePath; }
   std::string getJitObjectTag() const;
+  std::string getPreparedAstCacheTag() const;
 
   // IR generator
   bool generateIr(std::string path, bool emitAllFunctions = false);
@@ -428,6 +442,10 @@ private:
   // Configuration
   std::string m_strideRoot;
   std::string m_primarySourcePath;
+  std::string m_targetTriple;
+  std::string m_targetCPU;
+  std::string m_targetFeatures;
+  std::string m_boardOverride;
   std::vector<std::string> m_includePaths;
   std::vector<ASTNode> m_trees;
   bool m_optimizeCode{true};

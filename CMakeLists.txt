@@ -195,6 +195,8 @@ if (STRIDEJIT_BUILD_LLVM)
     LLVMARMCodeGen
     LLVMWebAssemblyAsmParser
     LLVMWebAssemblyCodeGen
+    LLVMAVRAsmParser
+    LLVMAVRCodeGen
   )
 else()
   target_link_libraries(StrideJit PUBLIC ${llvm_libs})

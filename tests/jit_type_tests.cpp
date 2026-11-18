@@ -1,5 +1,7 @@
 #include "gtest/gtest.h"
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 
 #include "stride/stridejit/stridecompiler.hpp"
 #include "stride/stridejit/strideenvironment.hpp"
