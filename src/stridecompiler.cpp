@@ -407,7 +407,19 @@ void StrideCompiler::createGlobal(std::shared_ptr<DeclarationNode> globalDecl) {
                                : 0;
     } else {
       // The tree, for sizes that name other declarations (2 * Board.size)
-      size = ASTQuery::getEntityDeclaredSize(globalDecl, {}, m_tree);
+      ScopeStack evalScope;
+      if (!connectionScopes.empty() && connectionScopes.back().scope) {
+        evalScope = *connectionScopes.back().scope;
+      }
+      if (auto parent = globalDecl->getCompilerProperty("parent")) {
+        if (parent->getNodeType() == AST::Declaration) {
+          auto pDecl = std::static_pointer_cast<DeclarationNode>(parent);
+          if (auto ents = pDecl->getPropertyValue("entities")) {
+            evalScope.push_back({pDecl, ents->getChildren()});
+          }
+        }
+      }
+      size = ASTQuery::getEntityDeclaredSize(globalDecl, evalScope, m_tree);
     }
     if (size > 0) {
       if (!Type->isArrayTy()) {
@@ -1432,6 +1444,27 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
       }
       if (!varType || varType->isVoidTy()) {
         varType = realType();
+      }
+      if (var.first && var.first->getNodeType() == AST::ArrayDeclaration &&
+          !varType->isArrayTy()) {
+        auto varDecl = std::static_pointer_cast<DeclarationNode>(var.first);
+        ScopeStack arrScope = moduleScope;
+        if (arrScope.empty()) {
+          if (auto parent = varDecl->getCompilerProperty("parent")) {
+            if (parent->getNodeType() == AST::Declaration) {
+              auto pDecl = std::static_pointer_cast<DeclarationNode>(parent);
+              if (auto ents = pDecl->getPropertyValue("entities")) {
+                arrScope.push_back({pDecl, ents->getChildren()});
+              }
+            }
+          }
+        }
+        int arrSize =
+            ASTQuery::getEntityDeclaredSize(varDecl, arrScope, m_tree);
+        if (arrSize > 0) {
+          varType =
+              llvm::ArrayType::get(varType, static_cast<uint64_t>(arrSize));
+        }
       }
       info.varIndices[varName] = static_cast<unsigned>(fieldTypes.size());
       fieldTypes.push_back(varType);
