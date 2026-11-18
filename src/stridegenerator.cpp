@@ -17,6 +17,7 @@
 #include "stride/utils/astquery.h"
 
 // llvm
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Module.h"
 // #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 
@@ -1368,7 +1369,11 @@ void StrideGenerator::generateLoadFunction(const std::string &domainName,
     llvm::IRBuilder<> builder(entry);
     builder.CreateRetVoid();
   } else {
+#if LLVM_VERSION_MAJOR >= 20
     const std::string tripleStr = state.TheModule->getTargetTriple().str();
+#else
+    const std::string tripleStr = state.TheModule->getTargetTriple();
+#endif
     const bool singleCoreTarget = (tripleStr.rfind("avr", 0) == 0);
     if (singleCoreTarget) {
       auto *i8 = llvm::Type::getInt8Ty(context);

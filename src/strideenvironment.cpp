@@ -1042,7 +1042,8 @@ void removeEverywhere(const ASTNode &tree, const ASTNode &node) {
 // One element of a filled constant, read from the evaluation's memory
 ASTNode constantElement(const FilledGlobal &global, const char *bytes,
                         const std::shared_ptr<DeclarationNode> &decl) {
-  const char *file = decl->getFilename().c_str();
+  const std::string fileStr = decl->getFilename();
+  const char *file = fileStr.c_str();
   const int line = decl->getLine();
   switch (global.kind) {
   case FilledGlobal::Kind::Switch:

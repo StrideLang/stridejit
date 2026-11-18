@@ -430,10 +430,11 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
               state.currentFunctionStateInfo->varResetSignals.end()) {
             resetSignalName = resetSigIt->second;
           } else {
+            const std::string &targetVarName = varName;
             auto varDeclIt = std::find_if(
                 internalVariables.begin(), internalVariables.end(),
-                [&varName](const std::shared_ptr<DeclarationNode> &d) {
-                  return d && d->getName() == varName;
+                [&targetVarName](const std::shared_ptr<DeclarationNode> &d) {
+                  return d && d->getName() == targetVarName;
                 });
             if (varDeclIt != internalVariables.end()) {
               auto resetProp = (*varDeclIt)->getPropertyValue("reset");
