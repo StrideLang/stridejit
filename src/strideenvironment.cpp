@@ -25,6 +25,7 @@
 #include "stride/stridejit/strideenvironment.hpp"
 #include "stride/stridejit/stridegenerator.hpp"
 #include "stride/stridejit/strideruntime_random.h"
+#include "stride/stridejit/strideruntime_sleep.h"
 #include "stride/stridejit/strideruntime_string.h"
 
 // llvm
@@ -2526,6 +2527,8 @@ bool StrideEnvironment::compileInMemory() {
   regSym("tan", static_cast<double (*)(double)>(&std::tan));
   regSym("__stride_Greater_d_dd", &__stride_Greater_d_dd);
   regSym("__stride_jit_random_int", &__stride_jit_random_int);
+  regSym("__stride_jit_sleep", &__stride_jit_sleep);
+  regSym("__stride_jit_sleep_tick_ready", &__stride_jit_sleep_tick_ready);
   regSym("__stride_jit_string_store", &__stride_jit_string_store);
   regSym("__stride_jit_string_substring", &__stride_jit_string_substring);
   regSym("__stride_jit_string_trim", &__stride_jit_string_trim);

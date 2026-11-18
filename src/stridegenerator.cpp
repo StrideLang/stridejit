@@ -404,13 +404,45 @@ buildSubdomainScheduleInfo(const std::shared_ptr<DeclarationNode> &childDecl,
 
 std::unique_ptr<ExprAST>
 buildSubdomainCallExpr(const ParentTickedSubdomain &sub,
-                       const ScopeStack &scope, ASTNode tree) {
+                       const ScopeStack &scope, ASTNode tree,
+                       StrideCompiler &state) {
   if (sub.childName.empty()) {
     return nullptr;
   }
   std::vector<std::unique_ptr<ExprAST>> subCallBody;
+
   subCallBody.push_back(
       std::make_unique<DirectFuncCallExprAST>(sub.childName + "_process"));
+
+  std::string sleepCounterName = "__stride_sleep_ticks_" + sub.childName;
+  if (state.globalExists(sleepCounterName)) {
+    if (!state.getFunctionInModule("__stride_jit_sleep_tick_ready")) {
+      llvm::Type *i1Ty = llvm::Type::getInt1Ty(*state.TheContext);
+      llvm::Type *ptrTy = llvm::PointerType::get(*state.TheContext, 0);
+      llvm::Function::Create(
+          llvm::FunctionType::get(i1Ty, {ptrTy}, false),
+          llvm::GlobalValue::ExternalLinkage, "__stride_jit_sleep_tick_ready",
+          state.TheModule.get());
+    }
+    std::vector<std::unique_ptr<ExprAST>> inArgs;
+    inArgs.push_back(std::make_unique<VariableExprAST>(sleepCounterName));
+    auto readyCall = std::make_unique<CallExprAST>(
+        "__stride_jit_sleep_tick_ready",
+        std::vector<std::unique_ptr<ExprAST>>{}, std::move(inArgs),
+        std::vector<std::unique_ptr<ExprAST>>{},
+        std::vector<std::unique_ptr<ExprAST>>{},
+        std::vector<std::unique_ptr<ExprAST>>{},
+        std::vector<std::unique_ptr<ExprAST>>{},
+        std::vector<llvm::Type *>{},
+        std::vector<llvm::Type *>{llvm::PointerType::get(*state.TheContext, 0)},
+        std::vector<llvm::Type *>{}, "");
+    readyCall->callType = CallableType::External;
+    std::vector<std::unique_ptr<ExprAST>> gatedBody;
+    gatedBody.push_back(std::make_unique<ResetExprAST>(
+        "__sleep_gate_" + sub.childName, std::move(readyCall),
+        std::move(subCallBody)));
+    subCallBody = std::move(gatedBody);
+  }
 
   if (sub.isRateDriven) {
     auto spec = RateScheduleSpec::build(sub.parentRate, sub.childRate,
@@ -627,7 +659,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
           }
           scheduledSubdomains.insert(subName);
           if (auto subInfo = findOrBuildSubdomainInfo(subName)) {
-            if (auto callExpr = buildSubdomainCallExpr(*subInfo, scope, tree)) {
+            if (auto callExpr = buildSubdomainCallExpr(*subInfo, scope, tree, state)) {
               preExprs.push_back(std::move(callExpr));
             }
           }
@@ -783,7 +815,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
           }
           scheduledSubdomains.insert(subName);
           if (auto subInfo = findOrBuildSubdomainInfo(subName)) {
-            if (auto callExpr = buildSubdomainCallExpr(*subInfo, scope, tree)) {
+            if (auto callExpr = buildSubdomainCallExpr(*subInfo, scope, tree, state)) {
               it->second.push_back(std::move(callExpr));
             }
           }
@@ -803,7 +835,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
           continue;
         }
         if (sub.isTriggered || sub.isRateDriven) {
-          if (auto callExpr = buildSubdomainCallExpr(sub, scope, tree)) {
+          if (auto callExpr = buildSubdomainCallExpr(sub, scope, tree, state)) {
             it->second.push_back(std::move(callExpr));
           }
         }
@@ -2952,12 +2984,32 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
     }
   };
 
+  auto getSleepTargetDomain = [&](ASTNode n) -> std::string {
+    if (n && n->getNodeType() == AST::Function) {
+      auto fn = std::static_pointer_cast<FunctionNode>(n);
+      if (fn->getName() == "Sleep") {
+        if (auto domProp = fn->getPropertyValue("domain")) {
+          auto domDecl = ASTQuery::findDeclarationForNode(domProp, scope, tree);
+          if (domDecl && domDecl->getEntityType() == "_domainDefinition") {
+            return domDecl->getName();
+          }
+        }
+      }
+    }
+    return {};
+  };
+
   std::string streamDomain;
+  std::string prevDomainName;
   while (next) {
     prev = current;
     current = next;
     next = streamIt.next();
     auto domainName = CodeAnalysis::getNodeDomainName(current, scope, tree);
+    if (domainName.empty() && prev != nullptr && !prevDomainName.empty() &&
+        !getSleepTargetDomain(current).empty()) {
+      domainName = prevDomainName;
+    }
     if (domainName.empty()) {
       // Look downstream along the stream to find the target domain
       StreamNodeIterator lookaheadIt(stream);
@@ -2968,6 +3020,9 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       }
       while (auto downstream = lookaheadIt.next()) {
         auto d = CodeAnalysis::getNodeDomainName(downstream, scope, tree);
+        if (d.empty()) {
+          d = getSleepTargetDomain(downstream);
+        }
         if (d.empty()) {
           auto conn =
               CodeAnalysis::resolveConnectionEntity(downstream, scope, tree, true);
@@ -2992,6 +3047,9 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         }
       }
       if (domainName.empty()) {
+        domainName = getSleepTargetDomain(current);
+      }
+      if (domainName.empty()) {
         domainName = "RootDomain";
       }
     }
@@ -3006,6 +3064,9 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         }
         while (auto downstream = lookahead.next()) {
           auto d = CodeAnalysis::getNodeDomainName(downstream, scope, tree);
+        if (d.empty()) {
+          d = getSleepTargetDomain(downstream);
+        }
           if (!d.empty()) {
             nextDomain = d;
             break;
@@ -3013,7 +3074,8 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         }
       }
       if (!nextDomain.empty() && !domainName.empty() && domainName != nextDomain) {
-        if (!CodeAnalysis::getCommonAncestorDomain(domainName, nextDomain, tree).empty()) {
+        if (!getSleepTargetDomain(next).empty() ||
+            !CodeAnalysis::getCommonAncestorDomain(domainName, nextDomain, tree).empty()) {
           domainName = nextDomain;
         }
       }
@@ -3233,9 +3295,139 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
             "calledInStream",
             std::make_shared<ValueNode>(true, __FILE__, __LINE__));
         auto subInfo = buildSubdomainScheduleInfo(funcDecl, domainName, tree);
-        if (auto callExpr = buildSubdomainCallExpr(subInfo, scope, tree)) {
+        if (auto callExpr = buildSubdomainCallExpr(subInfo, scope, tree, state)) {
           callExpr->setLocationFrom(func);
           generated[domainName].expr.push_back(std::move(callExpr));
+        }
+        continue;
+      }
+
+      if (funcDecl->getName() == "Sleep" &&
+          funcDecl->getEntityType() == "module") {
+        std::unique_ptr<ExprAST> durExpr;
+        if (prev && !generated[domainName].expr.empty()) {
+          durExpr = std::move(generated[domainName].expr.back());
+          generated[domainName].expr.pop_back();
+        } else if (auto durProp = func->getPropertyValue("duration")) {
+          durExpr = createExpr(durProp);
+        } else {
+          durExpr = std::make_unique<RealExprAST>(0.0);
+        }
+
+        auto domainProp = func->getPropertyValue("domain");
+        auto targetDomainDecl =
+            domainProp ? ASTQuery::findDeclarationForNode(domainProp, scope, tree)
+                       : nullptr;
+        if (!targetDomainDecl ||
+            targetDomainDecl->getEntityType() != "_domainDefinition") {
+          LOG_ERROR() << "Sleep requires a valid domain: property" << std::endl;
+          continue;
+        }
+
+        std::string targetName = targetDomainDecl->getName();
+        double targetRate =
+            CodeAnalysis::resolveRate(targetDomainDecl, scope, tree, false);
+        auto fwProp = targetDomainDecl->getPropertyValue("framework");
+        bool isAvr = fwProp && ASTQuery::getNodeName(fwProp) == "_AvrFramework";
+
+        auto isSubdomain = [&](const std::shared_ptr<DeclarationNode> &dom) {
+          if (auto pd = dom->getPropertyValue("parentDomain")) {
+            if (pd->getNodeType() != AST::None &&
+                ASTQuery::getNodeName(pd) != "none") {
+              return true;
+            }
+          }
+          if (tree) {
+            for (const auto &n : tree->getChildren()) {
+              if (n->getNodeType() != AST::Declaration) {
+                continue;
+              }
+              auto d = std::static_pointer_cast<DeclarationNode>(n);
+              if (d->getEntityType() != "_domainDefinition") {
+                continue;
+              }
+              for (const char *listProp : {"preSubdomains", "postSubdomains"}) {
+                auto list = d->getPropertyValue(listProp);
+                if (list && list->getNodeType() == AST::List) {
+                  for (const auto &item : list->getChildren()) {
+                    if (ASTQuery::getNodeName(item) == targetName) {
+                      return true;
+                    }
+                  }
+                }
+              }
+            }
+          }
+          return false;
+        };
+
+        auto makeTickExpr = [&](double rate, const std::string &intType) {
+          auto scaled = std::make_unique<BinaryExprAST>(
+              '*', std::move(durExpr), std::make_unique<RealExprAST>(rate));
+          auto rounded = std::make_unique<BinaryExprAST>(
+              '+', std::move(scaled), std::make_unique<RealExprAST>(0.5));
+          rounded->typecast = intType;
+          return rounded;
+        };
+
+        auto makeExtCall = [&](const std::string &fnName,
+                               std::unique_ptr<ExprAST> arg,
+                               llvm::Type *argTy) {
+          if (!state.getFunctionInModule(fnName)) {
+            llvm::Type *voidTy = llvm::Type::getVoidTy(*state.TheContext);
+            llvm::Function::Create(
+                llvm::FunctionType::get(voidTy, {argTy}, false),
+                llvm::GlobalValue::ExternalLinkage, fnName,
+                state.TheModule.get());
+          }
+          std::vector<std::unique_ptr<ExprAST>> inArgs;
+          inArgs.push_back(std::move(arg));
+          auto call = std::make_unique<CallExprAST>(
+              fnName, std::vector<std::unique_ptr<ExprAST>>{},
+              std::move(inArgs), std::vector<std::unique_ptr<ExprAST>>{},
+              std::vector<std::unique_ptr<ExprAST>>{},
+              std::vector<std::unique_ptr<ExprAST>>{},
+              std::vector<std::unique_ptr<ExprAST>>{},
+              std::vector<llvm::Type *>{}, std::vector<llvm::Type *>{argTy},
+              std::vector<llvm::Type *>{}, "");
+          call->callType = CallableType::External;
+          call->setLocationFrom(func);
+          return call;
+        };
+
+        const std::string &sleepDomain =
+            domainName.empty() ? targetName : domainName;
+        if (targetName == "AvrTickDomain" && targetRate > 0.0) {
+          generated[sleepDomain].expr.push_back(makeExtCall(
+              "__stride_avr_tick_sleep", makeTickExpr(targetRate, "UInt32"),
+              state.typesMap["UInt32"]));
+        } else if (isAvr) {
+          generated[sleepDomain].expr.push_back(
+              makeExtCall("__stride_avr_sleep_ms", makeTickExpr(1000.0, "UInt32"),
+                          state.typesMap["UInt32"]));
+        } else if (targetRate > 0.0 && isSubdomain(targetDomainDecl)) {
+          std::string counterName = "__stride_sleep_ticks_" + targetName;
+          if (!state.globalExists(counterName)) {
+            auto counterDecl = std::make_shared<DeclarationNode>(
+                counterName, "signal", nullptr, __FILE__, __LINE__);
+            counterDecl->addProperty(std::make_shared<PropertyNode>(
+                "type",
+                std::make_shared<EntityNode>("Int64", __FILE__, __LINE__),
+                __FILE__, __LINE__));
+            counterDecl->addProperty(std::make_shared<PropertyNode>(
+                "default",
+                std::make_shared<ValueNode>(int64_t(0), __FILE__, __LINE__),
+                __FILE__, __LINE__));
+            state.createGlobal(counterDecl);
+          }
+          auto assign = std::make_unique<BinaryExprAST>(
+              '=', std::make_unique<VariableExprAST>(counterName),
+              makeTickExpr(targetRate, "Int64"));
+          assign->setLocationFrom(func);
+          generated[sleepDomain].expr.push_back(std::move(assign));
+        } else {
+          generated[sleepDomain].expr.push_back(makeExtCall(
+              "__stride_jit_sleep", std::move(durExpr), state.realType()));
         }
         continue;
       }

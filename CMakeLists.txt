@@ -104,12 +104,14 @@ endif()
 set(STRIDERUNTIME_SRC
   src/strideruntime_string.c
   src/strideruntime_random.cpp
+  src/strideruntime_sleep.cpp
 )
 
 set(STRIDERUNTIME_HEADERS
   include/stride/stridejit/strideruntime_string.h
   include/stride/stridejit/stride_status.h
   include/stride/stridejit/strideruntime_random.h
+  include/stride/stridejit/strideruntime_sleep.h
 )
 
 add_library(StrideRuntime STATIC
@@ -158,6 +160,7 @@ set(STRIDEJIT_HEADERS
   include/stride/stridejit/stridedebugemitter.hpp
   include/stride/stridejit/strideruntime_string.h
   include/stride/stridejit/strideruntime_random.h
+  include/stride/stridejit/strideruntime_sleep.h
 )
 
 add_library(StrideJit 

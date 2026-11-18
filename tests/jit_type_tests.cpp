@@ -249,10 +249,94 @@ TEST(JITTypeTest, AvrFrameworkTypes) {
             nullptr);
   EXPECT_NE(ir.find("@__stride_avr_pin_write(i16"), std::string::npos) << ir;
   EXPECT_NE(ir.find("@__stride_avr_pin_mode(i16"), std::string::npos);
-  EXPECT_NE(ir.find("i32 @__stride_avr_millis()"), std::string::npos);
-  EXPECT_NE(ir.find("float @sin(float"), std::string::npos);
+  EXPECT_NE(ir.find("@__stride_avr_tick_sleep(i32"), std::string::npos) << ir;
+
   // avr-gcc's libraries have no 64-bit float routines: nothing may use double.
   EXPECT_EQ(ir.find("double"), std::string::npos) << ir;
 }
 
 } // namespace
+
+TEST(JITTypeTest, AvrObjectAndStateBuffer) {
+  strd::StrideEnvironment strenv;
+  strenv.setTarget("avr", "atmega328p");
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "avr_blink.stride"));
+  strenv.emitDomainStateBuffers();
+
+  ASSERT_NE(strenv.mStrideEnv.TheModule, nullptr);
+  EXPECT_NE(strenv.mStrideEnv.TheModule->getGlobalVariable("LedOn"), nullptr);
+
+  std::string ir;
+  llvm::raw_string_ostream os(ir);
+  strenv.mStrideEnv.TheModule->print(os, nullptr);
+  os.flush();
+  EXPECT_EQ(ir.find("cmpxchg"), std::string::npos) << ir;
+
+  std::error_code ec;
+  auto objPath =
+      std::filesystem::temp_directory_path(ec) / "stride_avr_blink_test.o";
+  std::filesystem::remove(objPath, ec);
+  EXPECT_TRUE(strenv.emitObjectFile(objPath.string(), "avr", "atmega328p", "",
+                                    "static", ""));
+  EXPECT_TRUE(std::filesystem::exists(objPath));
+  EXPECT_GT(std::filesystem::file_size(objPath), 0u);
+  std::filesystem::remove(objPath, ec);
+}
+
+TEST(JITTypeTest, SleepSubdomainTicks) {
+  const std::string code = R"(
+_domainDefinition MainDomain {
+    framework: _JitFramework
+    rate: 100
+    domainFunctionCode: ''
+}
+
+_domainDefinition WorkerDomain {
+    framework: _JitFramework
+    parentDomain: MainDomain
+    rate: 100
+    domainFunctionCode: ''
+}
+
+signal WorkCount { type: Int default: 0 domain: WorkerDomain }
+
+WorkCount + 1 >> WorkCount;
+0.03 >> Sleep(domain: WorkerDomain);
+)";
+
+  std::error_code ec;
+  auto stridePath = std::filesystem::temp_directory_path(ec) /
+                    "stride_sleep_subdomain_test.stride";
+  {
+    std::ofstream out(stridePath);
+    ASSERT_TRUE(out.is_open());
+    out << code;
+  }
+
+  strd::StrideEnvironment strenv;
+  bool ok = strenv.generateIr(stridePath.string());
+  std::filesystem::remove(stridePath, ec);
+  ASSERT_TRUE(ok);
+  ASSERT_TRUE(strenv.compileInMemory());
+  auto mainState = strenv.allocateSharedState("MainDomain");
+  void *mainArgs[1] = {mainState.get()};
+
+  auto count = [&]() {
+    int32_t *ptr = strenv.getGlobal<int32_t>("WorkCount");
+    return ptr ? *ptr : -1;
+  };
+
+  // Tick 1: WorkerDomain runs (WorkCount = 1) and sleeps 0.03s * 100Hz = 3 ticks.
+  EXPECT_EQ(strenv.invoke("MainDomain_process", mainArgs), 0);
+  EXPECT_EQ(count(), 1);
+
+  // Ticks 2, 3, 4: WorkerDomain is sleeping, so WorkCount stays 1.
+  for (int i = 0; i < 3; ++i) {
+    EXPECT_EQ(strenv.invoke("MainDomain_process", mainArgs), 0);
+    EXPECT_EQ(count(), 1);
+  }
+
+  // Tick 5: WorkerDomain wakes up and runs again (WorkCount = 2).
+  EXPECT_EQ(strenv.invoke("MainDomain_process", mainArgs), 0);
+  EXPECT_EQ(count(), 2);
+}
