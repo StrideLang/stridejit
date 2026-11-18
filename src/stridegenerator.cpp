@@ -124,6 +124,17 @@ void collectUsedPortPropertiesImpl(
             resolved = CodeAnalysis::evaluateRateMemberAccess(
                            pp->getEntity(), calleeScope, calleeDecl,
                            calleeFunc, tree) > 0;
+            if (!resolved && calleeFunc) {
+              if (auto outEnt =
+                      calleeFunc->getCompilerProperty("outputEntity")) {
+                if (outEnt->getNodeType() == AST::Function &&
+                    CodeAnalysis::getModulePortRateExpr(
+                        std::static_pointer_cast<FunctionNode>(outEnt),
+                        "mainInputPort", innerScope, tree)) {
+                  resolved = true;
+                }
+              }
+            }
           } else if (pp->getPropertyName() == "size") {
             resolved = CodeAnalysis::evaluateSizeMemberAccess(
                            pp->getEntity(), calleeScope, calleeDecl,
@@ -843,16 +854,24 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
         /* InternalPersistentArgs */ internalArgs,
         /* PropertyArgs */ std::vector<PrototypeArg>{}, ExternalArgs,
         std::vector<PrototypeArg>{});
-    std::vector<std::unique_ptr<ExprAST>> resetBody;
-    // The domain's onInit streams come first: every init runs them, before
-    // the blocks take their defaults (the load is inserted ahead of them)
+    auto resetProto = std::make_unique<PrototypeAST>(
+        std::string(domainName + "_reset"),
+        /* InArgs */ std::vector<PrototypeArg>{},
+        /* OutArgs */ std::vector<PrototypeArg>{},
+        /* InternalPersistentArgs */ internalArgs,
+        /* PropertyArgs */ std::vector<PrototypeArg>{}, ExternalArgs,
+        std::vector<PrototypeArg>{});
+    std::vector<std::unique_ptr<ExprAST>> initBody;
+    // The domain's onInit streams run first (before defaults/reset, with load
+    // inserted at entry). <Domain>_reset runs at the end of init.
     if (auto onInit = domainDecl ? domainDecl->getPropertyValue("onInit")
                                  : nullptr) {
       if (onInit->getNodeType() == AST::List) {
-        resetBody = generateStreamsForNodes(onInit->getChildren(), scope,
-                                            state, domainName);
+        initBody = generateStreamsForNodes(onInit->getChildren(), scope,
+                                           state, domainName);
       }
     }
+    std::vector<std::unique_ptr<ExprAST>> resetBody;
     for (auto &extArg : ExternalArgs) {
       if (std::holds_alternative<int32_t>(extArg.defaultValue)) {
         auto varInit = std::make_unique<BinaryExprAST>(
@@ -923,12 +942,16 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
       auto bufferDecl =
           ASTQuery::findDeclarationByName(bufferDomain.first, scope, tree);
       auto spec = BufferSpec::fromDeclaration(bufferDecl, tree);
-      for (const auto &name :
-           {spec.indexName(), spec.countName(), spec.sinceName()}) {
-        resetBody.push_back(std::make_unique<BinaryExprAST>(
-            '=', std::make_unique<VariableExprAST>(name),
-            std::make_unique<IntExprAST>(0, 32)));
-      }
+      resetBody.push_back(std::make_unique<BinaryExprAST>(
+          '=', std::make_unique<VariableExprAST>(spec.indexName()),
+          std::make_unique<IntExprAST>(0, 32)));
+      resetBody.push_back(std::make_unique<BinaryExprAST>(
+          '=', std::make_unique<VariableExprAST>(spec.countName()),
+          std::make_unique<IntExprAST>(
+              spec.mode == BufferSpec::Mode::Table ? spec.capacity : 0, 32)));
+      resetBody.push_back(std::make_unique<BinaryExprAST>(
+          '=', std::make_unique<VariableExprAST>(spec.sinceName()),
+          std::make_unique<IntExprAST>(0, 32)));
       resetBody.push_back(std::make_unique<BinaryExprAST>(
           '=', std::make_unique<VariableExprAST>(spec.readyName()),
           std::make_unique<BoolExprAST>(false)));
@@ -1147,13 +1170,45 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
               '=', std::make_unique<VariableExprAST>(sub.phaseGlobalName),
               std::move(zeroExpr)));
         }
-        resetBody.push_back(
+        initBody.push_back(
             std::make_unique<DirectFuncCallExprAST>(sub.childName + "_init"));
+        resetBody.push_back(
+            std::make_unique<DirectFuncCallExprAST>(sub.childName + "_reset"));
       }
     }
 
+    // onReset streams run after defaults, state machines, and buffer resets
+    // so runtime signal/buffer fills persist.
+    if (auto onReset = domainDecl ? domainDecl->getPropertyValue("onReset")
+                                  : nullptr) {
+      if (onReset->getNodeType() == AST::List) {
+        auto onResetExprs = generateStreamsForNodes(
+            onReset->getChildren(), scope, state, domainName);
+        for (auto &expr : onResetExprs) {
+          resetBody.push_back(std::move(expr));
+        }
+      }
+    }
+
+    auto resetFunc = std::make_unique<FunctionAST>(std::move(resetProto),
+                                                   std::move(resetBody));
+    resetFunc->callType = CallableType::DomainFunction;
+    resetFunc->hasState = domainNeedsState;
+    resetFunc->funcInstance = domainDecl;
+    if (domainDecl) {
+      resetFunc->line = domainDecl->getLine();
+      resetFunc->column = domainDecl->getColumn();
+      resetFunc->relativeFilename = domainDecl->getRelativeFilename();
+      resetFunc->absoluteFilename = domainDecl->getAbsoluteFilename();
+    }
+    resetFunc->displayName = domainName + "::reset";
+    llvm::Function *resetLlvm = resetFunc->codegen(state);
+    if (resetLlvm) {
+      generateInvoker(resetLlvm, state);
+    }
+
     auto initFunc = std::make_unique<FunctionAST>(std::move(initProto),
-                                                  std::move(resetBody));
+                                                  std::move(initBody));
     initFunc->callType = CallableType::DomainFunction;
     initFunc->hasState = domainNeedsState;
     initFunc->funcInstance = domainDecl;
@@ -1169,6 +1224,18 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
     //   initFunc->internalVariables.push_back(global);
     // }
     if (auto *initLlvm = initFunc->codegen(state)) {
+      if (resetLlvm) {
+        llvm::SmallVector<llvm::Value *, 8> fwdArgs;
+        for (auto &arg : initLlvm->args()) {
+          fwdArgs.push_back(&arg);
+        }
+        for (auto &bb : *initLlvm) {
+          if (auto *ret = llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator())) {
+            llvm::IRBuilder<> retBuilder(ret);
+            retBuilder.CreateCall(resetLlvm, fwdArgs);
+          }
+        }
+      }
       generateInvoker(initLlvm, state);
     }
 
@@ -1256,48 +1323,77 @@ void StrideGenerator::generateLoadFunction(const std::string &domainName,
   }
 
   auto &context = *state.TheContext;
-  auto *i32 = llvm::Type::getInt32Ty(context);
-  // 0: not loaded, 1: loading, 2: loaded
-  auto *guard = new llvm::GlobalVariable(
-      *state.TheModule, i32, false, llvm::GlobalValue::InternalLinkage,
-      llvm::ConstantInt::get(i32, 0), "__" + domainName + "_loadState");
-  guard->setAlignment(llvm::MaybeAlign(4));
-
-  // <Domain>_load runs the onLoad streams once per program. The first caller
-  // runs them; a caller that finds them running waits until they are done.
+  // <Domain>_load runs the onLoad streams once per program. When there are no
+  // onLoad streams, emit a trivial return so bare-metal targets (e.g. AVR)
+  // do not pull in atomic __sync_* helpers.
   auto *loadFn = llvm::Function::Create(
       llvm::FunctionType::get(llvm::Type::getVoidTy(context), false),
       llvm::GlobalValue::ExternalLinkage, domainName + "_load",
       state.TheModule.get());
-  auto *entry = llvm::BasicBlock::Create(context, "entry", loadFn);
-  auto *run = llvm::BasicBlock::Create(context, "run", loadFn);
-  auto *wait = llvm::BasicBlock::Create(context, "wait", loadFn);
-  auto *done = llvm::BasicBlock::Create(context, "done", loadFn);
-  llvm::IRBuilder<> builder(entry);
-  auto *exchange = builder.CreateAtomicCmpXchg(
-      guard, llvm::ConstantInt::get(i32, 0), llvm::ConstantInt::get(i32, 1),
-      llvm::MaybeAlign(4), llvm::AtomicOrdering::AcquireRelease,
-      llvm::AtomicOrdering::Acquire);
-  builder.CreateCondBr(builder.CreateExtractValue(exchange, 1), run, wait);
 
-  builder.SetInsertPoint(run);
-  if (bodyFn) {
-    builder.CreateCall(bodyFn);
+  if (!bodyFn) {
+    auto *entry = llvm::BasicBlock::Create(context, "entry", loadFn);
+    llvm::IRBuilder<> builder(entry);
+    builder.CreateRetVoid();
+  } else {
+    const std::string tripleStr = state.TheModule->getTargetTriple().str();
+    const bool singleCoreTarget = (tripleStr.rfind("avr", 0) == 0);
+    if (singleCoreTarget) {
+      auto *i8 = llvm::Type::getInt8Ty(context);
+      auto *guard = new llvm::GlobalVariable(
+          *state.TheModule, i8, false, llvm::GlobalValue::InternalLinkage,
+          llvm::ConstantInt::get(i8, 0), "__" + domainName + "_loadState");
+      auto *entry = llvm::BasicBlock::Create(context, "entry", loadFn);
+      auto *run = llvm::BasicBlock::Create(context, "run", loadFn);
+      auto *done = llvm::BasicBlock::Create(context, "done", loadFn);
+      llvm::IRBuilder<> builder(entry);
+      auto *cur = builder.CreateLoad(i8, guard);
+      builder.CreateCondBr(
+          builder.CreateICmpEQ(cur, llvm::ConstantInt::get(i8, 0)), run, done);
+      builder.SetInsertPoint(run);
+      builder.CreateStore(llvm::ConstantInt::get(i8, 1), guard);
+      builder.CreateCall(bodyFn);
+      builder.CreateRetVoid();
+      builder.SetInsertPoint(done);
+      builder.CreateRetVoid();
+    } else {
+      auto *i32 = llvm::Type::getInt32Ty(context);
+      // 0: not loaded, 1: loading, 2: loaded
+      auto *guard = new llvm::GlobalVariable(
+          *state.TheModule, i32, false, llvm::GlobalValue::InternalLinkage,
+          llvm::ConstantInt::get(i32, 0), "__" + domainName + "_loadState");
+      guard->setAlignment(llvm::MaybeAlign(4));
+
+      auto *entry = llvm::BasicBlock::Create(context, "entry", loadFn);
+      auto *run = llvm::BasicBlock::Create(context, "run", loadFn);
+      auto *wait = llvm::BasicBlock::Create(context, "wait", loadFn);
+      auto *done = llvm::BasicBlock::Create(context, "done", loadFn);
+      llvm::IRBuilder<> builder(entry);
+      auto *exchange = builder.CreateAtomicCmpXchg(
+          guard, llvm::ConstantInt::get(i32, 0),
+          llvm::ConstantInt::get(i32, 1), llvm::MaybeAlign(4),
+          llvm::AtomicOrdering::AcquireRelease, llvm::AtomicOrdering::Acquire);
+      builder.CreateCondBr(builder.CreateExtractValue(exchange, 1), run, wait);
+
+      builder.SetInsertPoint(run);
+      builder.CreateCall(bodyFn);
+      builder.CreateAlignedStore(llvm::ConstantInt::get(i32, 2), guard,
+                                 llvm::MaybeAlign(4))
+          ->setAtomic(llvm::AtomicOrdering::Release);
+      builder.CreateRetVoid();
+
+      builder.SetInsertPoint(wait);
+      auto *loadState =
+          builder.CreateAlignedLoad(i32, guard, llvm::MaybeAlign(4));
+      loadState->setAtomic(llvm::AtomicOrdering::Acquire);
+      builder.CreateCondBr(
+          builder.CreateICmpEQ(loadState, llvm::ConstantInt::get(i32, 2)), done,
+          wait);
+
+      builder.SetInsertPoint(done);
+      builder.CreateRetVoid();
+    }
   }
-  builder.CreateAlignedStore(llvm::ConstantInt::get(i32, 2), guard,
-                             llvm::MaybeAlign(4))
-      ->setAtomic(llvm::AtomicOrdering::Release);
-  builder.CreateRetVoid();
-
-  builder.SetInsertPoint(wait);
-  auto *loadState = builder.CreateAlignedLoad(i32, guard, llvm::MaybeAlign(4));
-  loadState->setAtomic(llvm::AtomicOrdering::Acquire);
-  builder.CreateCondBr(
-      builder.CreateICmpEQ(loadState, llvm::ConstantInt::get(i32, 2)), done,
-      wait);
-
-  builder.SetInsertPoint(done);
-  builder.CreateRetVoid();
   generateInvoker(loadFn, state);
 
   // Every instance's init loads first
@@ -1454,7 +1550,8 @@ std::vector<std::unique_ptr<ExprAST>> StrideGenerator::generateStreamsForNodes(
       auto stream = std::static_pointer_cast<StreamNode>(node);
       auto code = createStreamCode(stream, state.m_tree, scope, state);
       for (auto &domainCode : code) {
-        if (targetDomain.empty() || domainCode.first == targetDomain ||
+        if (targetDomain.empty() || domainCode.first.empty() ||
+            domainCode.first == targetDomain ||
             domainCode.first == "RootDomain") {
           for (const auto &f : domainCode.second.functions) {
             f->codegen(state);
@@ -1969,6 +2066,24 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
           segState.activeRate = currentRate;
         } else if (currentRate > 0.0 && segState.activeRate > 0.0 &&
                    std::abs(currentRate - segState.activeRate) > 1e-9) {
+          if (prev && prev->getNodeType() == AST::Function &&
+              segState.domainDecl &&
+              !prev->getCompilerProperty("__rate_hold_var")) {
+            std::string typeStr =
+                CodeAnalysis::resolveNodeOutDataType(prev, scope, tree);
+            llvm::Type *holdTy =
+                (!typeStr.empty() && state.typesMap.count(typeStr) &&
+                 !state.typesMap[typeStr]->isVoidTy())
+                    ? state.typesMap[typeStr]
+                    : state.realType();
+            std::string holdName = "__rate_hold_" + domainName + "_" +
+                                   std::to_string(state.m_idCounter++);
+            state.addDynamicDomainField(segState.domainDecl, holdName, holdTy,
+                                        llvm::Constant::getNullValue(holdTy));
+            prev->setCompilerProperty(
+                "__rate_hold_var",
+                std::make_shared<ValueNode>(holdName, __FILE__, __LINE__));
+          }
           flushPreScanSegment(domainName);
           segState.activeRate = currentRate;
         }
@@ -2913,6 +3028,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       }
       domainName = streamDomain;
     }
+    prevDomainName = domainName;
     auto &segState = resolveDomainRateInfo(domainName);
     std::string origCurrDom = CodeAnalysis::getNodeDomainName(current, scope, tree);
     double currentRate = (!origCurrDom.empty() && origCurrDom != domainName &&
@@ -3038,9 +3154,17 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                 : nullptr;
         if (decl && decl->getEntityType() == "buffer") {
           state.bufferDomains[decl->getName()] = domainName;
-          generated[domainName].expr.back() = std::make_unique<BufferPushExprAST>(
-              BufferSpec::fromDeclaration(decl, tree),
-              std::move(generated[domainName].expr.back()));
+          auto spec = BufferSpec::fromDeclaration(decl, tree);
+          if (spec.mode == BufferSpec::Mode::Table) {
+            generated[domainName].expr.back() = std::make_unique<BinaryExprAST>(
+                '=', std::move(entityExpr),
+                std::move(generated[domainName].expr.back()));
+          } else {
+            generated[domainName].expr.back() =
+                std::make_unique<BufferPushExprAST>(
+                    std::move(spec),
+                    std::move(generated[domainName].expr.back()));
+          }
         } else if (prevMember && prevMember->getPropertyName() == "frame" &&
                    state.bufferSpecs.count(prevMember->getEntity())) {
           // `Buf.frame >> Block` copies the current frame
@@ -3291,9 +3415,17 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         }
 
         // 3. Create intermediate entity
-        std::string intermediateName =
-            "__intermediate_" + state.getName() + "_" +
-            std::to_string(state.m_idCounter++);
+        std::string intermediateName;
+        if (auto holdProp = func->getCompilerProperty("__rate_hold_var")) {
+          if (holdProp->getNodeType() == AST::String) {
+            intermediateName =
+                std::static_pointer_cast<ValueNode>(holdProp)->getStringValue();
+          }
+        }
+        if (intermediateName.empty()) {
+          intermediateName = "__intermediate_" + state.getName() + "_" +
+                             std::to_string(state.m_idCounter++);
+        }
         auto intermediateEntity = std::make_shared<EntityNode>(
             intermediateName, func->getFilename().c_str(), func->getLine());
 
@@ -3664,8 +3796,22 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                 if (rate > 0) {
                   PortPropArgs.push_back(std::make_unique<RealExprAST>(rate));
                 } else {
-                  PortPropArgs.push_back(std::make_unique<MemberAccessAST>(
-                      ppNode->getEntity(), ppNode->getPropertyName()));
+                  std::unique_ptr<ExprAST> dynRateExpr;
+                  if (auto outEnt = func ? func->getCompilerProperty("outputEntity") : nullptr) {
+                    if (outEnt->getNodeType() == AST::Function) {
+                      auto rateExpr = CodeAnalysis::getModulePortRateExpr(
+                          std::static_pointer_cast<FunctionNode>(outEnt),
+                          "mainInputPort", scope, tree);
+                      if (rateExpr) {
+                        dynRateExpr = createExpr(rateExpr);
+                      }
+                    }
+                  }
+                  if (!dynRateExpr) {
+                    dynRateExpr = std::make_unique<MemberAccessAST>(
+                        ppNode->getEntity(), ppNode->getPropertyName());
+                  }
+                  PortPropArgs.push_back(std::move(dynRateExpr));
                 }
               }
             }
@@ -3978,11 +4124,7 @@ bool StrideGenerator::resolveIOParamsFromDefinition(
               } else if (role == CodeAnalysis::NodeRole::Persistent) {
                 InternalPersistentParams.push_back(arg);
               } else if (role == CodeAnalysis::NodeRole::Internal) {
-                if (outEntityDecl->getPropertyValue("persistent")) {
-                  InternalPersistentParams.push_back(arg);
-                } else {
-                  usedInternalVariables.push_back(outEntityDecl);
-                }
+                usedInternalVariables.push_back(outEntityDecl);
               }
             }
           }
@@ -4120,14 +4262,7 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
         auto decl = std::static_pointer_cast<DeclarationNode>(var.first);
         auto type =
             state.getLLVMTypeForCodegenEntity(decl, funcDecl, funcInstance);
-        if (fallbackIsDomainMember && fallbackIsCodeGenerator) {
-          usedInternalVariables.push_back(decl);
-        } else if (decl->getPropertyValue("persistent")) {
-          InternalPersistentParams.push_back(
-              PrototypeArg{ASTQuery::getNodeName(var.first), type});
-        } else {
-          usedInternalVariables.push_back(decl);
-        }
+        usedInternalVariables.push_back(decl);
       }
 
       // Persistent values are external
@@ -4214,6 +4349,9 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
     }
   }
 
+  if (polymorphic && funcInstance) {
+    functionScope.back().first = funcInstance;
+  }
   std::vector<std::unique_ptr<ExprAST>> collected;
   // Generate function code by going through stream blocks.
   auto streamBlocks =

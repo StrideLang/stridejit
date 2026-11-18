@@ -114,7 +114,7 @@ BufferSpec BufferSpec::fromDeclaration(std::shared_ptr<DeclarationNode> decl,
 
   if (auto modeNode = property("mode")) {
     int mode = resolveBufferConstant(
-        modeNode, {"ModeSliding", "ModeFifo", "ModeOverlapAdd"});
+        modeNode, {"ModeSliding", "ModeFifo", "ModeOverlapAdd", "ModeTable"});
     if (mode < 0) {
       if (ASTQuery::getNodeName(modeNode) == "ModePingPong") {
         error("Buffer::ModePingPong was removed. Use frameSize: capacity / 2 "

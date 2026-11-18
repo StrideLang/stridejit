@@ -1,6 +1,8 @@
 #include "gtest/gtest.h"
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
+#include <fstream>
 
 #include "stride/stridegen/codeanalysis.hpp"
 #include "stride/stridegen/codevalidator.hpp"
@@ -646,6 +648,60 @@ TEST(JITControlFlowTest, DomainOnLoadFillsConstantsWhileCompiling) {
                                         "RootDomain")
                 .value_or(-1),
             12);
+}
+
+// onReset runs after defaults at the end of init and whenever <Domain>_reset is
+// called, and RateAdapter inside a loop drives Oscillator at OutputPort.size.
+TEST(JITControlFlowTest, DomainOnResetAndRateAdapter) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "domain_on_reset.stride"));
+  const std::string headerPath = "domain_on_reset_test.h";
+  ASSERT_TRUE(strenv.emitCHeader(headerPath));
+  {
+    std::ifstream hdr(headerPath);
+    std::string header((std::istreambuf_iterator<char>(hdr)),
+                       std::istreambuf_iterator<char>());
+    EXPECT_NE(header.find("void RootDomain_reset("), std::string::npos);
+  }
+  std::remove(headerPath.c_str());
+  ASSERT_TRUE(strenv.compileInMemory());
+  ASSERT_TRUE(static_cast<bool>(strenv.getFunction("RootDomain_reset")));
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_init", args);
+  strenv.invoke("RootDomain_process", args);
+
+  EXPECT_NEAR(strenv.getStateVar<double>(statePtr.get(), "ConstOut",
+                                         std::nullopt, "RootDomain")
+                  .value_or(-99.0),
+              1.0, 1e-6);
+  EXPECT_NEAR(strenv.getStateVar<double>(statePtr.get(), "ResetOut",
+                                         std::nullopt, "RootDomain")
+                  .value_or(-99.0),
+              -1.0, 1e-6);
+  EXPECT_EQ(strenv.getStateVar<int32_t>(statePtr.get(), "Counter", std::nullopt,
+                                        "RootDomain")
+                .value_or(-1),
+            1);
+
+  // Calling _reset while initialized restores defaults and reruns onReset
+  strenv.invoke("RootDomain_reset", args);
+  EXPECT_EQ(strenv.getStateVar<int32_t>(statePtr.get(), "Counter", std::nullopt,
+                                        "RootDomain")
+                .value_or(-1),
+            0);
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(strenv.getStateVar<int32_t>(statePtr.get(), "Counter", std::nullopt,
+                                        "RootDomain")
+                .value_or(-1),
+            1);
+  EXPECT_NEAR(strenv.getStateVar<double>(statePtr.get(), "ResetOut",
+                                         std::nullopt, "RootDomain")
+                  .value_or(-99.0),
+              -1.0, 1e-6);
 }
 
 // onLoad runs outside any instance, so a domain block there is reported and

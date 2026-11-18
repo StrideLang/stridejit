@@ -1,0 +1,41 @@
+import Dsp::Generators as Generators
+
+_domainDefinition RootDomain {
+    framework: _JitFramework
+    rate: -1
+    inputs: [ ]
+    outputs: [
+        signal ConstOut { domain: RootDomain type: Real }
+        signal ResetOut { domain: RootDomain type: Real }
+        signal Counter { domain: RootDomain type: Int default: 0 }
+    ]
+    onLoad: [
+        FillSine() >> ConstLUT;
+    ]
+    onReset: [
+        FillSine() >> ResetArr;
+    ]
+    domainFunctionCode: ''
+}
+
+loop FillSine {
+    ports: [
+        mainOutputPort OutputPort {
+            entity: Output
+        }
+    ]
+    entities: [
+        signal Output[OutputPort.size] { type: Real }
+        iterator Out { entity: Output }
+    ]
+    streams: [
+        Generators::Oscillator(frequency: 1.0) >> RateAdapter(rate: OutputPort.size) >> Out;
+    ]
+}
+
+constant ConstLUT[4] { type: Real }
+signal ResetArr[4] { domain: RootDomain type: Real default: 0.0 }
+
+ConstLUT[1] >> ConstOut;
+ResetArr[3] >> ResetOut;
+Counter + 1 >> Counter;

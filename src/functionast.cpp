@@ -2541,6 +2541,7 @@ CallExprAST::codegen(StrideCompiler &state) {
     processArgGroup(state, ExternalArgs, CalleeF, CallArgs, false, &tempOuts);
   }
 
+  llvm::FunctionType *calleeFnTy = CalleeF->getFunctionType();
   for (unsigned i = 0, e = PortPropArgs.size(); i != e; ++i) {
     auto [value, type] = PortPropArgs[i]->codegen(state);
     if (value && value->getType()->isPointerTy()) {
@@ -2548,6 +2549,13 @@ CallExprAST::codegen(StrideCompiler &state) {
                                ? type.value()
                                : llvm::Type::getInt32Ty(*state.TheContext);
       value = state.Builder->CreateLoad(elemTy, value, "port_prop_val");
+    }
+    if (value && CallArgs.size() < calleeFnTy->getNumParams()) {
+      llvm::Type *expectedTy = calleeFnTy->getParamType(CallArgs.size());
+      if (value->getType() != expectedTy) {
+        value = state.convertValue(value, expectedTy, true, true);
+        type = expectedTy;
+      }
     }
     CallArgs.push_back({std::move(value), type});
   }

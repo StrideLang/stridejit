@@ -1,0 +1,41 @@
+_domainDefinition BufferDom {
+    framework: _JitFramework
+    rate: -1
+    inputs: [
+        signal AudioIn { domain: BufferDom type: Real }
+    ]
+    outputs: [
+        signal Out { domain: BufferDom type: Int }
+        signal Edited { domain: BufferDom type: Int }
+    ]
+    onReset: [
+        FillTable() >> TableBuf;
+    ]
+    domainFunctionCode: ''
+}
+
+buffer TableBuf {
+    type: Int
+    capacity: 4
+    mode: Buffer::ModeTable
+}
+
+loop FillTable {
+    ports: [
+        mainOutputPort OutputPort {
+            entity: Output
+        }
+    ]
+    entities: [
+        signal Output[OutputPort.size] { type: Int }
+        iterator Out { entity: Output }
+        sequence Seq { from: 0 step: 3 limit: OutputPort.size * 3 }
+    ]
+    streams: [
+        Seq >> Out;
+    ]
+}
+
+TableBuf[2] >> Out;
+99 >> TableBuf[1];
+TableBuf[1] >> Edited;

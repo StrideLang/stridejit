@@ -861,39 +861,6 @@ StrideCompiler::getLLVMType(std::shared_ptr<strd::DeclarationNode> decl,
     }
     return typesMap[DataTypes::Int];
   }
-  if (decl->getEntityType() == "table") {
-    llvm::Type *elemTy = (!type.empty() && typesMap.find(type) != typesMap.end() &&
-                          !typesMap[type]->isVoidTy())
-                             ? typesMap[type]
-                             : typesMap[DataTypes::Real];
-    auto sizeNode = decl->getPropertyValue("size");
-    if (sizeNode) {
-      ScopeStack evalScope = scope;
-      if (evalScope.empty() && !connectionScopes.empty() &&
-          connectionScopes.back().scope) {
-        evalScope = *connectionScopes.back().scope;
-      }
-      std::vector<LangError> errors;
-      int64_t tableSize = ASTFunctions::evaluateConstInteger(
-          sizeNode, evalScope, m_tree, &errors);
-      if (errors.empty() && tableSize > 0) {
-        return llvm::ArrayType::get(elemTy, static_cast<uint64_t>(tableSize));
-      }
-      if (auto sizeDecl = std::static_pointer_cast<DeclarationNode>(
-              sizeNode->getCompilerProperty("declaration"))) {
-        if (auto valNode = sizeDecl->getPropertyValue("value")) {
-          errors.clear();
-          tableSize = ASTFunctions::evaluateConstInteger(valNode, evalScope,
-                                                         m_tree, &errors);
-          if (errors.empty() && tableSize > 0) {
-            return llvm::ArrayType::get(elemTy,
-                                        static_cast<uint64_t>(tableSize));
-          }
-        }
-      }
-    }
-    return elemTy;
-  }
   if (decl->getEntityType() == "buffer") {
     auto spec = BufferSpec::fromDeclaration(decl, m_tree);
     llvm::Type *elemTy = (!type.empty() && typesMap.find(type) != typesMap.end() &&
@@ -1449,7 +1416,6 @@ void StrideCompiler::buildNodeState(const CodeAnalysis::TypeTree &nodeTree) {
            var.first->getNodeType() == AST::ArrayDeclaration)) {
         auto varDecl = std::static_pointer_cast<DeclarationNode>(var.first);
         if (var.first->getNodeType() == AST::ArrayDeclaration ||
-            varDecl->getEntityType() == "table" ||
             varDecl->getEntityType() == "buffer") {
           varType = getLLVMType(varDecl, moduleScope);
         }

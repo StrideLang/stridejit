@@ -246,4 +246,13 @@ TEST(JITBufferTest, ReadOnlyPropertyIsRejected) {
                                  "buffer_readonly_property.stride"));
 }
 
+TEST(JITBufferTest, ModeTableStoresRandomAccessBlock) {
+  BufferDomain domain;
+  ASSERT_TRUE(domain.compile("buffer_mode_table.stride"));
+  EXPECT_EQ(domain.arraySize("TableBuf"), 4u);
+  domain.process();
+  EXPECT_EQ(domain.get<int32_t>("Out"), 6);
+  EXPECT_EQ(domain.get<int32_t>("Edited"), 99);
+}
+
 } // namespace

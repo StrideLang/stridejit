@@ -1430,7 +1430,9 @@ BufferViewExprAST::codegen(StrideCompiler &state) {
   llvm::Value *count = B.CreateLoad(i32Ty, countPtr, "view_cnt");
   llvm::Value *partial = B.CreateICmpULT(count, i32(Spec.frameSize), "partial");
   llvm::Value *start = nullptr;
-  if (Spec.mirrored) {
+  if (Spec.mode == BufferSpec::Mode::Table) {
+    start = i32(0);
+  } else if (Spec.mirrored) {
     llvm::Value *n =
         B.CreateSelect(partial, count, i32(Spec.frameSize), "view_len");
     start = B.CreateSub(B.CreateAdd(index, i32(Spec.capacity)), n,
