@@ -540,6 +540,50 @@ void StrideCompiler::recordStatus(llvm::Value *status) {
   }
   llvm::Value *word = Builder->CreateLoad(i8Ty, statusPtr, "domain_status");
   Builder->CreateStore(Builder->CreateOr(word, status), statusPtr);
+
+  // Debug builds: log a failure with the location of the statement that
+  // made it (inside a module: the location of the module's call)
+  if (statusLogPtr && statusCountPtr) {
+    llvm::Function *function = Builder->GetInsertBlock()->getParent();
+    llvm::BasicBlock *logBB =
+        llvm::BasicBlock::Create(*TheContext, "status_log", function);
+    llvm::BasicBlock *contBB =
+        llvm::BasicBlock::Create(*TheContext, "status_logged", function);
+    Builder->CreateCondBr(
+        Builder->CreateICmpNE(status, llvm::ConstantInt::get(i8Ty, 0)), logBB,
+        contBB);
+    Builder->SetInsertPoint(logBB);
+    unsigned line = 0;
+    unsigned column = 0;
+    if (const llvm::DebugLoc &location = Builder->getCurrentDebugLocation()) {
+      line = location.getLine();
+      column = location.getCol();
+    }
+    llvm::Type *i32Ty = llvm::Type::getInt32Ty(*TheContext);
+    llvm::StructType *entryType = statusLogEntryType();
+    llvm::Type *logType = llvm::ArrayType::get(entryType, kStatusLogSize);
+    llvm::Value *count = Builder->CreateLoad(i32Ty, statusCountPtr, "count");
+    llvm::Value *slot =
+        Builder->CreateURem(count, Builder->getInt32(kStatusLogSize));
+    llvm::Value *entry = Builder->CreateInBoundsGEP(
+        logType, statusLogPtr, {Builder->getInt32(0), slot}, "log_entry");
+    Builder->CreateStore(Builder->getInt32(line),
+                         Builder->CreateStructGEP(entryType, entry, 0));
+    Builder->CreateStore(Builder->getInt16(static_cast<uint16_t>(column)),
+                         Builder->CreateStructGEP(entryType, entry, 1));
+    Builder->CreateStore(status, Builder->CreateStructGEP(entryType, entry, 2));
+    Builder->CreateStore(Builder->CreateAdd(count, Builder->getInt32(1)),
+                         statusCountPtr);
+    Builder->CreateBr(contBB);
+    Builder->SetInsertPoint(contBB);
+  }
+}
+
+llvm::StructType *StrideCompiler::statusLogEntryType() {
+  return llvm::StructType::get(*TheContext,
+                               {llvm::Type::getInt32Ty(*TheContext),
+                                llvm::Type::getInt16Ty(*TheContext),
+                                llvm::Type::getInt8Ty(*TheContext)});
 }
 
 void StrideCompiler::recordStatus(llvm::Value *status,

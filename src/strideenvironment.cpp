@@ -1,5 +1,8 @@
 #include "stride/utils/logger.h"
 #include <algorithm>
+#include <cstddef>
+#include <cstdlib>
+#include <cstring>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
@@ -1450,16 +1453,57 @@ void StrideEnvironment::snapshotStateDefaults() {
   }
 }
 
+size_t StrideEnvironment::getStateAlignment(const std::string &funcName) const {
+  const auto *info = mStrideEnv.getStateStructInfo(funcName);
+  size_t alignment = 1;
+  if (info && info->structType) {
+    if (const auto *DL = getDataLayout()) {
+      alignment = DL->getABITypeAlign(info->structType).value();
+    }
+  }
+  return std::max<size_t>(alignment, getCacheLine());
+}
+
+size_t StrideEnvironment::getStateAllocSize(const std::string &funcName) const {
+  const auto *info = mStrideEnv.getStateStructInfo(funcName);
+  if (!info || info->allocSize == 0) {
+    return 0;
+  }
+  const size_t alignment = getStateAlignment(funcName);
+  return (info->allocSize + alignment - 1) / alignment * alignment;
+}
+
+// Host state blocks are aligned to at least the cache line (see
+// getStateAlignment), so allocation and release use the aligned allocator.
+static void *allocateAligned(size_t size, size_t alignment) {
+  alignment = std::max<size_t>(alignment, alignof(std::max_align_t));
+  size = (size + alignment - 1) / alignment * alignment;
+#if defined(_MSC_VER)
+  return _aligned_malloc(size, alignment);
+#else
+  return std::aligned_alloc(alignment, size);
+#endif
+}
+
+static void freeAligned(void *ptr) {
+#if defined(_MSC_VER)
+  _aligned_free(ptr);
+#else
+  std::free(ptr);
+#endif
+}
+
 void *StrideEnvironment::allocateState(const std::string &funcName) {
   const auto *info = mStrideEnv.getStateStructInfo(funcName);
   if (!info || !info->structType || info->allocSize == 0) {
     return nullptr;
   }
-  void *mem = malloc(info->allocSize);
+  const size_t size = getStateAllocSize(funcName);
+  void *mem = allocateAligned(size, getStateAlignment(funcName));
   if (!mem) {
     return nullptr;
   }
-  memset(mem, 0, info->allocSize);
+  memset(mem, 0, size);
   if (!info->defaultBytes.empty()) {
     size_t copySize = info->defaultBytes.size() < info->allocSize
                           ? info->defaultBytes.size()
@@ -1487,7 +1531,7 @@ StrideEnvironment::allocateSharedState(const std::string &funcName) {
 
 void StrideEnvironment::deallocateState(void *statePtr) {
   if (statePtr) {
-    free(statePtr);
+    freeAligned(statePtr);
   }
 }
 
@@ -1531,7 +1575,8 @@ StrideEnvironment::getStateFields(const std::string &funcName) const {
       field.kind = StateField::Kind::Integer;
     } else if (type->isFloatingPointTy()) {
       field.kind = StateField::Kind::Real;
-    } else if (type->isStructTy()) {
+    } else if (type->isStructTy() &&
+               const_cast<StrideCompiler &>(mStrideEnv).isStringType(type)) {
       field.kind = StateField::Kind::String;
     }
     if (index < info->fieldAllocSizes.size() && field.count > 0) {
@@ -1606,6 +1651,57 @@ static bool storeStateString(const StrideCompiler::StateStructInfo &info,
   __stride_jit_string_store(
       view, chars, static_cast<int32_t>(charsType->getArrayNumElements()));
   return true;
+}
+
+std::vector<StrideEnvironment::StatusEvent>
+StrideEnvironment::getStatusLog(const void *statePtr, const std::string &domain,
+                                uint32_t *total) const {
+  std::vector<StatusEvent> events;
+  if (total) {
+    *total = 0;
+  }
+  const auto *info = mStrideEnv.getStateStructInfo(domain);
+  const auto *DL = getDataLayout();
+  if (!statePtr || !info || !info->structType || !DL) {
+    return events;
+  }
+  auto logIt = info->varIndices.find(StrideCompiler::statusLogName(domain));
+  auto countIt = info->varIndices.find(StrideCompiler::statusCountName(domain));
+  if (logIt == info->varIndices.end() || countIt == info->varIndices.end() ||
+      logIt->second >= info->fieldOffsets.size() ||
+      countIt->second >= info->fieldOffsets.size()) {
+    return events;
+  }
+  const auto *bytes = static_cast<const uint8_t *>(statePtr);
+  uint32_t count = 0;
+  std::memcpy(&count, bytes + info->fieldOffsets[countIt->second],
+              sizeof(count));
+  if (total) {
+    *total = count;
+  }
+  auto *logType = llvm::dyn_cast<llvm::ArrayType>(
+      info->structType->getElementType(logIt->second));
+  if (!logType) {
+    return events;
+  }
+  auto *entryType = llvm::cast<llvm::StructType>(logType->getElementType());
+  const auto *entryLayout = DL->getStructLayout(entryType);
+  const uint64_t entrySize = DL->getTypeAllocSize(entryType);
+  const uint64_t size = logType->getNumElements();
+  const uint64_t kept = std::min<uint64_t>(count, size);
+  for (uint64_t i = count - kept; i < count; ++i) {
+    const uint8_t *entry =
+        bytes + info->fieldOffsets[logIt->second] + (i % size) * entrySize;
+    StatusEvent event;
+    std::memcpy(&event.line, entry + entryLayout->getElementOffset(0),
+                sizeof(event.line));
+    std::memcpy(&event.column, entry + entryLayout->getElementOffset(1),
+                sizeof(event.column));
+    std::memcpy(&event.code, entry + entryLayout->getElementOffset(2),
+                sizeof(event.code));
+    events.push_back(event);
+  }
+  return events;
 }
 
 static const StrideCompiler::StateStructInfo *
@@ -3112,11 +3208,16 @@ void StrideEnvironment::emitDomainStateBuffers() {
     if (mStrideEnv.TheModule->getGlobalVariable(symName)) {
       continue;
     }
-    auto *arrTy = llvm::ArrayType::get(i8, info.allocSize);
+    // Aligned like the struct (16- and 32-bit fields fault unaligned on
+    // some cores) and to the cache line when the core has one
+    const size_t alignment = getStateAlignment(decl->getName());
+    const size_t size =
+        (info.allocSize + alignment - 1) / alignment * alignment;
+    auto *arrTy = llvm::ArrayType::get(i8, size);
     auto *gv = new llvm::GlobalVariable(
         *mStrideEnv.TheModule, arrTy, false, llvm::GlobalValue::ExternalLinkage,
         llvm::ConstantAggregateZero::get(arrTy), symName);
-    gv->setAlignment(llvm::MaybeAlign(1));
+    gv->setAlignment(llvm::MaybeAlign(alignment));
   }
 }
 

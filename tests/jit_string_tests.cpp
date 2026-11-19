@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "stride/stridejit/strideenvironment.hpp"
+#include "stride/stridejit/stridecompiler.hpp"
 #include "stride/stridejit/strideruntime_string.h"
 
 #include "llvm/IR/Instructions.h"
@@ -635,5 +636,86 @@ TEST(JITStringTest, ModuleStatus) {
                 .value_or(-1),
             STRIDE_STATUS_INVALID);
 
+}
+
+// A debug build logs each failed call with the location of its statement;
+// a release build keeps only the status word.
+TEST(JITStringTest, DebugStatusLog) {
+  StrideEnvironment strenv;
+  strenv.enableDebugInfo(true);
+  strenv.setDebugInfoLevel(DebugInfoLevel::Full);
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "StatusTest.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *state = statePtr.get();
+  const std::string dom = "RootDomain";
+  void *args[8] = {state};
+
+  ASSERT_TRUE(strenv.setStateVar(state, "Text", std::string("cdef"), std::nullopt, dom));
+  ASSERT_TRUE(strenv.setStateVar(state, "ClearStatus", 0, std::nullopt, dom));
+  EXPECT_EQ(strenv.invoke("RootDomain_process", args), 0);
+
+  uint32_t total = 0;
+  auto log = strenv.getStatusLog(state, dom, &total);
+  ASSERT_EQ(total, 2u);
+  ASSERT_EQ(log.size(), 2u);
+  // [ "ab", Text ] >> Concat() >> Short;  (StatusTest.stride line 29)
+  EXPECT_EQ(log[0].code, STRIDE_STATUS_TRUNCATED);
+  EXPECT_EQ(log[0].line, 29u);
+  // [ Text, -1 ] >> Parse() >> Number;  (line 36)
+  EXPECT_EQ(log[1].code, STRIDE_STATUS_INVALID);
+  EXPECT_EQ(log[1].line, 36u);
+
+  // The log keeps the last kStatusLogSize failures and counts all of them
+  for (int i = 0; i < 5; ++i) {
+    EXPECT_EQ(strenv.invoke("RootDomain_process", args), 0);
+  }
+  log = strenv.getStatusLog(state, dom, &total);
+  EXPECT_EQ(total, 12u);
+  EXPECT_EQ(log.size(), StrideCompiler::kStatusLogSize);
+  EXPECT_EQ(log.back().code, STRIDE_STATUS_INVALID);
+  // It is part of the state, but not a field of its own
+  for (const auto &field : strenv.getStateFields(dom)) {
+    EXPECT_NE(field.kind == StrideEnvironment::StateField::Kind::String &&
+                  field.name.find("statusLog") != std::string::npos,
+              true);
+  }
+
+  // No debug info: no log
+  StrideEnvironment release;
+  ASSERT_TRUE(release.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "StatusTest.stride"));
+  for (const auto &field : release.getStateFields(dom)) {
+    EXPECT_EQ(field.name.find("statusLog"), std::string::npos);
+  }
+}
+
+// Each domain's state starts on a cache line and fills whole lines, so two
+// domains run by different threads never share one. The host JIT assumes
+// 64-byte lines; a core without a cache (cacheLine 0) packs tightly.
+TEST(JITStringTest, StateIsCacheLineAligned) {
+  StrideEnvironment host;
+  ASSERT_TRUE(host.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "StatusTest.stride"));
+  EXPECT_EQ(host.getCacheLine(), 64u);
+  EXPECT_EQ(host.getStateAlignment("RootDomain"), 64u);
+  EXPECT_EQ(host.getStateAllocSize("RootDomain") % 64, 0u);
+  EXPECT_GE(host.getStateAllocSize("RootDomain"),
+            host.getStateSize("RootDomain"));
+  std::vector<std::shared_ptr<void>> states;
+  for (int i = 0; i < 4; ++i) {
+    states.push_back(host.allocateSharedState("RootDomain"));
+    ASSERT_NE(states.back().get(), nullptr);
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(states.back().get()) % 64, 0u);
+  }
+
+  StrideEnvironment packed;
+  packed.setCacheLine(0);
+  ASSERT_TRUE(packed.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "StatusTest.stride"));
+  EXPECT_LT(packed.getStateAlignment("RootDomain"), 64u);
+  auto state = packed.allocateSharedState("RootDomain");
+  ASSERT_NE(state.get(), nullptr);
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(state.get()) %
+                packed.getStateAlignment("RootDomain"),
+            0u);
 }
 

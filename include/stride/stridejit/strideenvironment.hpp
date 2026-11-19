@@ -237,6 +237,22 @@ public:
   void setBoardOverride(const std::string &boardName) {
     m_boardOverride = boardName;
   }
+  // The target core's cache line in bytes (the core's cacheLine property),
+  // 0 for a core without a data cache. Each domain's state starts on a
+  // cache line and is padded to a whole number of them, so two domains run
+  // by different cores or threads never share one (false sharing). When not
+  // set: 64 for the host JIT, 0 for any other target.
+  void setCacheLine(unsigned bytes) { m_cacheLine = bytes; }
+  unsigned getCacheLine() const {
+    if (m_cacheLine) {
+      return *m_cacheLine;
+    }
+    return m_targetTriple.empty() ? 64u : 0u;
+  }
+  // Alignment and size of a domain's state block: the struct's own
+  // alignment and size, raised to the cache line when there is one.
+  size_t getStateAlignment(const std::string &funcName) const;
+  size_t getStateAllocSize(const std::string &funcName) const;
   // Emits global `__stride_<Domain>_state` zero-initialized byte arrays for each
   // stateful domain in the module so C runtimes (e.g. AVR) can pass them directly.
   void emitDomainStateBuffers();
@@ -285,6 +301,21 @@ public:
   };
   // The fields of a function's or domain's state struct, in struct order
   std::vector<StateField> getStateFields(const std::string &funcName) const;
+
+  // A failed runtime call logged by a debug build: its status code
+  // (stride_status.h) and the location of the statement that made it (for
+  // a call inside a module, the location of the module's call).
+  struct StatusEvent {
+    uint8_t code{0};
+    uint32_t line{0};
+    uint16_t column{0};
+  };
+  // The domain's logged failures, oldest first. A debug build keeps the last
+  // StrideCompiler::kStatusLogSize of them; *total (when given) is how many
+  // there were in all. Empty when the domain keeps no log.
+  std::vector<StatusEvent> getStatusLog(const void *statePtr,
+                                        const std::string &domain,
+                                        uint32_t *total = nullptr) const;
 
   // Dynamic state variable access by name or pattern
   template <typename T>
@@ -443,6 +474,7 @@ private:
   std::string m_strideRoot;
   std::string m_primarySourcePath;
   std::string m_targetTriple;
+  std::optional<unsigned> m_cacheLine;
   std::string m_targetCPU;
   std::string m_targetFeatures;
   std::string m_boardOverride;

@@ -1957,6 +1957,18 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
           state.addDynamicDomainField(
               node, StrideCompiler::statusName(domainName), statusType,
               llvm::Constant::getNullValue(statusType));
+          // Debug builds keep a log of where the failures happened
+          if (state.isDebugInfoEnabled()) {
+            llvm::Type *logType = llvm::ArrayType::get(
+                state.statusLogEntryType(), StrideCompiler::kStatusLogSize);
+            state.addDynamicDomainField(
+                node, StrideCompiler::statusLogName(domainName), logType,
+                llvm::Constant::getNullValue(logType));
+            llvm::Type *countType = llvm::Type::getInt32Ty(*state.TheContext);
+            state.addDynamicDomainField(
+                node, StrideCompiler::statusCountName(domainName), countType,
+                llvm::Constant::getNullValue(countType));
+          }
         }
       }
     }
@@ -4224,10 +4236,17 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       }
     }
   }
-  // Scratch for string results is reused from one stream to the next
+  // Scratch for string results is reused from one stream to the next.
+  // Statements without a location of their own (calls) get the stream's, so
+  // debug info and the debug status log point at the right line.
   for (auto &domainCode : generated) {
     if (!domainCode.second.expr.empty() && domainCode.second.expr.front()) {
       domainCode.second.expr.front()->startsStream = true;
+    }
+    for (auto &expr : domainCode.second.expr) {
+      if (expr && expr->getLine() <= 0) {
+        expr->setLocationFrom(stream);
+      }
     }
   }
   return generated;

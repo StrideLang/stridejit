@@ -249,6 +249,19 @@ public:
   // The current domain's status word, or nullptr when it has none (then the
   // status is dropped).
   llvm::Value *statusPtr{nullptr};
+  // Debug builds only: the domain's log of failed calls, a ring of
+  // kStatusLogSize statusLogEntryType() entries ({line, column, code}), and
+  // how many failures there were in all. nullptr when not kept.
+  static constexpr unsigned kStatusLogSize = 8;
+  static std::string statusLogName(const std::string &domain) {
+    return domain + "_statusLog";
+  }
+  static std::string statusCountName(const std::string &domain) {
+    return domain + "_statusCount";
+  }
+  llvm::StructType *statusLogEntryType();
+  llvm::Value *statusLogPtr{nullptr};
+  llvm::Value *statusCountPtr{nullptr};
   // ORs status (an integer) into the domain's word.
   void recordStatus(llvm::Value *status);
   // Also stores it as varName's last write status, when varName has one

@@ -371,7 +371,11 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   // returns it, and its caller records the returned status in turn, so a
   // status from deep inside a module still reaches the domain.
   llvm::Value *prevStatusPtr = state.statusPtr;
+  llvm::Value *prevStatusLogPtr = state.statusLogPtr;
+  llvm::Value *prevStatusCountPtr = state.statusCountPtr;
   state.statusPtr = nullptr;
+  state.statusLogPtr = nullptr;
+  state.statusCountPtr = nullptr;
   llvm::AllocaInst *calleeStatus = nullptr;
   if (callType != CallableType::DomainFunction) {
     calleeStatus = state.CreateEntryBlockAlloca(
@@ -423,9 +427,15 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
               state.currentFunctionStateInfo->structType,
               state.currentFunctionStatePtr, idx, varName + "_ptr");
           state.NamedValues[varName] = {fieldPtr, elemTy};
-          if (callType == CallableType::DomainFunction &&
-              varName == StrideCompiler::statusName(searchName)) {
-            state.statusPtr = fieldPtr;
+          if (callType == CallableType::DomainFunction) {
+            if (varName == StrideCompiler::statusName(searchName)) {
+              state.statusPtr = fieldPtr;
+            } else if (varName == StrideCompiler::statusLogName(searchName)) {
+              state.statusLogPtr = fieldPtr;
+            } else if (varName ==
+                       StrideCompiler::statusCountName(searchName)) {
+              state.statusCountPtr = fieldPtr;
+            }
           }
 
           // Independent Variable Resets:
@@ -1336,6 +1346,8 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     if (!statement) {
       state.scratch = outerScratch;
       state.statusPtr = prevStatusPtr;
+      state.statusLogPtr = prevStatusLogPtr;
+      state.statusCountPtr = prevStatusCountPtr;
       return nullptr;
     }
     if (statement->startsStream) {
@@ -1569,6 +1581,8 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   state.finishScratch();
   state.scratch = outerScratch;
   state.statusPtr = prevStatusPtr;
+  state.statusLogPtr = prevStatusLogPtr;
+  state.statusCountPtr = prevStatusCountPtr;
   state.currentFunctionStatePtr = prevFunctionStatePtr;
   state.currentFunctionStateInfo = prevFunctionStateInfo;
   // Validate the generated code, checking for consistency.
