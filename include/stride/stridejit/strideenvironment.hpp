@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "stride/parser/ast.h"
+#include "stride/stridejit/statelayout.hpp"
 #include "stride/stridejit/stridecompiler.hpp"
 #include "stride/utils/cachemanager.h"
 #include "stride/utils/logger.h"
@@ -306,6 +307,15 @@ public:
   };
   // The fields of a function's or domain's state struct, in struct order
   std::vector<StateField> getStateFields(const std::string &funcName) const;
+  // The layout of a domain's state block for the target it was compiled
+  // for: enough to read its variables from raw bytes without the JIT (see
+  // statelayout.hpp). Empty fields when the domain has no state.
+  StateLayout getStateLayout(const std::string &domain) const;
+  // The layouts of every domain that has state.
+  std::vector<StateLayout> getStateLayouts() const;
+  // Every domain's state layout plus the variables kept in globals of their
+  // own, for the target the program was compiled for.
+  ProgramLayout getProgramLayout() const;
 
   // A state block holds pointers into itself: each String points at its own
   // characters. After the block's bytes are copied to another address,

@@ -1626,6 +1626,201 @@ StrideEnvironment::getStateFields(const std::string &funcName) const {
   return fields;
 }
 
+StateLayout StrideEnvironment::getStateLayout(const std::string &domain) const {
+  StateLayout layout;
+  layout.domain = domain;
+  layout.targetTriple = m_targetTriple;
+  const auto *info = mStrideEnv.getStateStructInfo(domain);
+  const auto *DL = getDataLayout();
+  if (!info || !info->structType || !DL) {
+    return layout;
+  }
+  layout.littleEndian = DL->isLittleEndian();
+  layout.pointerSize = DL->getPointerSize();
+  layout.size = info->allocSize;
+  layout.alignment = getStateAlignment(domain);
+
+  // Where a String's length sits inside its {pointer, length} view
+  uint64_t lengthOffset = 0;
+  uint64_t lengthSize = 0;
+  auto stringIt = mStrideEnv.typesMap.find(DataTypes::String);
+  if (stringIt != mStrideEnv.typesMap.end()) {
+    if (auto *view = llvm::dyn_cast<llvm::StructType>(stringIt->second)) {
+      if (view->getNumElements() == 2) {
+        lengthOffset = DL->getStructLayout(view)->getElementOffset(1);
+        lengthSize = DL->getTypeStoreSize(view->getElementType(1));
+      }
+    }
+  }
+
+  for (const StateField &stateField : getStateFields(domain)) {
+    StateLayout::Field field;
+    field.name = stateField.name;
+    field.offset = stateField.offset;
+    field.count = stateField.count;
+    field.elementSize = stateField.elementSize;
+    field.charsOffset = stateField.charsOffset;
+    field.capacity = stateField.capacity;
+    switch (stateField.kind) {
+    case StateField::Kind::Switch:
+      field.kind = StateLayout::Field::Kind::Switch;
+      field.valueSize = 1;
+      break;
+    case StateField::Kind::Integer:
+      field.kind = StateLayout::Field::Kind::Integer;
+      break;
+    case StateField::Kind::Real:
+      field.kind = StateLayout::Field::Kind::Real;
+      break;
+    case StateField::Kind::String:
+      field.kind = StateLayout::Field::Kind::String;
+      field.lengthOffset = lengthOffset;
+      field.lengthSize = lengthSize;
+      break;
+    default:
+      break;
+    }
+    // The value's own width, from the struct's element type
+    auto indexIt = info->varIndices.find(stateField.name);
+    if (indexIt != info->varIndices.end() &&
+        indexIt->second < info->structType->getNumElements()) {
+      llvm::Type *type = info->structType->getElementType(indexIt->second);
+      if (type->isArrayTy()) {
+        type = type->getArrayElementType();
+      }
+      if (field.kind == StateLayout::Field::Kind::Integer ||
+          field.kind == StateLayout::Field::Kind::Real) {
+        field.valueSize = DL->getTypeStoreSize(type);
+      }
+    }
+    // An integer's sign comes from its declared data type (UInt8, Int16)
+    if (field.kind == StateLayout::Field::Kind::Integer && mStrideEnv.m_tree) {
+      if (auto decl = ASTQuery::findDeclarationByName(stateField.name, {},
+                                                      mStrideEnv.m_tree)) {
+        const std::string typeName = StrideCompiler::getDataTypeName(decl);
+        if (!typeName.empty()) {
+          auto info = const_cast<StrideCompiler &>(mStrideEnv)
+                          .getDataTypeInfo(typeName);
+          if (info.valid()) {
+            field.isSigned = info.isSigned;
+          }
+        }
+      }
+    }
+    layout.fields.push_back(field);
+  }
+  return layout;
+}
+
+std::vector<StateLayout> StrideEnvironment::getStateLayouts() const {
+  std::vector<StateLayout> layouts;
+  for (const auto &[instance, info] : mStrideEnv.stateStructMap) {
+    if (!instance || !info.structType || info.allocSize == 0 ||
+        instance->getNodeType() != AST::Declaration) {
+      continue;
+    }
+    auto decl = std::static_pointer_cast<DeclarationNode>(instance);
+    const std::string &type = decl->getEntityType();
+    if (type != "domain" && type != "_domainDefinition") {
+      continue;
+    }
+    layouts.push_back(getStateLayout(decl->getName()));
+  }
+  return layouts;
+}
+
+ProgramLayout StrideEnvironment::getProgramLayout() const {
+  ProgramLayout program;
+  program.targetTriple = m_targetTriple;
+  program.domains = getStateLayouts();
+  const auto *DL = getDataLayout();
+  if (!DL) {
+    return program;
+  }
+  program.littleEndian = DL->isLittleEndian();
+  program.pointerSize = DL->getPointerSize();
+  auto &compiler = const_cast<StrideCompiler &>(mStrideEnv);
+
+  uint64_t lengthOffset = 0;
+  uint64_t lengthSize = 0;
+  auto stringIt = compiler.typesMap.find(DataTypes::String);
+  if (stringIt != compiler.typesMap.end()) {
+    if (auto *view = llvm::dyn_cast<llvm::StructType>(stringIt->second)) {
+      if (view->getNumElements() == 2) {
+        lengthOffset = DL->getStructLayout(view)->getElementOffset(1);
+        lengthSize = DL->getTypeStoreSize(view->getElementType(1));
+      }
+    }
+  }
+  const std::string charsSuffix = StrideCompiler::stringCharsName("");
+  for (const auto &[name, global] : compiler.globals()) {
+    auto *variable = llvm::dyn_cast_or_null<llvm::GlobalVariable>(global.first);
+    // Constants are not state; a String's characters belong to the String
+    if (!variable || variable->isConstant() ||
+        (name.size() > charsSuffix.size() &&
+         name.compare(name.size() - charsSuffix.size(), charsSuffix.size(),
+                      charsSuffix) == 0)) {
+      continue;
+    }
+    GlobalLayout entry;
+    entry.symbol = variable->getName().str();
+    llvm::Type *type = variable->getValueType();
+    entry.size = DL->getTypeAllocSize(type);
+    auto &field = entry.field;
+    field.name = name;
+    if (type->isArrayTy()) {
+      field.count = type->getArrayNumElements();
+      type = type->getArrayElementType();
+    }
+    field.elementSize = DL->getTypeAllocSize(type);
+    if (type->isIntegerTy(1)) {
+      field.kind = StateLayout::Field::Kind::Switch;
+      field.valueSize = 1;
+    } else if (type->isIntegerTy()) {
+      field.kind = StateLayout::Field::Kind::Integer;
+      field.valueSize = DL->getTypeStoreSize(type);
+    } else if (type->isFloatingPointTy()) {
+      field.kind = StateLayout::Field::Kind::Real;
+      field.valueSize = DL->getTypeStoreSize(type);
+    } else if (compiler.isStringType(type)) {
+      field.kind = StateLayout::Field::Kind::String;
+      field.lengthOffset = lengthOffset;
+      field.lengthSize = lengthSize;
+      auto chars = compiler.getGlobal(StrideCompiler::stringCharsName(name));
+      if (auto *charsVar =
+              llvm::dyn_cast_or_null<llvm::GlobalVariable>(chars.first)) {
+        entry.charsSymbol = charsVar->getName().str();
+        llvm::Type *charsType = charsVar->getValueType();
+        if (charsType->isArrayTy() &&
+            charsType->getArrayElementType()->isArrayTy()) {
+          charsType = charsType->getArrayElementType();
+        }
+        if (charsType->isArrayTy()) {
+          field.capacity = charsType->getArrayNumElements();
+        }
+      }
+    }
+    if (field.kind == StateLayout::Field::Kind::Integer && compiler.m_tree) {
+      if (auto decl =
+              ASTQuery::findDeclarationByName(name, {}, compiler.m_tree)) {
+        const std::string typeName = StrideCompiler::getDataTypeName(decl);
+        if (!typeName.empty()) {
+          auto info = compiler.getDataTypeInfo(typeName);
+          if (info.valid()) {
+            field.isSigned = info.isSigned;
+          }
+        }
+      }
+    }
+    program.globals.push_back(entry);
+  }
+  std::sort(program.globals.begin(), program.globals.end(),
+            [](const GlobalLayout &a, const GlobalLayout &b) {
+              return a.field.name < b.field.name;
+            });
+  return program;
+}
+
 // Writes value into the String at slot, a field of the state at statePtr
 // (element arrayIdx of an array of strings). A String with its own
 // character buffer (<name>__chars) gets a copy of the characters, cut off at

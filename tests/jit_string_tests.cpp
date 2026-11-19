@@ -2,6 +2,7 @@
 #include <clocale>
 #include <cstring>
 #include <filesystem>
+#include <iostream>
 #include <vector>
 
 #include "stride/stridejit/strideenvironment.hpp"
@@ -794,5 +795,105 @@ TEST(JITStringTest, CopyStateMovesStrings) {
   EXPECT_EQ(strenv.getStateVar<StrideStringView>(copy.get(), "Whole", std::nullopt, dom)
                 ->toString(),
             "abgh");
+}
+
+// The state layout reads every variable from the state's raw bytes, without
+// the JIT: the values match getStateVar.
+TEST(JITStringTest, StateLayoutReadsRawBytes) {
+  StrideEnvironment strenv;
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "StringsTest.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+  const std::string dom = "RootDomain";
+  auto statePtr = strenv.allocateSharedState(dom);
+  void *state = statePtr.get();
+  ASSERT_TRUE(strenv.setStateVar(state, "InStr", std::string("Hello World"), std::nullopt, dom));
+  ASSERT_TRUE(strenv.setStateVar(state, "PaddedStr", std::string("   Trimmed   "), std::nullopt, dom));
+  void *args[40] = {state};
+  EXPECT_EQ(strenv.invoke("RootDomain_process", args), 0);
+
+  StateLayout layout = strenv.getStateLayout(dom);
+  EXPECT_EQ(layout.domain, dom);
+  EXPECT_EQ(layout.pointerSize, sizeof(void *));
+  EXPECT_TRUE(layout.littleEndian);
+  // A copy of the bytes: nothing reads the JIT's memory through pointers
+  std::vector<uint8_t> bytes(static_cast<const uint8_t *>(state),
+                             static_cast<const uint8_t *>(state) + layout.size);
+  auto read = [&](const char *name, uint64_t index = 0) {
+    const StateLayout::Field *field = layout.find(name);
+    EXPECT_NE(field, nullptr) << name;
+    return field ? readStateValue(layout, *field, bytes.data(), bytes.size(), index)
+                 : StateValue{};
+  };
+  auto text = [&](const char *name, uint64_t index = 0) {
+    StateValue value = read(name, index);
+    return std::holds_alternative<std::string>(value)
+               ? std::get<std::string>(value)
+               : std::string("<unreadable>");
+  };
+
+  EXPECT_EQ(text("OutConcat"), "Hello, World!");
+  EXPECT_EQ(text("OutFmt1"), "Player Hero: Score 0042, HP 98.6%, Alive on");
+  EXPECT_EQ(text("OutShort"), "Hello");
+  EXPECT_EQ(text("StrArray", 1), "Second");
+  EXPECT_EQ(text("StrArray", 2), "Hello");
+  EXPECT_EQ(std::get<int64_t>(read("OutPos")), 6);
+  EXPECT_EQ(std::get<int64_t>(read("OutLen")), 11);
+  EXPECT_EQ(std::get<bool>(read("OutStarts")), true);
+  EXPECT_EQ(std::get<bool>(read("OutEmpty")), false);
+  EXPECT_DOUBLE_EQ(std::get<double>(read("OutReal")), 98.765);
+  // Out of range reads nothing
+  EXPECT_TRUE(std::holds_alternative<std::monostate>(read("StrArray", 3)));
+
+  std::string json = layout.toJson();
+  EXPECT_NE(json.find("\"name\": \"OutConcat\""), std::string::npos);
+  EXPECT_NE(json.find("\"kind\": \"string\""), std::string::npos);
+}
+
+// The layout follows the target: on AVR pointers and Int are 16 bits. A
+// subdomain's variables are globals of their own, listed with their symbols
+// so a tool can find them in the firmware's ELF.
+TEST(JITStringTest, ProgramLayoutForAvr) {
+  StrideEnvironment strenv;
+  strenv.setTarget("avr", "atmega328p");
+  ASSERT_TRUE(
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "avr_serial_counter.stride"));
+  ProgramLayout program = strenv.getProgramLayout();
+  EXPECT_EQ(program.targetTriple, "avr");
+  EXPECT_EQ(program.pointerSize, 2u);
+  EXPECT_TRUE(program.littleEndian);
+  const StateLayout *tick = program.findDomain("AvrTickDomain");
+  ASSERT_NE(tick, nullptr);
+  EXPECT_EQ(tick->alignment, 1u); // no cache, byte-aligned fields
+
+  const GlobalLayout *count = program.findGlobal("Count");
+  ASSERT_NE(count, nullptr) << program.toJson();
+  EXPECT_EQ(count->field.kind, StateLayout::Field::Kind::Integer);
+  EXPECT_EQ(count->field.valueSize, 2u);
+  EXPECT_TRUE(count->field.isSigned);
+  EXPECT_FALSE(count->symbol.empty());
+  const GlobalLayout *line = program.findGlobal("Line");
+  ASSERT_NE(line, nullptr);
+  EXPECT_EQ(line->field.kind, StateLayout::Field::Kind::String);
+  EXPECT_EQ(line->field.capacity, 24u);
+  EXPECT_EQ(line->field.lengthOffset, 2u); // after the 16-bit pointer
+  EXPECT_FALSE(line->charsSymbol.empty());
+  // The characters are part of Line, not a global of their own
+  EXPECT_EQ(program.findGlobal("Line__chars"), nullptr);
+
+  // Decoding AVR memory on the host: Count = 300, Line = "count: 300"
+  const uint8_t countBytes[2] = {300 & 0xff, 300 >> 8};
+  EXPECT_EQ(std::get<int64_t>(
+                readGlobalValue(program, *count, countBytes, sizeof(countBytes))),
+            300);
+  const std::string value = "count: 300";
+  std::vector<uint8_t> view(line->size, 0);
+  view[line->field.lengthOffset] = static_cast<uint8_t>(value.size());
+  std::vector<uint8_t> chars(line->field.capacity, 0);
+  std::memcpy(chars.data(), value.data(), value.size());
+  EXPECT_EQ(std::get<std::string>(readGlobalValue(program, *line, view.data(),
+                                                  view.size(), chars.data(),
+                                                  chars.size())),
+            value);
+  EXPECT_NE(program.toJson().find("\"charsSymbol\""), std::string::npos);
 }
 

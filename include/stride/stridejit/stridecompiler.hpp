@@ -183,6 +183,12 @@ public:
   std::pair<llvm::Value *, std::optional<llvm::Type *>>
   getGlobal(std::string globalName);
   bool globalExists(std::string globalName);
+  // Every global, by declared name
+  const std::map<std::string,
+                 std::pair<llvm::Value *, std::optional<llvm::Type *>>> &
+  globals() const {
+    return m_globals;
+  }
 
   // ---- String storage ----
   // A String variable is a {ptr, length} view plus a companion variable,
