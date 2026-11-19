@@ -1,0 +1,59 @@
+# A status from a call inside a module reaches the domain's word: the module
+# returns the status it gathered and its caller records it, through any
+# number of module levels.
+
+_domainDefinition RootDomain {
+    framework: _JitFramework
+    rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+        signal Trigger { domain: RootDomain type: Int }
+    ]
+    outputs: [
+        signal Direct { domain: RootDomain type: Int }
+        signal Nested { domain: RootDomain type: Int }
+    ]
+    domainFunctionCode: ''
+}
+
+# Text with no number in it: Parse reports Invalid and gives the default
+module ParseText {
+    ports: [
+        mainInputPort InPort {
+            entity: Input
+        },
+        mainOutputPort OutPort {
+            entity: Output
+        }
+    ]
+    entities: [
+        signal Input { type: Int default: 0 }
+        signal Output { type: Int default: 0 }
+    ]
+    streams: [
+        [ "no number", Input ] >> Parse() >> Output;
+    ]
+}
+
+# Calls ParseText: the status passes through this module too
+module ParseTwice {
+    ports: [
+        mainInputPort InPort {
+            entity: Input
+        },
+        mainOutputPort OutPort {
+            entity: Output
+        }
+    ]
+    entities: [
+        signal Input { type: Int default: 0 }
+        signal Output { type: Int default: 0 }
+    ]
+    streams: [
+        Input >> ParseText() >> Output;
+    ]
+}
+
+Trigger >> ParseText() >> Direct;
+Trigger >> ParseTwice() >> Nested;

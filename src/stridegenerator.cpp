@@ -1719,25 +1719,59 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
     }
   }
 
-  // Whether any stream calls a module that reports a status (status: on)
+  // Whether any stream calls a module that reports a status (status: on),
+  // directly or through the streams of the modules it calls
   const bool treeHasStatusCalls = [&]() {
-    for (const auto &child : tree->getChildren()) {
-      if (child->getNodeType() != AST::Stream) {
-        continue;
+    std::set<ASTNode> visited;
+    std::function<bool(const ASTNode &)> reportsStatus;
+    auto declReportsStatus = [&](const std::shared_ptr<DeclarationNode> &d) {
+      if (!d || !visited.insert(d).second) {
+        return false;
       }
-      StreamNodeIterator it(std::static_pointer_cast<StreamNode>(child));
-      while (auto n = it.next()) {
-        if (n->getNodeType() != AST::Function) {
-          continue;
+      auto status = d->getPropertyValue("status");
+      if (status && status->getNodeType() == AST::Switch &&
+          std::static_pointer_cast<ValueNode>(status)->getSwitchValue()) {
+        return true;
+      }
+      // A module: look in its streams and blocks
+      for (const auto &property : d->getProperties()) {
+        if (property && reportsStatus(property->getValue())) {
+          return true;
         }
-        for (const auto &d : ASTQuery::findAllDeclarationsForNode(
-                 std::static_pointer_cast<FunctionNode>(n), scope, tree)) {
-          auto status = d ? d->getPropertyValue("status") : nullptr;
-          if (status && status->getNodeType() == AST::Switch &&
-              std::static_pointer_cast<ValueNode>(status)->getSwitchValue()) {
+      }
+      return false;
+    };
+    reportsStatus = [&](const ASTNode &node) -> bool {
+      if (!node) {
+        return false;
+      }
+      if (node->getNodeType() == AST::Stream) {
+        StreamNodeIterator it(std::static_pointer_cast<StreamNode>(node));
+        while (auto n = it.next()) {
+          if (n->getNodeType() != AST::Function) {
+            continue;
+          }
+          for (const auto &d : ASTQuery::findAllDeclarationsForNode(
+                   std::static_pointer_cast<FunctionNode>(n), scope, tree)) {
+            if (declReportsStatus(d)) {
+              return true;
+            }
+          }
+        }
+        return false;
+      }
+      if (node->getNodeType() == AST::List) {
+        for (const auto &child : node->getChildren()) {
+          if (reportsStatus(child)) {
             return true;
           }
         }
+      }
+      return false;
+    };
+    for (const auto &child : tree->getChildren()) {
+      if (reportsStatus(child)) {
+        return true;
       }
     }
     return false;

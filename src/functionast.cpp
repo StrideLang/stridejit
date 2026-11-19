@@ -366,10 +366,19 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   llvm::Value *prevFunctionStatePtr = state.currentFunctionStatePtr;
   const StrideCompiler::StateStructInfo *prevFunctionStateInfo =
       state.currentFunctionStateInfo;
-  // A domain function records statuses in its domain's word; a module has
-  // no word of its own yet
+  // A domain function records statuses in its domain's word (set below,
+  // when its state has one). Any other callable gathers them in a local and
+  // returns it, and its caller records the returned status in turn, so a
+  // status from deep inside a module still reaches the domain.
   llvm::Value *prevStatusPtr = state.statusPtr;
   state.statusPtr = nullptr;
+  llvm::AllocaInst *calleeStatus = nullptr;
+  if (callType != CallableType::DomainFunction) {
+    calleeStatus = state.CreateEntryBlockAlloca(
+        TheFunction, "callable_status", state.Builder->getInt8Ty());
+    state.Builder->CreateStore(state.Builder->getInt8(0), calleeStatus);
+    state.statusPtr = calleeStatus;
+  }
 
   if (hasState) {
     auto stateArgIt = state.NamedValues.find("__state");
@@ -1546,7 +1555,16 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
     state.Builder->SetInsertPoint(ReactionExitBB);
   }
 
-  auto *outVal = llvm::ConstantInt::get(state.Builder->getInt32Ty(), 0, true);
+  // The callable's gathered status (stride_status.h); 0 for a domain
+  // function, whose statuses are in its word
+  llvm::Value *outVal =
+      llvm::ConstantInt::get(state.Builder->getInt32Ty(), 0, true);
+  if (calleeStatus) {
+    outVal = state.Builder->CreateZExt(
+        state.Builder->CreateLoad(state.Builder->getInt8Ty(), calleeStatus,
+                                  "callable_status"),
+        state.Builder->getInt32Ty());
+  }
   state.Builder->CreateRet(outVal);
   state.finishScratch();
   state.scratch = outerScratch;
@@ -2613,6 +2631,11 @@ CallExprAST::codegen(StrideCompiler &state) {
     }
     call =
         state.Builder->CreateCall(CalleeF, CallArgsValues, CalleeF->getReturnType()->isVoidTy() ? "" : CalleeF->getName());
+    // A callable returns the status it gathered (see FunctionAST::codegen)
+    if (callType != CallableType::External &&
+        call->getType()->isIntegerTy(32)) {
+      state.recordStatus(call);
+    }
 
     state.Builder->CreateBr(MergeBB);
     // ThenBB = state.Builder->GetInsertBlock();
@@ -2655,6 +2678,12 @@ CallExprAST::codegen(StrideCompiler &state) {
     }
     call =
         state.Builder->CreateCall(CalleeF, CallArgsValues, CalleeF->getReturnType()->isVoidTy() ? "" : CalleeF->getName());
+    // A callable returns the status it gathered (see FunctionAST::codegen)
+    if ((callType == CallableType::Module || callType == CallableType::Loop ||
+         callType == CallableType::Reaction) &&
+        call->getType()->isIntegerTy(32)) {
+      state.recordStatus(call);
+    }
   }
 
   for (size_t i = 0; i < scatterOuts.size(); ++i) {

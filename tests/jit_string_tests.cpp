@@ -607,3 +607,33 @@ TEST(JITStringTest, DomainStatus) {
     EXPECT_EQ(field.name.find("_status"), std::string::npos) << field.name;
   }
 }
+
+// A status from a call inside a module reaches the domain's word: callables
+// return the status they gathered and their callers record it.
+TEST(JITStringTest, ModuleStatus) {
+  StrideEnvironment strenv;
+  ASSERT_TRUE(
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "ModuleStatusTest.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *state = statePtr.get();
+  const std::string dom = "RootDomain";
+  void *args[8] = {state};
+
+  ASSERT_TRUE(strenv.setStateVar(state, "Trigger", 7, std::nullopt, dom));
+  EXPECT_EQ(strenv.invoke("RootDomain_process", args), 0);
+  // Parse gave its default, the module's input
+  EXPECT_EQ(strenv.getStateVar<int32_t>(state, "Direct", std::nullopt, dom)
+                .value_or(0),
+            7);
+  EXPECT_EQ(strenv.getStateVar<int32_t>(state, "Nested", std::nullopt, dom)
+                .value_or(0),
+            7);
+  EXPECT_EQ(strenv.getStateVar<int8_t>(state, "RootDomain_status",
+                                       std::nullopt, dom)
+                .value_or(-1),
+            STRIDE_STATUS_INVALID);
+
+}
+
