@@ -8,11 +8,13 @@ _domainDefinition RootDomain {
     domainIncludes: []
     inputs: [
         string Word { domain: RootDomain maxSize: 8 }
+        signal Score { domain: RootDomain type: Int }
     ]
     outputs: [
         string Greeting { domain: RootDomain maxSize: 16 }
         string Copy { domain: RootDomain maxSize: 8 }
         string Joined { domain: RootDomain maxSize: 16 }
+        string Scored { domain: RootDomain maxSize: 13 }
     ]
     domainFunctionCode: ''
 }
@@ -20,3 +22,5 @@ _domainDefinition RootDomain {
 "Hello" >> Greeting;
 Word >> Copy;
 [ "ab", Word ] >> Concat() >> Joined;
+# "n=" and an Int (at most 11 characters, padded to 4): at most 13
+[ "n={:04d}", Score ] >> Format() >> Scored;

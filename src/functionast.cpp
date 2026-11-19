@@ -2077,6 +2077,107 @@ static uint64_t stringBound(StrideCompiler &state, const ExprAST *e) {
   return StrideCompiler::kDefaultStringMaxSize;
 }
 
+// The most characters Format can print for the value e (before padding):
+// an Int at most 11 ("-2147483648"), a Switch 5 ("false"), a Real 127 (the
+// runtime's number buffer), a String its size. Unknown values are treated as
+// the default String size, which is at least as large.
+static uint64_t formatValueBound(StrideCompiler &state, const ExprAST *e) {
+  constexpr uint64_t kInt = 11, kSwitch = 5, kReal = 127;
+  if (dynamic_cast<const IntExprAST *>(e)) {
+    return kInt;
+  }
+  if (dynamic_cast<const RealExprAST *>(e)) {
+    return kReal;
+  }
+  if (dynamic_cast<const BoolExprAST *>(e)) {
+    return kSwitch;
+  }
+  if (auto *var = dynamic_cast<const VariableExprAST *>(e)) {
+    std::optional<llvm::Type *> type;
+    auto it = state.NamedValues.find(var->getName());
+    if (it != state.NamedValues.end()) {
+      type = it->second.second;
+    } else if (state.globalExists(var->getName())) {
+      type = state.getGlobal(var->getName()).second;
+    }
+    if (type && *type) {
+      llvm::Type *t = *type;
+      if (t->isArrayTy()) {
+        t = t->getArrayElementType();
+      }
+      if (t->isIntegerTy(1)) {
+        return kSwitch;
+      }
+      if (t->isIntegerTy()) {
+        return kInt;
+      }
+      if (t->isFloatingPointTy()) {
+        return kReal;
+      }
+    }
+  }
+  return stringBound(state, e);
+}
+
+// The padding width of each placeholder in a Format template, in order
+// ({:04d} is 4, {} is 0). The runtime pads to at most 64.
+static std::vector<uint64_t> formatWidths(const std::string &text) {
+  std::vector<uint64_t> widths;
+  for (size_t i = 0; i < text.size(); ++i) {
+    if (text[i] == '{' && i + 1 < text.size() && text[i + 1] == '{') {
+      ++i;
+      continue;
+    }
+    if (text[i] != '{') {
+      continue;
+    }
+    size_t close = text.find('}', i + 1);
+    if (close == std::string::npos) {
+      break;
+    }
+    uint64_t width = 0;
+    size_t j = i + 1;
+    if (j < close && text[j] == ':') {
+      ++j;
+      if (j < close && text[j] == '0') {
+        ++j;
+      }
+      while (j < close && text[j] >= '0' && text[j] <= '9') {
+        width = std::min<uint64_t>(width * 10 + (text[j] - '0'), 64);
+        ++j;
+      }
+    }
+    widths.push_back(width);
+    i = close;
+  }
+  return widths;
+}
+
+// The characters a Format template prints itself: everything outside its
+// placeholders, with {{ and }} printing one brace each.
+static uint64_t formatLiteralLength(const std::string &text) {
+  uint64_t length = 0;
+  for (size_t i = 0; i < text.size(); ++i) {
+    if ((text[i] == '{' || text[i] == '}') && i + 1 < text.size() &&
+        text[i + 1] == text[i]) {
+      ++length;
+      ++i;
+      continue;
+    }
+    if (text[i] == '{') {
+      size_t close = text.find('}', i + 1);
+      if (close == std::string::npos) {
+        length += text.size() - i; // printed as it is
+        break;
+      }
+      i = close;
+      continue;
+    }
+    ++length;
+  }
+  return length;
+}
+
 StringResultBound strd::stringResultBound(
     StrideCompiler &state, const std::string &kind,
     const std::vector<std::unique_ptr<ExprAST>> &inputs,
@@ -2091,16 +2192,27 @@ StringResultBound strd::stringResultBound(
       sum += stringBound(state, input.get());
     }
     bound = sum;
-  } else if (kind == "format") {
-    // The template plus, for each value, its widest text and padding
-    uint64_t sum = 0;
-    for (const auto *group : {&inputs, &properties}) {
-      for (const auto &arg : *group) {
-        bool isNumber = dynamic_cast<const IntExprAST *>(arg.get()) ||
-                        dynamic_cast<const RealExprAST *>(arg.get()) ||
-                        dynamic_cast<const BoolExprAST *>(arg.get());
-        sum += (isNumber ? 0 : stringBound(state, arg.get())) + kFormatWidth;
-      }
+  } else if (kind == "format" && !inputs.empty()) {
+    // The template (its first input) plus, for each value, its widest text
+    // or its placeholder's width. Without a literal template the widths
+    // are unknown and the runtime's limit of 64 is assumed.
+    const auto *templateLiteral =
+        dynamic_cast<const StringExprAST *>(inputs[0].get());
+    std::vector<uint64_t> widths;
+    if (templateLiteral) {
+      widths = formatWidths(templateLiteral->getValue());
+    }
+    uint64_t sum = templateLiteral
+                       ? formatLiteralLength(templateLiteral->getValue())
+                       : stringBound(state, inputs[0].get());
+    for (size_t i = 1; i < inputs.size(); ++i) {
+      uint64_t width = templateLiteral
+                           ? (i - 1 < widths.size() ? widths[i - 1] : 0)
+                           : kFormatWidth;
+      sum += std::max(formatValueBound(state, inputs[i].get()), width);
+    }
+    for (const auto &property : properties) {
+      sum += stringBound(state, property.get());
     }
     bound = sum;
   } else if (kind == "repeat" && inputs.size() >= 2) {

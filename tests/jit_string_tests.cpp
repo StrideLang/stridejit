@@ -743,10 +743,14 @@ TEST(JITStringTest, StrictRejectsWritesThatMayNotFit) {
   const std::string dom = "RootDomain";
   void *args[8] = {state};
   ASSERT_TRUE(strictOk.setStateVar(state, "Word", std::string("cdef"), std::nullopt, dom));
+  ASSERT_TRUE(strictOk.setStateVar(state, "Score", 42, std::nullopt, dom));
   EXPECT_EQ(strictOk.invoke("RootDomain_process", args), 0);
   EXPECT_EQ(strictOk.getStateVar<StrideStringView>(state, "Joined", std::nullopt, dom)
                 ->toString(),
             "abcdef");
+  EXPECT_EQ(strictOk.getStateVar<StrideStringView>(state, "Scored", std::nullopt, dom)
+                ->toString(),
+            "n=0042");
   EXPECT_EQ(strictOk.getStateVar<int8_t>(state, "RootDomain_status",
                                          std::nullopt, dom)
                 .value_or(0),

@@ -1,0 +1,26 @@
+use AVR version 1.0 on ArduinoUno
+
+# Prints a counter over the Uno's USB serial port once a second, and blinks
+# the LED with it. Open a serial monitor at 115200 baud to see:
+#
+#   count: 1
+#   count: 2
+#   ...
+#
+# Format writes into scratch on the tick function's stack, the result is
+# stored in Line (24 characters), and PrintLn sends it through the serial
+# port's transmit buffer.
+
+signal Count { type: Int default: 0 domain: AvrTickDomain }
+switch LedOn { default: off domain: AvrTickDomain }
+string Line { maxSize: 24 domain: AvrTickDomain }
+
+[13, 1] >> __AvrPinMode();
+
+Count + 1 >> Count;
+[ "count: {}", Count ] >> Format() >> Line;
+Line >> PrintLn();
+
+LedOn >> Not() >> LedOn;
+[13, LedOn] >> __AvrPinWrite();
+1.0 >> Sleep(domain: AvrTickDomain);
