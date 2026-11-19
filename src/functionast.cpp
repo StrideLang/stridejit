@@ -2128,11 +2128,27 @@ StringResultBound strd::stringResultBound(
   return result;
 }
 
-void strd::reportStringResultBound(const StringResultBound &result,
+void strd::reportStringResultBound(StrideCompiler &state,
+                                   const StringResultBound &result,
                                    const std::string &callee,
                                    const std::string &destination,
                                    const std::string &file, int line,
                                    int column) {
+  if (state.strict && (result.mayTruncate() || !result.bound)) {
+    ++state.strictErrors;
+    if (result.mayTruncate()) {
+      LOG_ERROR() << file << ":" << line << ":" << column << ": " << callee
+                  << " can make " << *result.bound << " characters; "
+                  << destination << " holds " << *result.destination
+                  << " (strict: a String may not be cut off)." << std::endl;
+    } else {
+      LOG_ERROR() << file << ":" << line << ":" << column << ": the size of "
+                  << callee << "'s result is not known when compiling"
+                  << " (strict: every String result must be bounded)."
+                  << std::endl;
+    }
+    return;
+  }
   if (result.mayTruncate()) {
     LOG_WARNING() << file << ":" << line << ":" << column << ": " << callee
                   << " can make " << *result.bound << " characters; "
@@ -2493,7 +2509,7 @@ CallExprAST::codegen(StrideCompiler &state) {
           StringResultBound result = stringResultBound(
               state, kind, InArgs, PropertyArgs, OutArgs);
           reportStringResultBound(
-              result, Callee,
+              state, result, Callee,
               outVarName.empty() ? std::string("the destination") : outVarName,
               m_relativeFilename, m_line, m_column);
           // A result that always fits needs no status recorded

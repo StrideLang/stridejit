@@ -265,10 +265,25 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         state.Builder->CreateStore(Val, Variable);
       }
     }
-    // A String keeps its characters in its own buffer
+    // A String keeps its characters in its own buffer. A literal or a
+    // String of a known size that fits needs no status; one that may not
+    // fit is reported like a Concat that may not.
     if (state.isStringType(Val->getType()) ||
         (TypePtr.has_value() && state.isStringType(TypePtr.value()))) {
-      state.commitStringWrite(LHSE->getName(), LHSE->getIndices());
+      StringResultBound copy;
+      copy.destination = state.stringCapacity(LHSE->getName());
+      if (auto *literal = dynamic_cast<StringExprAST *>(RHS.get())) {
+        copy.bound = literal->getValue().size();
+      } else if (auto *source = dynamic_cast<VariableExprAST *>(RHS.get())) {
+        copy.bound = state.stringCapacity(source->getName());
+      }
+      if (copy.destination && copy.bound) {
+        reportStringResultBound(state, copy, "the value", LHSE->getName(),
+                                m_relativeFilename, m_line, m_column);
+      }
+      state.commitStringWrite(LHSE->getName(), LHSE->getIndices(),
+                              /* freshWrite */ true,
+                              /* reportStatus */ !copy.cannotTruncate());
     }
 
     if (previousSwitchVal) {
@@ -486,7 +501,7 @@ BinaryExprAST::codegen(StrideCompiler &state) {
             stringResultBound(state, "sum", operands, noArgs, noArgs);
         LHS = std::move(operands[0]);
         RHS = std::move(operands[1]);
-        reportStringResultBound(result, "+", "the destination",
+        reportStringResultBound(state, result, "+", "the destination",
                                 m_relativeFilename, m_line, m_column);
         uint64_t bytes = result.bytes;
         llvm::Value *concatStatus = state.Builder->CreateCall(

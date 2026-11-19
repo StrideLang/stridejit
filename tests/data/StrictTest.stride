@@ -1,0 +1,22 @@
+# String writes that always fit, which strict mode accepts. Each write's
+# size is known when compiling and is no larger than its destination.
+
+_domainDefinition RootDomain {
+    framework: _JitFramework
+    rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+        string Word { domain: RootDomain maxSize: 8 }
+    ]
+    outputs: [
+        string Greeting { domain: RootDomain maxSize: 16 }
+        string Copy { domain: RootDomain maxSize: 8 }
+        string Joined { domain: RootDomain maxSize: 16 }
+    ]
+    domainFunctionCode: ''
+}
+
+"Hello" >> Greeting;
+Word >> Copy;
+[ "ab", Word ] >> Concat() >> Joined;

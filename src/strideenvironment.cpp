@@ -707,7 +707,13 @@ bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
 
   initializeJIT();
 
+  mStrideEnv.strictErrors = 0;
   StrideGenerator::compile(root, globalScope, mStrideEnv);
+  if (mStrideEnv.strict && mStrideEnv.strictErrors > 0) {
+    LOG_ERROR() << mStrideEnv.strictErrors
+                << " String write(s) can be cut off (strict)." << std::endl;
+    return false;
+  }
 
   if (emitAllFunctions) {
     generateAllRootFunctions(root);
@@ -1651,6 +1657,85 @@ static bool storeStateString(const StrideCompiler::StateStructInfo &info,
   __stride_jit_string_store(
       view, chars, static_cast<int32_t>(charsType->getArrayNumElements()));
   return true;
+}
+
+// Whether a value of type holds a String anywhere inside it
+static bool holdsString(llvm::Type *type, llvm::Type *stringType) {
+  if (type == stringType) {
+    return true;
+  }
+  if (auto *array = llvm::dyn_cast<llvm::ArrayType>(type)) {
+    return holdsString(array->getElementType(), stringType);
+  }
+  if (auto *structType = llvm::dyn_cast<llvm::StructType>(type)) {
+    for (llvm::Type *element : structType->elements()) {
+      if (holdsString(element, stringType)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Rebases the String pointers in the value of type at bytes that point into
+// [from, from + size) onto [to, to + size)
+static void relocateStrings(llvm::Type *type, llvm::Type *stringType,
+                            const llvm::DataLayout &DL, char *bytes,
+                            const char *from, size_t size, char *to) {
+  if (!holdsString(type, stringType)) {
+    return;
+  }
+  if (type == stringType) {
+    const char *data = nullptr;
+    std::memcpy(&data, bytes, sizeof(data));
+    if (data >= from && data < from + size) {
+      char *moved = to + (data - from);
+      std::memcpy(bytes, &moved, sizeof(moved));
+    }
+    return;
+  }
+  if (auto *array = llvm::dyn_cast<llvm::ArrayType>(type)) {
+    const uint64_t elementSize = DL.getTypeAllocSize(array->getElementType());
+    for (uint64_t i = 0; i < array->getNumElements(); ++i) {
+      relocateStrings(array->getElementType(), stringType, DL,
+                      bytes + i * elementSize, from, size, to);
+    }
+    return;
+  }
+  if (auto *structType = llvm::dyn_cast<llvm::StructType>(type)) {
+    const auto *layout = DL.getStructLayout(structType);
+    for (unsigned i = 0; i < structType->getNumElements(); ++i) {
+      relocateStrings(structType->getElementType(i), stringType, DL,
+                      bytes + layout->getElementOffset(i), from, size, to);
+    }
+  }
+}
+
+void StrideEnvironment::relocateState(void *state, const void *from,
+                                      const std::string &domain) const {
+  if (!state || !from || state == from) {
+    return;
+  }
+  const auto *info = mStrideEnv.getStateStructInfo(domain);
+  const auto *DL = getDataLayout();
+  auto stringIt = mStrideEnv.typesMap.find(DataTypes::String);
+  if (!info || !info->structType || !DL ||
+      stringIt == mStrideEnv.typesMap.end()) {
+    return;
+  }
+  relocateStrings(info->structType, stringIt->second, *DL,
+                  static_cast<char *>(state), static_cast<const char *>(from),
+                  info->allocSize, static_cast<char *>(state));
+}
+
+void StrideEnvironment::copyState(void *destination, const void *source,
+                                  const std::string &domain) const {
+  if (!destination || !source || destination == source) {
+    return;
+  }
+  const size_t size = getStateSize(domain);
+  std::memcpy(destination, source, size);
+  relocateState(destination, source, domain);
 }
 
 std::vector<StrideEnvironment::StatusEvent>

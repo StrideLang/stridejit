@@ -243,6 +243,11 @@ public:
   // by different cores or threads never share one (false sharing). When not
   // set: 64 for the host JIT, 0 for any other target.
   void setCacheLine(unsigned bytes) { m_cacheLine = bytes; }
+  // Strict: generateIr fails when a String write can be cut off or its size
+  // cannot be bounded when compiling (otherwise those are warnings and the
+  // write reports status Truncated at run time).
+  void setStrict(bool strict) { mStrideEnv.strict = strict; }
+  bool isStrict() const { return mStrideEnv.strict; }
   unsigned getCacheLine() const {
     if (m_cacheLine) {
       return *m_cacheLine;
@@ -301,6 +306,16 @@ public:
   };
   // The fields of a function's or domain's state struct, in struct order
   std::vector<StateField> getStateFields(const std::string &funcName) const;
+
+  // A state block holds pointers into itself: each String points at its own
+  // characters. After the block's bytes are copied to another address,
+  // relocateState points the Strings at `state` that pointed into the block
+  // at `from` at the same place in `state`; Strings pointing elsewhere (a
+  // literal) are left alone. copyState copies and relocates.
+  void relocateState(void *state, const void *from,
+                     const std::string &domain) const;
+  void copyState(void *destination, const void *source,
+                 const std::string &domain) const;
 
   // A failed runtime call logged by a debug build: its status code
   // (stride_status.h) and the location of the statement that made it (for

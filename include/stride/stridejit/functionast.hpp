@@ -243,8 +243,10 @@ stringResultBound(StrideCompiler &state, const std::string &kind,
                   const std::vector<std::unique_ptr<ExprAST>> &properties,
                   const std::vector<std::unique_ptr<ExprAST>> &outputs);
 // Reports a result that can be cut off (a warning with the sizes) or whose
-// bound is unknown (a note), at the call's location.
-void reportStringResultBound(const StringResultBound &result,
+// bound is unknown (a note), at the call's location. In strict mode both are
+// errors, counted in state.strictErrors.
+void reportStringResultBound(StrideCompiler &state,
+                             const StringResultBound &result,
                              const std::string &callee,
                              const std::string &destination,
                              const std::string &file, int line, int column);

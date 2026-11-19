@@ -719,3 +719,76 @@ TEST(JITStringTest, StateIsCacheLineAligned) {
             0u);
 }
 
+// Strict mode: a String write that can be cut off, or whose size cannot be
+// bounded when compiling, makes generateIr fail.
+TEST(JITStringTest, StrictRejectsWritesThatMayNotFit) {
+  StrideEnvironment strictOk;
+  strictOk.setStrict(true);
+  EXPECT_TRUE(strictOk.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "StrictTest.stride"));
+
+  // [ "ab", Text ] >> Concat() >> Short; can be cut off
+  StrideEnvironment strictBad;
+  strictBad.setStrict(true);
+  EXPECT_FALSE(
+      strictBad.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "StatusTest.stride"));
+
+  // The same program compiles without strict mode
+  StrideEnvironment lenient;
+  EXPECT_TRUE(lenient.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "StatusTest.stride"));
+
+  // Writes that always fit report no status
+  ASSERT_TRUE(strictOk.compileInMemory());
+  auto statePtr = strictOk.allocateSharedState("RootDomain");
+  void *state = statePtr.get();
+  const std::string dom = "RootDomain";
+  void *args[8] = {state};
+  ASSERT_TRUE(strictOk.setStateVar(state, "Word", std::string("cdef"), std::nullopt, dom));
+  EXPECT_EQ(strictOk.invoke("RootDomain_process", args), 0);
+  EXPECT_EQ(strictOk.getStateVar<StrideStringView>(state, "Joined", std::nullopt, dom)
+                ->toString(),
+            "abcdef");
+  EXPECT_EQ(strictOk.getStateVar<int8_t>(state, "RootDomain_status",
+                                         std::nullopt, dom)
+                .value_or(0),
+            STRIDE_STATUS_OK);
+}
+
+// A state block's Strings point at their own characters, inside the block.
+// copyState moves those pointers with the copy, so the copy stays valid when
+// the original is changed or freed.
+TEST(JITStringTest, CopyStateMovesStrings) {
+  StrideEnvironment strenv;
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "StatusTest.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+  const std::string dom = "RootDomain";
+  auto original = strenv.allocateSharedState(dom);
+  void *args[8] = {original.get()};
+  ASSERT_TRUE(strenv.setStateVar(original.get(), "Text", std::string("cdef"), std::nullopt, dom));
+  EXPECT_EQ(strenv.invoke("RootDomain_process", args), 0);
+
+  auto copy = strenv.allocateSharedState(dom);
+  strenv.copyState(copy.get(), original.get(), dom);
+  const size_t size = strenv.getStateSize(dom);
+  // Scramble the original: the copy must not depend on it
+  std::memset(original.get(), '#', size);
+  original.reset();
+
+  auto whole = strenv.getStateVar<StrideStringView>(copy.get(), "Whole", std::nullopt, dom);
+  ASSERT_TRUE(whole.has_value());
+  EXPECT_EQ(whole->toString(), "abcdef");
+  const char *begin = static_cast<const char *>(copy.get());
+  EXPECT_GE(whole->data, begin);
+  EXPECT_LT(whole->data, begin + size);
+  EXPECT_EQ(strenv.getStateVar<StrideStringView>(copy.get(), "Short", std::nullopt, dom)
+                ->toString(),
+            "abcd");
+
+  // The copy runs like the original did
+  void *copyArgs[8] = {copy.get()};
+  ASSERT_TRUE(strenv.setStateVar(copy.get(), "Text", std::string("gh"), std::nullopt, dom));
+  EXPECT_EQ(strenv.invoke("RootDomain_process", copyArgs), 0);
+  EXPECT_EQ(strenv.getStateVar<StrideStringView>(copy.get(), "Whole", std::nullopt, dom)
+                ->toString(),
+            "abgh");
+}
+

@@ -252,6 +252,11 @@ public:
   // Debug builds only: the domain's log of failed calls, a ring of
   // kStatusLogSize statusLogEntryType() entries ({line, column, code}), and
   // how many failures there were in all. nullptr when not kept.
+  // Strict: a String write that can be cut off, or whose size cannot be
+  // bounded when compiling, is an error instead of a warning. strictErrors
+  // counts them; generateIr fails when there are any.
+  bool strict{false};
+  unsigned strictErrors{0};
   static constexpr unsigned kStatusLogSize = 8;
   static std::string statusLogName(const std::string &domain) {
     return domain + "_statusLog";
