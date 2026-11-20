@@ -28,6 +28,7 @@
 #include "stride/stridejit/strideenvironment.hpp"
 #include "stride/stridejit/stridegenerator.hpp"
 #include "stride/stridejit/strideruntime_random.h"
+#include "stride/stridejit/strideruntime_gpio.h"
 #include "stride/stridejit/strideruntime_sleep.h"
 #include "stride/stridejit/strideruntime_string.h"
 
@@ -402,7 +403,16 @@ bool StrideEnvironment::prepareTree(ASTNode tree) {
                         SystemConfiguration(),
                         featConfig);
   resolver.process();
-  return true;
+  // Errors the resolver can't compile past, such as a gpioPin the board
+  // can't support
+  bool resolved = true;
+  for (const auto &error : resolver.getErrors()) {
+    LOG_ERROR() << error.getErrorText() << std::endl;
+    if (error.severity == LangError::Error) {
+      resolved = false;
+    }
+  }
+  return resolved;
 }
 
 namespace {
@@ -2979,6 +2989,9 @@ bool StrideEnvironment::compileInMemory() {
   regSym("__stride_jit_random_int", &__stride_jit_random_int);
   regSym("__stride_jit_sleep", &__stride_jit_sleep);
   regSym("__stride_jit_sleep_tick_ready", &__stride_jit_sleep_tick_ready);
+  regSym("__stride_jit_gpio_write", &__stride_jit_gpio_write);
+  regSym("__stride_jit_gpio_read", &__stride_jit_gpio_read);
+  regSym("__stride_jit_gpio_modify", &__stride_jit_gpio_modify);
   regSym("__stride_jit_string_store", &__stride_jit_string_store);
   regSym("__stride_jit_string_substring", &__stride_jit_string_substring);
   regSym("__stride_jit_string_trim", &__stride_jit_string_trim);

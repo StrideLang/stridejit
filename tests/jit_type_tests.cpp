@@ -342,3 +342,131 @@ WorkCount + 1 >> WorkCount;
   EXPECT_EQ(strenv.invoke("MainDomain_process", mainArgs), 0);
   EXPECT_EQ(count(), 2);
 }
+
+// Memory-mapped register access through native llvm:: instructions, as the
+// portable GPIO modules use it. The "register" here is a host buffer whose
+// address the program reads from a signal, so the test runs on any host.
+TEST(JITTypeTest, VolatileRegisterLoadStore) {
+  const std::string code = R"(
+_domainDefinition MainDomain {
+    framework: _JitFramework
+    rate: 100
+    domainFunctionCode: ''
+}
+
+platformModule _TestRegWrite8 {
+    inputs: [UInt64, UInt8]
+    outputs: []
+    processing: "llvm::store volatile i8 %%intokens:1%%, %%intokens:0%%"
+    inherits: [_Signal]
+}
+
+platformModule _TestRegRead32 {
+    inputs: [UInt64]
+    outputs: [UInt32]
+    processing: "%%outtokens:0%% = llvm::load volatile i32, %%intokens:0%%"
+    inherits: [_Signal]
+}
+
+signal Address { type: UInt64 default: 0 domain: MainDomain }
+signal WordAddress { type: UInt64 default: 0 domain: MainDomain }
+signal Value { type: UInt8 default: 0 domain: MainDomain }
+signal Word { type: UInt32 default: 0 domain: MainDomain }
+
+[Address, Value] >> _TestRegWrite8();
+WordAddress >> _TestRegRead32() >> Word;
+)";
+
+  std::error_code ec;
+  auto stridePath = std::filesystem::temp_directory_path(ec) /
+                    "stride_volatile_register_test.stride";
+  {
+    std::ofstream out(stridePath);
+    ASSERT_TRUE(out.is_open());
+    out << code;
+  }
+
+  strd::StrideEnvironment strenv;
+  bool ok = strenv.generateIr(stridePath.string());
+  std::filesystem::remove(stridePath, ec);
+  ASSERT_TRUE(ok);
+
+  std::string ir;
+  {
+    llvm::raw_string_ostream os(ir);
+    strenv.mStrideEnv.TheModule->print(os, nullptr);
+  }
+  EXPECT_NE(ir.find("store volatile i8"), std::string::npos) << ir;
+  EXPECT_NE(ir.find("load volatile i32"), std::string::npos) << ir;
+  EXPECT_NE(ir.find("inttoptr"), std::string::npos) << ir;
+
+  ASSERT_TRUE(strenv.compileInMemory());
+  auto mainState = strenv.allocateSharedState("MainDomain");
+  void *mainArgs[1] = {mainState.get()};
+
+  volatile uint8_t byteRegister = 0;
+  volatile uint32_t wordRegister = 0xA5C3F00Fu;
+  void *state = mainState.get();
+  ASSERT_TRUE(strenv.setStateVar<uint64_t>(
+      state, "Address", reinterpret_cast<uint64_t>(&byteRegister),
+      std::nullopt, "MainDomain"));
+  ASSERT_TRUE(strenv.setStateVar<uint64_t>(
+      state, "WordAddress", reinterpret_cast<uint64_t>(&wordRegister),
+      std::nullopt, "MainDomain"));
+  ASSERT_TRUE(strenv.setStateVar<uint8_t>(state, "Value", 0x5A, std::nullopt,
+                                          "MainDomain"));
+
+  EXPECT_EQ(strenv.invoke("MainDomain_process", mainArgs), 0);
+  EXPECT_EQ(byteRegister, 0x5A);
+  EXPECT_EQ(strenv.getStateVar<uint32_t>(state, "Word", std::nullopt,
+                                         "MainDomain")
+                .value_or(0),
+            0xA5C3F00Fu);
+}
+
+// The standard platform domain aliases resolve to AVR's domains, and Sleep
+// calls each domain's declared sleepModule: the loop sleeps without blocking
+// the tick domain.
+TEST(JITTypeTest, AvrStandardDomainsAndSleep) {
+  const std::string code = R"(
+use AVR version 1.0 on ArduinoUno
+
+switch Blink { default: off domain: PlatformLoopDomain }
+signal Count { type: Int default: 0 domain: PlatformTimerDomain }
+
+Blink >> Not() >> Blink;
+0.5 >> Sleep(domain: PlatformLoopDomain);
+
+Count + 1 >> Count;
+0.25 >> Sleep(domain: PlatformTimerDomain);
+)";
+
+  std::error_code ec;
+  auto stridePath = std::filesystem::temp_directory_path(ec) /
+                    "stride_avr_standard_domains_test.stride";
+  {
+    std::ofstream out(stridePath);
+    ASSERT_TRUE(out.is_open());
+    out << code;
+  }
+
+  strd::StrideEnvironment strenv;
+  bool ok = strenv.generateIr(stridePath.string());
+  std::filesystem::remove(stridePath, ec);
+  ASSERT_TRUE(ok);
+
+  auto *module = strenv.mStrideEnv.TheModule.get();
+  ASSERT_NE(module, nullptr);
+  EXPECT_NE(module->getFunction("AvrLoopDomain_process"), nullptr);
+  EXPECT_NE(module->getFunction("AvrTickDomain_process"), nullptr);
+
+  std::string ir;
+  {
+    llvm::raw_string_ostream os(ir);
+    module->print(os, nullptr);
+  }
+  // Loop sleep is cooperative, never the blocking delay.
+  EXPECT_NE(ir.find("@__stride_avr_loop_sleep(i32"), std::string::npos) << ir;
+  EXPECT_EQ(ir.find("@__stride_avr_sleep_ms"), std::string::npos) << ir;
+  EXPECT_NE(ir.find("@__stride_avr_tick_sleep(i32"), std::string::npos) << ir;
+}

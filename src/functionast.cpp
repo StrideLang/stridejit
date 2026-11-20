@@ -3231,6 +3231,270 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
         outval = state.Builder->CreateSelect(cond, trueVal, falseVal, "seltmp");
         outtype = trueVal->getType();
       }
+    } else if (instr.rfind("gpio ", 0) == 0) {
+      // GPIO register access for the DigitalIO modules, at the width iN of
+      // the framework's GPIO registers. Addresses are integers.
+      //   "llvm::gpio write iN level, set, clear, setMask, clearMask, rmw"
+      //     rmw: register = level ? reg | setMask : reg & ~clearMask at set
+      //     otherwise: store (level ? setMask : clearMask) at (level ? set : clear)
+      //   "<out> = llvm::gpio read iN address, mask"   (register & mask) != 0
+      //   "llvm::gpio modify iN address, clearMask, setBits, rmw"
+      //     rmw: register = (register & ~clearMask) | setBits; else store setBits
+      // With constant operands (a pin known at compile time) the branches fold
+      // and a write is one store, or one sbi/cbi on AVR.
+      auto trimText = [](std::string s) {
+        s.erase(0, s.find_first_not_of(" \t"));
+        size_t last = s.find_last_not_of(" \t\r\n");
+        s.erase(last == std::string::npos ? 0 : last + 1);
+        return s;
+      };
+      std::string rest = trimText(instr.substr(5));
+      size_t opEnd = rest.find_first_of(" \t");
+      std::string op = rest.substr(0, opEnd);
+      rest = opEnd == std::string::npos ? "" : trimText(rest.substr(opEnd));
+      size_t typeEnd = rest.find_first_of(" \t,");
+      std::string typeStr = rest.substr(0, typeEnd);
+      rest = typeEnd == std::string::npos ? "" : trimText(rest.substr(typeEnd));
+      unsigned bits = 0;
+      if (typeStr.size() > 1 && typeStr[0] == 'i') {
+        try {
+          bits = static_cast<unsigned>(std::stoul(typeStr.substr(1)));
+        } catch (...) {
+        }
+      }
+      if (bits != 8 && bits != 16 && bits != 32 && bits != 64) {
+        LOG_ERROR() << "ERROR: llvm::gpio needs a type of i8, i16, i32 or i64: "
+                    << instr << std::endl;
+        return {nullptr, std::nullopt};
+      }
+      llvm::Type *regTy = llvm::Type::getIntNTy(*state.TheContext, bits);
+      std::vector<llvm::Value *> ops;
+      size_t start = 0;
+      while (start <= rest.size() && !rest.empty()) {
+        size_t comma = rest.find(',', start);
+        std::string text = trimText(rest.substr(
+            start, comma == std::string::npos ? std::string::npos : comma - start));
+        llvm::Value *v = resolveOperand(text);
+        if (!v) {
+          try {
+            size_t used = 0;
+            long long literal = std::stoll(text, &used, 0);
+            if (used == text.size()) {
+              v = llvm::ConstantInt::get(regTy, literal, true);
+            }
+          } catch (...) {
+          }
+        }
+        if (!v) {
+          LOG_ERROR() << "ERROR: llvm::gpio operand '" << text
+                      << "' is not an input or integer: " << instr << std::endl;
+          return {nullptr, std::nullopt};
+        }
+        ops.push_back(v);
+        if (comma == std::string::npos) {
+          break;
+        }
+        start = comma + 1;
+      }
+      auto &B = *state.Builder;
+      llvm::Type *intPtrTy =
+          state.TheModule->getDataLayout().getIntPtrType(*state.TheContext);
+      auto asInt = [&](llvm::Value *v, llvm::Type *ty) -> llvm::Value * {
+        if (v->getType()->isFloatingPointTy()) {
+          return B.CreateFPToUI(v, ty);
+        }
+        return B.CreateZExtOrTrunc(v, ty);
+      };
+      auto asBool = [&](llvm::Value *v) -> llvm::Value * {
+        if (v->getType()->isIntegerTy(1)) {
+          return v;
+        }
+        if (v->getType()->isFloatingPointTy()) {
+          return B.CreateFCmpONE(v, llvm::ConstantFP::get(v->getType(), 0.0));
+        }
+        return B.CreateICmpNE(v, llvm::ConstantInt::get(v->getType(), 0));
+      };
+      auto ptrOf = [&](llvm::Value *address) {
+        return B.CreateIntToPtr(asInt(address, intPtrTy),
+                                llvm::PointerType::get(*state.TheContext, 0),
+                                "reg");
+      };
+      // Emits `then` when cond holds and `otherwise` when not, joined after.
+      auto branch = [&](llvm::Value *cond, const std::function<void()> &then,
+                        const std::function<void()> &otherwise) {
+        if (auto *c = llvm::dyn_cast<llvm::ConstantInt>(cond)) {
+          c->isZero() ? otherwise() : then();
+          return;
+        }
+        llvm::Function *fn = B.GetInsertBlock()->getParent();
+        auto *thenBB = llvm::BasicBlock::Create(*state.TheContext, "gpio.rmw", fn);
+        auto *elseBB = llvm::BasicBlock::Create(*state.TheContext, "gpio.store", fn);
+        auto *mergeBB = llvm::BasicBlock::Create(*state.TheContext, "gpio.done", fn);
+        B.CreateCondBr(cond, thenBB, elseBB);
+        B.SetInsertPoint(thenBB);
+        then();
+        B.CreateBr(mergeBB);
+        B.SetInsertPoint(elseBB);
+        otherwise();
+        B.CreateBr(mergeBB);
+        B.SetInsertPoint(mergeBB);
+      };
+
+      if (op == "write" && ops.size() == 6) {
+        llvm::Value *level = asBool(ops[0]);
+        llvm::Value *setAddr = ops[1];
+        llvm::Value *clearAddr = ops[2];
+        llvm::Value *setMask = asInt(ops[3], regTy);
+        llvm::Value *clearMask = asInt(ops[4], regTy);
+        llvm::Value *rmw = asBool(ops[5]);
+        branch(
+            rmw,
+            [&] {
+              // One branch per level, so each is a read-modify-write with a
+              // constant mask: sbi in one and cbi in the other on AVR.
+              branch(
+                  level,
+                  [&] {
+                    llvm::Value *ptr = ptrOf(setAddr);
+                    llvm::Value *old = B.CreateLoad(regTy, ptr, true, "regval");
+                    outval = B.CreateStore(B.CreateOr(old, setMask), ptr, true);
+                  },
+                  [&] {
+                    llvm::Value *ptr = ptrOf(setAddr);
+                    llvm::Value *old = B.CreateLoad(regTy, ptr, true, "regval");
+                    outval = B.CreateStore(
+                        B.CreateAnd(old, B.CreateNot(clearMask)), ptr, true);
+                  });
+            },
+            [&] {
+              llvm::Value *addr = B.CreateSelect(level, asInt(setAddr, intPtrTy),
+                                                 asInt(clearAddr, intPtrTy));
+              llvm::Value *value = B.CreateSelect(level, setMask, clearMask);
+              outval = B.CreateStore(value, ptrOf(addr), true);
+            });
+      } else if (op == "read" && ops.size() == 2) {
+        llvm::Value *value = B.CreateLoad(regTy, ptrOf(ops[0]), true, "regval");
+        llvm::Value *masked = B.CreateAnd(value, asInt(ops[1], regTy));
+        outval = B.CreateICmpNE(masked, llvm::ConstantInt::get(regTy, 0), "pin");
+        outtype = llvm::Type::getInt1Ty(*state.TheContext);
+      } else if (op == "modify" && ops.size() == 4) {
+        llvm::Value *ptr = ptrOf(ops[0]);
+        llvm::Value *clearMask = asInt(ops[1], regTy);
+        llvm::Value *setBits = asInt(ops[2], regTy);
+        branch(
+            asBool(ops[3]),
+            [&] {
+              llvm::Value *old = B.CreateLoad(regTy, ptr, true, "regval");
+              llvm::Value *cleared = B.CreateAnd(old, B.CreateNot(clearMask));
+              outval = B.CreateStore(B.CreateOr(cleared, setBits), ptr, true);
+            },
+            [&] { outval = B.CreateStore(setBits, ptr, true); });
+      } else {
+        LOG_ERROR() << "ERROR: unknown llvm::gpio instruction or operand count: "
+                    << instr << std::endl;
+        return {nullptr, std::nullopt};
+      }
+    } else if (instr.rfind("load volatile ", 0) == 0 ||
+               instr.rfind("store volatile ", 0) == 0) {
+      // Memory-mapped register access, for GPIO and other peripherals:
+      //   "<out> = llvm::load volatile iN, <address>"
+      //   "llvm::store volatile iN <value>, <address>"
+      // The address is an integer and becomes a pointer through inttoptr, so
+      // a constant address folds into a single instruction (sbi/cbi on AVR).
+      const bool isStore = instr[0] == 's';
+      std::string rest = instr.substr(isStore ? 15 : 14);
+      auto trim = [](std::string s) {
+        s.erase(0, s.find_first_not_of(" \t"));
+        size_t last = s.find_last_not_of(" \t\r\n");
+        s.erase(last == std::string::npos ? 0 : last + 1);
+        return s;
+      };
+      rest = trim(rest);
+      size_t typeEnd = rest.find_first_of(" \t,");
+      std::string typeStr = rest.substr(0, typeEnd);
+      unsigned bits = 0;
+      if (typeStr.size() > 1 && typeStr[0] == 'i') {
+        try {
+          bits = static_cast<unsigned>(std::stoul(typeStr.substr(1)));
+        } catch (...) {
+          bits = 0;
+        }
+      }
+      if (bits != 8 && bits != 16 && bits != 32 && bits != 64) {
+        LOG_ERROR() << "ERROR: llvm::" << (isStore ? "store" : "load")
+                    << " volatile needs a type of i8, i16, i32 or i64: "
+                    << instr << std::endl;
+        return {nullptr, std::nullopt};
+      }
+      llvm::Type *accessTy = llvm::Type::getIntNTy(*state.TheContext, bits);
+      rest = typeEnd == std::string::npos ? std::string() : rest.substr(typeEnd);
+      if (!rest.empty() && rest[0] == ',') {
+        rest = rest.substr(1);
+      }
+      rest = trim(rest);
+
+      // An operand is a token for an argument, or an integer literal.
+      auto operand = [&](const std::string &text) -> llvm::Value * {
+        std::string op = trim(text);
+        if (auto *v = resolveOperand(op)) {
+          return v;
+        }
+        try {
+          size_t used = 0;
+          long long literal = std::stoll(op, &used, 0);
+          if (used == op.size()) {
+            return llvm::ConstantInt::get(accessTy, literal, true);
+          }
+        } catch (...) {
+        }
+        return nullptr;
+      };
+      auto toPointer = [&](llvm::Value *address) -> llvm::Value * {
+        if (address->getType()->isPointerTy()) {
+          return address;
+        }
+        llvm::Type *intPtrTy =
+            state.TheModule->getDataLayout().getIntPtrType(*state.TheContext);
+        if (address->getType()->isFloatingPointTy()) {
+          address = state.Builder->CreateFPToUI(address, intPtrTy);
+        } else {
+          address = state.Builder->CreateZExtOrTrunc(address, intPtrTy);
+        }
+        return state.Builder->CreateIntToPtr(
+            address, llvm::PointerType::get(*state.TheContext, 0), "reg");
+      };
+      auto toAccessType = [&](llvm::Value *value) -> llvm::Value * {
+        if (value->getType()->isFloatingPointTy()) {
+          return state.Builder->CreateFPToUI(value, accessTy);
+        }
+        return state.Builder->CreateZExtOrTrunc(value, accessTy);
+      };
+
+      if (isStore) {
+        size_t comma = rest.find(',');
+        llvm::Value *value =
+            comma == std::string::npos ? nullptr : operand(rest.substr(0, comma));
+        llvm::Value *address =
+            comma == std::string::npos ? nullptr : operand(rest.substr(comma + 1));
+        if (!value || !address) {
+          LOG_ERROR() << "ERROR: llvm::store volatile needs a value and an "
+                         "address: "
+                      << instr << std::endl;
+          return {nullptr, std::nullopt};
+        }
+        outval = state.Builder->CreateStore(toAccessType(value),
+                                            toPointer(address), true);
+      } else {
+        llvm::Value *address = operand(rest);
+        if (!address) {
+          LOG_ERROR() << "ERROR: llvm::load volatile needs an address: "
+                      << instr << std::endl;
+          return {nullptr, std::nullopt};
+        }
+        outval = state.Builder->CreateLoad(accessTy, toPointer(address), true,
+                                           "regval");
+        outtype = accessTy;
+      }
     } else {
       size_t comma = instr.find(',');
       if (comma != std::string::npos) {

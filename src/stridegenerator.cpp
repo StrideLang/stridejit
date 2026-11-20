@@ -208,6 +208,31 @@ std::vector<std::shared_ptr<MemberAccessNode>> collectUsedPortProperties(
 }
 
 
+// A constant listed in a typeClass of constants, an enumeration such as
+// _DomainExecution or Gpio::_PinPulls.
+bool isEnumerationMember(const std::string &name, const ASTNode &tree) {
+  for (const auto &child : tree->getChildren()) {
+    if (child->getNodeType() != AST::Declaration) {
+      continue;
+    }
+    auto decl = std::static_pointer_cast<DeclarationNode>(child);
+    if (decl->getEntityType() != "typeClass") {
+      continue;
+    }
+    auto types = decl->getPropertyValue("types");
+    if (!types) {
+      continue;
+    }
+    for (const auto &member : types->getChildren()) {
+      if (member->getNodeType() == AST::Entity &&
+          ASTQuery::getNodeName(member) == name) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 struct ExternalCallTemplate {
   std::string symbol;
   // Input token index for each operand listed after the symbol, in call
@@ -2319,7 +2344,13 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
           decl->getEntityType() == "gameDefinition") {
         generatedIRCode.domainGeneratedCode[decl->getName()];
       }
-      if (decl->getEntityType() == "signal" ||
+      if (decl->getEntityType() == "constant" &&
+          decl->getNodeType() == AST::Declaration &&
+          isEnumerationMember(decl->getName(), tree)) {
+        // A member of a typeClass of constants (Gpio::PullUp,
+        // ExecutionCooperative) names a value for schemas. Every use was
+        // folded to its value, so it needs no storage.
+      } else if (decl->getEntityType() == "signal" ||
           decl->getEntityType() == "string" ||
           ASTQuery::isConstant(decl, scope, tree)) {
         auto *type = state.getLLVMType(decl);
@@ -3448,10 +3479,52 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
 
         const std::string &sleepDomain =
             domainName.empty() ? targetName : domainName;
-        if (targetName == "AvrTickDomain" && targetRate > 0.0) {
-          generated[sleepDomain].expr.push_back(makeExtCall(
-              "__stride_avr_tick_sleep", makeTickExpr(targetRate, "UInt32"),
-              state.typesMap["UInt32"]));
+
+        // A domain can declare how it sleeps: sleepModule is a platformModule
+        // that takes a tick count, and sleepRate is its ticks per second
+        // (the domain's rate when absent). AVR's tick and loop domains use it
+        // so that sleeping suspends only that domain.
+        std::string sleepSymbol;
+        std::string sleepArgType;
+        double sleepRate = targetRate;
+        auto moduleProp = targetDomainDecl->getPropertyValue("sleepModule");
+        if (moduleProp && moduleProp->getNodeType() != AST::None) {
+          auto moduleDecl = ASTQuery::findDeclarationForNode(moduleProp, scope, tree);
+          if (moduleDecl && moduleDecl->getEntityType() == "platformModule") {
+            auto processing = moduleDecl->getPropertyValue("processing");
+            if (processing && processing->getNodeType() == AST::String) {
+              auto call = parseExternalCallTemplate(
+                  std::static_pointer_cast<ValueNode>(processing)
+                      ->getStringValue());
+              if (call) {
+                sleepSymbol = call->symbol;
+              }
+            }
+            auto inputs = moduleDecl->getPropertyValue("inputs");
+            if (inputs && inputs->getNodeType() == AST::List &&
+                !inputs->getChildren().empty()) {
+              sleepArgType = ASTQuery::getNodeName(inputs->getChildren()[0]);
+            }
+          }
+          if (sleepSymbol.empty() || !state.typesMap.count(sleepArgType)) {
+            LOG_ERROR() << "Domain " << targetName
+                        << ": sleepModule must be a platformModule that calls "
+                           "an external function with one integer input"
+                        << std::endl;
+            continue;
+          }
+          if (auto rateProp = targetDomainDecl->getPropertyValue("sleepRate")) {
+            if (rateProp->getNodeType() == AST::Int ||
+                rateProp->getNodeType() == AST::Real) {
+              sleepRate = std::static_pointer_cast<ValueNode>(rateProp)->toReal();
+            }
+          }
+        }
+
+        if (!sleepSymbol.empty() && sleepRate > 0.0) {
+          generated[sleepDomain].expr.push_back(
+              makeExtCall(sleepSymbol, makeTickExpr(sleepRate, sleepArgType),
+                          state.typesMap[sleepArgType]));
         } else if (isAvr) {
           generated[sleepDomain].expr.push_back(
               makeExtCall("__stride_avr_sleep_ms", makeTickExpr(1000.0, "UInt32"),

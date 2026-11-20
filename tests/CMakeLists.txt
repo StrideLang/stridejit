@@ -42,6 +42,7 @@ if (STRIDEJIT_BUILD_TESTS)
       jit_stream_tests.cpp
       jit_string_tests.cpp
       jit_type_tests.cpp
+      jit_gpio_tests.cpp
 
       # Tooling & Diagnostics
       debug_tests.cpp

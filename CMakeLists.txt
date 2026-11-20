@@ -105,6 +105,7 @@ set(STRIDERUNTIME_SRC
   src/strideruntime_string.c
   src/strideruntime_random.cpp
   src/strideruntime_sleep.cpp
+  src/strideruntime_gpio.cpp
 )
 
 set(STRIDERUNTIME_HEADERS
@@ -112,6 +113,7 @@ set(STRIDERUNTIME_HEADERS
   include/stride/stridejit/stride_status.h
   include/stride/stridejit/strideruntime_random.h
   include/stride/stridejit/strideruntime_sleep.h
+  include/stride/stridejit/strideruntime_gpio.h
 )
 
 add_library(StrideRuntime STATIC
