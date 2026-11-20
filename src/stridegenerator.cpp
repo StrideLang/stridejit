@@ -4661,8 +4661,17 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
         signature.push_back(param.llvmType);
       }
     }
-    funcName =
-        state.mangler.mangle(ASTQuery::getNodeName(funcDecl), {}, signature);
+    // Compute mangled symbol name with canonical package scope.
+        std::vector<std::string> nsScope;
+        if (auto nsProp = funcDecl->getCompilerProperty("namespaceTree")) {
+          for (const auto &seg : nsProp->getChildren()) {
+            if (seg->getNodeType() == AST::String) {
+              nsScope.push_back(
+                  std::static_pointer_cast<ValueNode>(seg)->getStringValue());
+            }
+          }
+        }
+    funcName = state.mangler.mangle(ASTQuery::getNodeName(funcDecl), nsScope, signature);
     if (symbolName) {
       *symbolName = funcName;
     }
