@@ -3680,6 +3680,78 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       collectPropertyArgs(args, typeTree, state, generated[domainName].expr,
                           scope, tree, funcDecl, func);
 
+      // Inside a generic module the data types of the inputs may not be
+      // known when the variant is matched (`type: InputPort.type`), so the
+      // first variant is taken. The arguments' LLVM types are known now: a
+      // variant whose inputs are exactly those types is the one meant
+      // (__Select@Int for Int values, not __Select@Double).
+      if (funcDecl->getEntityType() == "platformModule" && func &&
+          !args.MainIn.argTypes.empty()) {
+        // An input declared in the enclosing module with a port's type
+        // (`type: InputPort.type`) has the type of what that module's
+        // instance connects to, as the module's prototype has
+        std::shared_ptr<FunctionNode> enclosing;
+        if (!scope.empty() && scope.back().first &&
+            scope.back().first->getNodeType() == AST::Function) {
+          enclosing = std::static_pointer_cast<FunctionNode>(scope.back().first);
+        }
+        bool resolvedThroughInstance = false;
+        auto inputList = func->getCompilerProperty("mainInput");
+        if (enclosing && inputList && inputList->getNodeType() == AST::List &&
+            inputList->getChildren().size() == args.MainIn.argTypes.size()) {
+          auto enclosingDecl =
+              ASTQuery::findDeclarationByName(enclosing->getName(), scope, tree);
+          for (size_t i = 0; enclosingDecl && i < args.MainIn.argTypes.size();
+               ++i) {
+            auto elemDecl = ASTQuery::findDeclarationForNode(
+                inputList->getChildren()[i], scope, tree);
+            auto typeNode =
+                elemDecl ? elemDecl->getPropertyValue("type") : nullptr;
+            if (!typeNode || typeNode->getNodeType() != AST::MemberAccess) {
+              continue;
+            }
+            if (auto *resolved = state.getLLVMTypeForCodegenEntity(
+                    elemDecl, enclosingDecl, enclosing)) {
+              if (resolved != args.MainIn.argTypes[i]) {
+                args.MainIn.argTypes[i] = resolved;
+                resolvedThroughInstance = true;
+              }
+            }
+          }
+        }
+        auto inputsMatch = [&](const std::shared_ptr<DeclarationNode> &d) {
+          auto inputs = d->getPropertyValue("inputs");
+          if (!inputs || inputs->getNodeType() != AST::List ||
+              inputs->getChildren().size() != args.MainIn.argTypes.size()) {
+            return false;
+          }
+          for (size_t i = 0; i < args.MainIn.argTypes.size(); ++i) {
+            const auto &input = inputs->getChildren()[i];
+            if (input->getNodeType() != AST::Entity) {
+              return false;
+            }
+            auto type = state.typesMap.find(
+                std::static_pointer_cast<EntityNode>(input)->getName());
+            if (type == state.typesMap.end() ||
+                type->second != args.MainIn.argTypes[i]) {
+              return false;
+            }
+          }
+          return true;
+        };
+        // Only then: otherwise the variant was matched by data types, which
+        // LLVM types can't overrule (UInt16 and Int16 are both i16)
+        if (resolvedThroughInstance && !inputsMatch(funcDecl)) {
+          for (const auto &d : decls) {
+            if (d && d != funcDecl &&
+                d->getEntityType() == "platformModule" && inputsMatch(d)) {
+              funcDecl = d;
+              break;
+            }
+          }
+        }
+      }
+
       if (funcDecl->getEntityType() == "platformModule" && func) {
         if (auto fmtProp = func->getPropertyValue("format")) {
           auto fmtExpr = createExpr(fmtProp);
@@ -3951,9 +4023,12 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         }
       }
 
-      // Overloads with the same LLVM signature differ only in what they do
-      // (Int and UInt32 are both i32, compared signed and unsigned): use the
-      // one of the declaration the call's data types matched
+      // The lookup above goes by LLVM types, which neither tell Int from
+      // UInt32 (both i32, compared signed and unsigned) nor count an integer
+      // widening (a UInt16 passed to the UInt32 variant). The declaration the
+      // call's data types matched is the one meant: use its overload when it
+      // takes as many values and gives the same result; the arguments are
+      // converted to it.
       if (externFunc && funcDecl->getEntityType() == "platformModule") {
         auto processing = funcDecl->getPropertyValue("processing");
         if (processing && processing->getNodeType() == AST::String) {

@@ -495,3 +495,64 @@ TEST(JITTypeTest, MixedTypeComparisonUsesRealVariant) {
     EXPECT_EQ(*below, in < 3.0) << in;
   }
 }
+
+// Unsigned comparisons on AVR stay integer comparisons: UInt8 to UInt32
+// against each other and against literals, and the library's timer solver
+// run on the target. A float compare there would be software floating point.
+TEST(JITTypeTest, AvrUnsignedComparisonsUseNoFloat) {
+  const std::string code = R"(
+use AVR version 1.0 on ArduinoUno
+
+signal Small { type: UInt8 default: 3 domain: PlatformLoopDomain }
+signal Medium { type: UInt16 default: 300 domain: PlatformLoopDomain }
+signal Large { type: UInt32 default: 70000 domain: PlatformLoopDomain }
+switch SmallBelow { default: off domain: PlatformLoopDomain }
+switch MediumAbove { default: off domain: PlatformLoopDomain }
+switch LargeAtMost { default: off domain: PlatformLoopDomain }
+switch Mixed { default: off domain: PlatformLoopDomain }
+switch Same { default: off domain: PlatformLoopDomain }
+
+[Small, 10] >> Less() >> SmallBelow;
+[Medium, 255] >> Greater() >> MediumAbove;
+[Large, 100000] >> LessOrEqual() >> LargeAtMost;
+[Small, Large] >> GreaterOrEqual() >> Mixed;
+[Medium, Large] >> Equal() >> Same;
+
+constant TickPrescalers[5] { value: [1, 8, 64, 256, 1024] type: UInt32 }
+signal Clock { type: UInt32 default: 16000000 domain: PlatformLoopDomain }
+signal TickPrescaler { type: Int default: 0 domain: PlatformLoopDomain }
+signal TickTop { type: UInt32 default: 0 domain: PlatformLoopDomain }
+TimerPrescalerSelect(clock: Clock rate: 1000 maxTop: 255 prescalers: TickPrescalers) >> TickPrescaler;
+TimerTop(clock: Clock rate: 1000 prescaler: TickPrescalers[TickPrescaler]) >> TickTop;
+)";
+
+  std::error_code ec;
+  auto stridePath = std::filesystem::temp_directory_path(ec) /
+                    "stride_avr_unsigned_comparisons_test.stride";
+  {
+    std::ofstream out(stridePath);
+    ASSERT_TRUE(out.is_open());
+    out << code;
+  }
+
+  strd::Logger::startBuffering();
+  strd::StrideEnvironment strenv;
+  bool ok = strenv.generateIr(stridePath.string());
+  const std::string logs = strd::Logger::getBufferedOutput();
+  std::filesystem::remove(stridePath, ec);
+  ASSERT_TRUE(ok) << logs;
+
+  std::string ir;
+  {
+    llvm::raw_string_ostream os(ir);
+    strenv.mStrideEnv.TheModule->print(os, nullptr);
+  }
+  EXPECT_EQ(ir.find("fcmp"), std::string::npos) << ir;
+  EXPECT_EQ(ir.find("uitofp"), std::string::npos) << ir;
+  EXPECT_EQ(ir.find("sitofp"), std::string::npos) << ir;
+  // UInt16 > 255 is unsigned; a UInt8 may compare as a signed Int16, which
+  // holds it exactly
+  EXPECT_NE(ir.find("icmp ugt"), std::string::npos) << ir;
+  EXPECT_EQ(ir.find("icmp sgt i16"), std::string::npos) << ir;
+  EXPECT_NE(ir.find("icmp ule"), std::string::npos) << ir;
+}
