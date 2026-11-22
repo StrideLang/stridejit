@@ -4536,6 +4536,10 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
   StrideCompiler::ConnectionScopeGuard connectionScope(state, scope, tree);
 
   if (!polymorphic) {
+    funcName = state.callableSymbol(funcDecl.get(), funcName);
+    if (symbolName) {
+      *symbolName = funcName;
+    }
     llvm::Function *TheFunction = state.getFunctionInModule(funcName);
     if (TheFunction) {
       LOG_DEBUG() << " Function already defined: " << funcName << std::endl;
@@ -4702,7 +4706,10 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
             }
           }
         }
-    funcName = state.mangler.mangle(ASTQuery::getNodeName(funcDecl), nsScope, signature);
+    funcName = state.callableSymbol(
+        funcDecl.get(),
+        state.mangler.mangle(ASTQuery::getNodeName(funcDecl), nsScope,
+                             signature));
     if (symbolName) {
       *symbolName = funcName;
     }
@@ -4730,8 +4737,8 @@ std::unique_ptr<FunctionAST> StrideGenerator::createFunctionDeclaration(
           collected.push_back(std::move(domainCode.second.expr.front()));
           domainCode.second.expr.erase(domainCode.second.expr.begin());
         }
-        // FIXME nested functions need to have their name mangled/hashed as
-        // they move to the global namespace
+        // Nested functions move to the global namespace under the symbol
+        // callableSymbol gave them
         for (const auto &f : domainCode.second.functions) {
           f->codegen(state);
         }

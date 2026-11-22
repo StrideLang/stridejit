@@ -470,3 +470,28 @@ Count + 1 >> Count;
   EXPECT_EQ(ir.find("@__stride_avr_sleep_ms"), std::string::npos) << ir;
   EXPECT_NE(ir.find("@__stride_avr_tick_sleep(i32"), std::string::npos) << ir;
 }
+
+TEST(JITTypeTest, MixedTypeComparisonUsesRealVariant) {
+  // GreaterOrEqual and Less declare their Int variant first; [Real, Int]
+  // must still compare as reals.
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                "mixed_type_comparison.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  for (double in : {2.5, 3.0, 3.5}) {
+    strenv.setStateVar(statePtr.get(), "In", in, std::nullopt, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto atLeast = strenv.getStateVar<bool>(statePtr.get(), "AtLeast",
+                                            std::nullopt, "RootDomain");
+    auto below = strenv.getStateVar<bool>(statePtr.get(), "Below",
+                                          std::nullopt, "RootDomain");
+    ASSERT_TRUE(atLeast.has_value()) << in;
+    ASSERT_TRUE(below.has_value()) << in;
+    EXPECT_EQ(*atLeast, in >= 3.0) << in;
+    EXPECT_EQ(*below, in < 3.0) << in;
+  }
+}

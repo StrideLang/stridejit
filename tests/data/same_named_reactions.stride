@@ -1,0 +1,37 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [ signal In {domain: RootDomain type: Real} ]
+    outputs: [
+        signal OutA {domain: RootDomain type: Real}
+        signal OutB {domain: RootDomain type: Real}
+    ]
+	domainFunctionCode: ''
+}
+# Both modules have a reaction called Step: each must run its own code
+module AddOne {
+    ports: [ mainInputPort InputPort { entity: Input }, mainOutputPort OutputPort { entity: Output } ]
+    entities: [
+        signal Input { type: Real domain: OutputPort.domain }
+        signal Output { type: Real domain: OutputPort.domain }
+        reaction Step {
+            streams: [ Input + 1.0 >> Output; ]
+        }
+    ]
+    streams: [ on >> Step(); ]
+}
+module AddTen {
+    ports: [ mainInputPort InputPort { entity: Input }, mainOutputPort OutputPort { entity: Output } ]
+    entities: [
+        signal Input { type: Real domain: OutputPort.domain }
+        signal Output { type: Real domain: OutputPort.domain }
+        reaction Step {
+            streams: [ Input + 10.0 >> Output; ]
+        }
+    ]
+    streams: [ on >> Step(); ]
+}
+In >> AddOne() >> OutA;
+In >> AddTen() >> OutB;

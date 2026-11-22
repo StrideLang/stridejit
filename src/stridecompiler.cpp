@@ -214,6 +214,31 @@ std::optional<ExternalFunction> StrideCompiler::getExternalFunction(
     std::string strideName, llvm::Type *returnType,
     std::vector<llvm::Type *> argTypes, bool allowConversion) {
   std::optional<ExternalFunction> out;
+  // Without an exact match, the candidate the arguments widen to with the
+  // fewest conversions (an integer becomes a real, a float a double), so
+  // [Real, Int] picks the Real variant whatever order variants are declared
+  // in. A narrowing candidate (a real passed as an integer) is only used when
+  // nothing widens.
+  int bestWidenings = -1;
+  auto widenings = [](llvm::FunctionType *fType,
+                      const std::vector<llvm::Type *> &args) {
+    int count = 0;
+    for (size_t i = 0; i < args.size(); i++) {
+      llvm::Type *arg = args[i];
+      llvm::Type *param = fType->getParamType(i);
+      if (arg == param) {
+        continue;
+      }
+      bool widens = (arg->isIntegerTy() && !arg->isIntegerTy(1) &&
+                     param->isFloatingPointTy()) ||
+                    (arg->isFloatTy() && param->isDoubleTy());
+      if (!widens) {
+        return -1;
+      }
+      count++;
+    }
+    return count;
+  };
   for (const auto &externFunc : functionMap) {
     if (externFunc.first == strideName) {
       for (const auto &candidate : externFunc.second) {
@@ -284,7 +309,11 @@ std::optional<ExternalFunction> StrideCompiler::getExternalFunction(
                           << std::endl;
               return candidate;
             }
-            if (!out) {
+            int count = widenings(llvmFType, argTypes);
+            if (count >= 0 && (bestWidenings < 0 || count < bestWidenings)) {
+              out = candidate;
+              bestWidenings = count;
+            } else if (!out) {
               out = candidate;
             }
           } else {
@@ -300,6 +329,26 @@ std::optional<ExternalFunction> StrideCompiler::getExternalFunction(
   }
 
   return out;
+}
+
+std::string StrideCompiler::callableSymbol(const DeclarationNode *decl,
+                                           const std::string &name) {
+  auto key = std::make_pair(decl, name);
+  auto known = m_callableSymbols.find(key);
+  if (known != m_callableSymbols.end()) {
+    return known->second;
+  }
+  std::string symbol = name;
+  for (int n = 1;; n++) {
+    auto owner = m_callableSymbolOwners.find(symbol);
+    if (owner == m_callableSymbolOwners.end() || owner->second == decl) {
+      break;
+    }
+    symbol = name + "_" + std::to_string(n);
+  }
+  m_callableSymbolOwners[symbol] = decl;
+  m_callableSymbols[key] = symbol;
+  return symbol;
 }
 
 llvm::Function *StrideCompiler::getFunctionInModule(std::string Name) {

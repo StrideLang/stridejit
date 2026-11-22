@@ -165,6 +165,12 @@ public:
                               std::shared_ptr<FunctionNode> functionInstance);
 
   llvm::Function *getFunctionInModule(std::string Name);
+  // The symbol of the function generated for callable `decl` under `name`.
+  // Different declarations can share a name (reactions nested in different
+  // modules, modules of different packages): the first keeps `name`, the
+  // others get `name_1`, `name_2`... so one never runs the other's code.
+  std::string callableSymbol(const DeclarationNode *decl,
+                             const std::string &name);
 
   llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
                                            llvm::StringRef VarName,
@@ -351,6 +357,11 @@ public:
   // Names of generated callables that are mangled, e.g. one variant per type
   // signature of a polymorphic module. Resolves them back to Stride names.
   NameMangler mangler;
+  // callableSymbol's assignments: (declaration, name) -> symbol, and the
+  // declaration each symbol belongs to
+  std::map<std::pair<const DeclarationNode *, std::string>, std::string>
+      m_callableSymbols;
+  std::map<std::string, const DeclarationNode *> m_callableSymbolOwners;
 
   // Scope of the function instance whose parameter types are being
   // resolved. Used to find declarations of the nodes connected to its ports.

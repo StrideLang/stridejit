@@ -1,0 +1,34 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [ signal In {domain: RootDomain type: Real} ]
+    outputs: [
+        switch AtLeast {domain: RootDomain}
+        switch Below {domain: RootDomain}
+    ]
+	domainFunctionCode: ''
+}
+# A Real compared with an Int constant uses the Real comparison, whichever
+# variant is declared first (GreaterOrEqual and Less list Int first)
+module AtLeastLimit {
+    ports: [ mainInputPort InputPort { entity: Input }, mainOutputPort OutputPort { entity: Output } ]
+    entities: [
+        signal Input { type: InputPort.type domain: OutputPort.domain }
+        switch Output { domain: OutputPort.domain }
+        constant Limit { value: 3 }
+    ]
+    streams: [ [Input, Limit] >> GreaterOrEqual() >> Output; ]
+}
+module BelowLimit {
+    ports: [ mainInputPort InputPort { entity: Input }, mainOutputPort OutputPort { entity: Output } ]
+    entities: [
+        signal Input { type: InputPort.type domain: OutputPort.domain }
+        switch Output { domain: OutputPort.domain }
+        constant Limit { value: 3 }
+    ]
+    streams: [ [Input, Limit] >> Less() >> Output; ]
+}
+In >> AtLeastLimit() >> AtLeast;
+In >> BelowLimit() >> Below;

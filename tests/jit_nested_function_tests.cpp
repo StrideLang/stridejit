@@ -990,3 +990,26 @@ TEST(JITNestedFunctionTest, StandaloneInvokerParameterList) {
 
   strenv.deallocateState(state);
 }
+
+TEST(JITNestedFunctionTest, SameNamedReactionsInDifferentModules) {
+  // AddOne and AddTen both declare a reaction Step. Each call must run its
+  // own module's Step, not the one generated first.
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                "same_named_reactions.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.setStateVar(statePtr.get(), "In", 5.0, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  auto outA = strenv.getStateVar<double>(statePtr.get(), "OutA", std::nullopt,
+                                         "RootDomain");
+  auto outB = strenv.getStateVar<double>(statePtr.get(), "OutB", std::nullopt,
+                                         "RootDomain");
+  ASSERT_TRUE(outA.has_value());
+  ASSERT_TRUE(outB.has_value());
+  EXPECT_DOUBLE_EQ(*outA, 6.0);
+  EXPECT_DOUBLE_EQ(*outB, 15.0);
+}
