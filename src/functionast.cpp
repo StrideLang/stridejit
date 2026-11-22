@@ -2043,6 +2043,26 @@ void processArgGroup(
             }
             type = elemTy;
           }
+        } else if (!isOutputGroup && targetElemTy && type.has_value() &&
+                   type.value() != targetElemTy &&
+                   (type.value()->isIntegerTy() ||
+                    type.value()->isFloatingPointTy()) &&
+                   (targetElemTy->isIntegerTy() ||
+                    targetElemTy->isFloatingPointTy())) {
+          // A variable of another type than the callee takes (an Int passed
+          // to a Real property): pass a converted copy, as literals are
+          llvm::Function *TheFunction =
+              state.Builder->GetInsertBlock()->getParent();
+          auto *varExpr = dynamic_cast<VariableExprAST *>(ArgGroup[i].get());
+          std::string varName = varExpr ? varExpr->getName() : "call_tmp";
+          llvm::Value *loaded =
+              state.Builder->CreateLoad(type.value(), newArgVal, varName);
+          llvm::AllocaInst *tempAlloc = state.CreateEntryBlockAlloca(
+              TheFunction, varName + "_conv", targetElemTy);
+          state.Builder->CreateStore(convertScalar(state, loaded, targetElemTy),
+                                     tempAlloc);
+          newArgVal = tempAlloc;
+          type = targetElemTy;
         }
       } else if (calleeArg && !calleeArg->getType()->isPointerTy() &&
                  newArgVal->getType()->isPointerTy()) {

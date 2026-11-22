@@ -1,0 +1,36 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+        signal A {domain: RootDomain type: UInt32}
+        signal B {domain: RootDomain type: UInt32}
+    ]
+    outputs: [
+        switch AtMost {domain: RootDomain}
+        switch LoopAtMost {domain: RootDomain}
+        switch AtMostLiteral {domain: RootDomain}
+    ]
+	domainFunctionCode: ''
+}
+
+# UInt32 values compare as unsigned integers, not as reals: at the top
+# level, inside a module, and against a literal
+module AtMostModule {
+    ports: [
+        mainOutputPort OutputPort { entity: Output }
+        propertyInputPort LeftPort { name: "left" entity: Left }
+        propertyInputPort RightPort { name: "right" entity: Right }
+    ]
+    entities: [
+        switch Output { default: off }
+        signal Left { type: UInt32 }
+        signal Right { type: UInt32 }
+    ]
+    streams: [ [Left, Right] >> LessOrEqual() >> Output; ]
+}
+
+[A, B] >> LessOrEqual() >> AtMost;
+AtMostModule(left: A right: B) >> LoopAtMost;
+[A, 255] >> LessOrEqual() >> AtMostLiteral;

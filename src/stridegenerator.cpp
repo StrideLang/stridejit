@@ -2885,6 +2885,76 @@ void StrideGenerator::collectPropertyArgs(
                          const std::shared_ptr<PropertyNode> &b) {
                        return portIndex(a) < portIndex(b);
                      });
+    // A property the call leaves out takes its port entity's default, so the
+    // call passes one value per property port (Select's whenOff defaults to
+    // its input). The default is a literal, or the module's main input.
+    if (portsNode && funcDecl->getEntityType() != "platformModule") {
+      std::string mainInputEntity;
+      if (auto inPort = ASTQuery::getModuleMainInputPort(funcDecl)) {
+        mainInputEntity = ASTQuery::getNodeName(inPort->getPropertyValue("entity"));
+      }
+      ASTNode mainInput =
+          (typeTree && typeTree->instance)
+              ? typeTree->instance->getCompilerProperty("mainInput")
+              : nullptr;
+      if (!mainInput) {
+        mainInput = funcInstance->getCompilerProperty("mainInput");
+      }
+      auto entities = funcDecl->getPropertyValue("entities");
+      std::vector<std::shared_ptr<PropertyNode>> complete;
+      size_t next = 0;
+      for (const auto &port : portsNode->getChildren()) {
+        if (port->getNodeType() != AST::Declaration) {
+          continue;
+        }
+        auto portDecl = std::static_pointer_cast<DeclarationNode>(port);
+        if (portDecl->getEntityType() != "propertyInputPort" &&
+            portDecl->getEntityType() != "propertyOutputPort") {
+          continue;
+        }
+        const std::string portName = portOrder[next++];
+        auto given = std::find_if(props.begin(), props.end(),
+                                  [&](const std::shared_ptr<PropertyNode> &p) {
+                                    return p->getName() == portName;
+                                  });
+        if (given != props.end()) {
+          complete.push_back(*given);
+          continue;
+        }
+        ASTNode fallback;
+        const std::string entityName =
+            ASTQuery::getNodeName(portDecl->getPropertyValue("entity"));
+        if (entities && !entityName.empty()) {
+          auto entityDecl = ASTQuery::findDeclarationByName(
+              entityName, {{funcDecl, entities->getChildren()}}, nullptr);
+          if (entityDecl) {
+            fallback = entityDecl->getPropertyValue("default");
+          }
+        }
+        if (fallback && fallback->getNodeType() == AST::Entity &&
+            ASTQuery::getNodeName(fallback) == mainInputEntity) {
+          fallback = mainInput;
+          if (auto inputFunc = std::dynamic_pointer_cast<FunctionNode>(fallback)) {
+            fallback = inputFunc->getCompilerProperty("intermediateOutput");
+          }
+        }
+        if (!fallback) {
+          LOG_ERROR() << func->getFilename() << ":" << func->getLine() << " "
+                      << func->getName() << " needs its " << portName
+                      << " property: it has no default" << std::endl;
+          continue;
+        }
+        complete.push_back(std::make_shared<PropertyNode>(
+            portName, fallback, func->getFilename().c_str(), func->getLine()));
+      }
+      // Properties no port declares go last, as before
+      for (const auto &p : props) {
+        if (portIndex(p) >= portOrder.size()) {
+          complete.push_back(p);
+        }
+      }
+      props = std::move(complete);
+    }
     for (const auto &propNode : props) {
       auto value = propNode->getValue();
       if (value && value->getNodeType() == AST::Entity) {
@@ -3380,6 +3450,28 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                     << func->getName() << std::endl;
         continue;
       }
+      // A framework variant (Select@Double) takes its values as inputs and
+      // has no properties, so a call that passes properties
+      // (Select(condition: whenOn:)) means the module of the plain name
+      if (funcDecl->getEntityType() == "platformModule") {
+        bool passesProperties = false;
+        for (const auto &prop : func->getProperties()) {
+          if (prop->getName() != "format") {
+            passesProperties = true;
+            break;
+          }
+        }
+        if (passesProperties) {
+          for (const auto &d : ASTQuery::findAllDeclarations(
+                   func->getName(), scope, tree, func->getNamespaceList())) {
+            if (d && d->getEntityType() != "platformModule" &&
+                isCallable(d, scope, tree)) {
+              funcDecl = d;
+              break;
+            }
+          }
+        }
+      }
 
       if (funcDecl->getEntityType() == "_domainDefinition") {
         funcDecl->setCompilerProperty(
@@ -3855,6 +3947,26 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
             args.MainOut.argTypes.push_back(state.getLLVMType(mainOutputDecl));
           } else if (retType && !retType->isVoidTy()) {
             args.MainOut.argTypes.push_back(retType);
+          }
+        }
+      }
+
+      // Overloads with the same LLVM signature differ only in what they do
+      // (Int and UInt32 are both i32, compared signed and unsigned): use the
+      // one of the declaration the call's data types matched
+      if (externFunc && funcDecl->getEntityType() == "platformModule") {
+        auto processing = funcDecl->getPropertyValue("processing");
+        if (processing && processing->getNodeType() == AST::String) {
+          const std::string declared =
+              std::static_pointer_cast<ValueNode>(processing)->getStringValue();
+          if (externFunc->name != declared) {
+            for (const auto &candidate : state.functionMap[funcDecl->getName()]) {
+              if (candidate.name == declared &&
+                  candidate.llvmFunctionType == externFunc->llvmFunctionType) {
+                externFunc = candidate;
+                break;
+              }
+            }
           }
         }
       }

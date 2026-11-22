@@ -1,0 +1,19 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+        signal In {domain: RootDomain type: Int}
+        switch Pick {domain: RootDomain}
+    ]
+    outputs: [
+        signal Chosen {domain: RootDomain type: Int}
+        signal Both {domain: RootDomain type: Int}
+    ]
+	domainFunctionCode: ''
+}
+
+# whenOff left out: it defaults to the input
+In >> Select(condition: Pick whenOn: 7) >> Chosen;
+In >> Select(condition: Pick whenOn: 7 whenOff: 9) >> Both;

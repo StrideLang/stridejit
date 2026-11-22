@@ -457,6 +457,35 @@ TEST(JITControlFlowTest, TimerConfigurationFilledWhileCompiling) {
   EXPECT_NEAR(rateValue->getValueAPF().convertToDouble(), 1000.0, 1e-9);
 }
 
+// Select's whenOff defaults to its input: In >> Select(condition: Pick
+// whenOn: 7) gives 7 when Pick is on and In when it is off
+TEST(JITControlFlowTest, SelectWhenOffDefaultsToInput) {
+  strd::Logger::startBuffering();
+  strd::StrideEnvironment strenv;
+  const bool generated =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "select_default.stride");
+  const std::string logs = strd::Logger::getBufferedOutput();
+  ASSERT_TRUE(generated) << logs;
+  ASSERT_TRUE(strenv.compileInMemory()) << logs;
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  for (bool pick : {false, true}) {
+    strenv.setStateVar(statePtr.get(), "In", 3, std::nullopt, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "Pick", pick, std::nullopt,
+                       "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    auto chosen = strenv.getStateVar<int32_t>(statePtr.get(), "Chosen",
+                                              std::nullopt, "RootDomain");
+    auto both = strenv.getStateVar<int32_t>(statePtr.get(), "Both",
+                                            std::nullopt, "RootDomain");
+    ASSERT_TRUE(chosen.has_value()) << pick;
+    ASSERT_TRUE(both.has_value()) << pick;
+    EXPECT_EQ(*chosen, pick ? 7 : 3) << pick;
+    EXPECT_EQ(*both, pick ? 7 : 9) << pick;
+  }
+}
+
 // A neighbour table filled while compiling, read in a broadcast: each
 // instance reads a fixed section, the edge reads off, and nothing reads the
 // table at run time (the code the Steps pattern generates by hand)
@@ -1339,3 +1368,38 @@ TEST(JITControlFlowTest, LoopIteratorSizeMismatchValidation) {
 }
 
 } // namespace
+
+// UInt32 comparisons are unsigned integer comparisons, not real ones (which
+// would mean software floating point on AVR)
+TEST(JITControlFlowTest, UnsignedComparisonsStayInteger) {
+  strd::Logger::startBuffering();
+  strd::StrideEnvironment strenv;
+  const bool generated =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "uint_comparison.stride");
+  const std::string logs = strd::Logger::getBufferedOutput();
+  ASSERT_TRUE(generated) << logs;
+  std::string ir;
+  llvm::raw_string_ostream rso(ir);
+  strenv.mStrideEnv.TheModule->print(rso, nullptr);
+  EXPECT_EQ(ir.find("uitofp"), std::string::npos) << ir;
+  EXPECT_EQ(ir.find("fcmp"), std::string::npos) << ir;
+  EXPECT_NE(ir.find("icmp ule"), std::string::npos) << ir;
+
+  ASSERT_TRUE(strenv.compileInMemory()) << logs;
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  // 3000000000 is negative as a signed 32-bit integer
+  for (uint32_t a : {5u, 255u, 256u, 3000000000u}) {
+    strenv.setStateVar(statePtr.get(), "A", a, std::nullopt, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "B", 255u, std::nullopt, "RootDomain");
+    strenv.invoke("RootDomain_process", args);
+    for (const char *name : {"AtMost", "LoopAtMost", "AtMostLiteral"}) {
+      auto value =
+          strenv.getStateVar<bool>(statePtr.get(), name, std::nullopt,
+                                   "RootDomain");
+      ASSERT_TRUE(value.has_value()) << name;
+      EXPECT_EQ(*value, a <= 255u) << name << " " << a;
+    }
+  }
+}
