@@ -1,0 +1,35 @@
+_domainDefinition RootDomain {
+	framework: _JitFramework
+	# requiresResources: [_RootContext]
+	# providesResources: [_DomainFunction]
+	rate: -1 # -1 is 'one-shot/final' domain
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [ ]
+    outputs: [
+        signal Out { domain: RootDomain type: Int }
+    ]
+	domainFunctionCode: ''
+}
+
+constant Clock16 { value: 16000000 type: UInt32 }
+constant Clock8 { value: 8000000 type: UInt32 }
+constant Prescalers[5] { value: [1, 8, 64, 256, 1024] type: UInt32 }
+
+# A 1 kHz tick on an 8-bit timer, at 16 MHz and at 8 MHz
+constant Prescaler16 { type: Int }
+constant Top16 { type: UInt32 }
+constant Rate16 { type: Real }
+constant Prescaler8 { type: Int }
+constant Top8 { type: UInt32 }
+# 10 Hz does not fit an 8-bit timer at 16 MHz
+constant SlowPrescaler { type: Int }
+
+TimerPrescalerSelect(clock: Clock16 rate: 1000 maxTop: 255 prescalers: Prescalers) >> Prescaler16;
+TimerTop(clock: Clock16 rate: 1000 prescaler: Prescalers[Prescaler16]) >> Top16;
+TimerRate(clock: Clock16 prescaler: Prescalers[Prescaler16] top: Top16) >> Rate16;
+TimerPrescalerSelect(clock: Clock8 rate: 1000 maxTop: 255 prescalers: Prescalers) >> Prescaler8;
+TimerTop(clock: Clock8 rate: 1000 prescaler: Prescalers[Prescaler8]) >> Top8;
+TimerPrescalerSelect(clock: Clock16 rate: 10 maxTop: 255 prescalers: Prescalers) >> SlowPrescaler;
+
+Top16 >> Out;

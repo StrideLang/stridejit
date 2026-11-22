@@ -365,6 +365,10 @@ static bool validateDataTypes(ASTNode tree) {
   return valid;
 }
 
+namespace {
+void lowerCompileChecks(ASTNode root);
+}
+
 bool StrideEnvironment::prepareTree(ASTNode tree) {
   if (!tree) {
     return false;
@@ -395,6 +399,9 @@ bool StrideEnvironment::prepareTree(ASTNode tree) {
   if (!m_boardOverride.empty() && !systemNodes.empty()) {
     systemNodes.front()->setHwPlatforms({m_boardOverride});
   }
+
+  // Before resolving, so the streams it adds are resolved like any other
+  lowerCompileChecks(tree);
 
   CodeResolver resolver(tree,
                         !m_strideRoot.empty()
@@ -713,7 +720,9 @@ bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
   }
   m_trees.push_back(root);
 
-  evaluateConstantFills(root);
+  if (!evaluateConstantFills(root)) {
+    return false;
+  }
 
   initializeJIT();
 
@@ -1099,11 +1108,278 @@ ASTNode constantElement(const FilledGlobal &global, const char *bytes,
   }
   return nullptr;
 }
+
+// The compileChecks declared at the root of the tree
+std::vector<std::shared_ptr<DeclarationNode>> compileChecks(ASTNode root) {
+  std::vector<std::shared_ptr<DeclarationNode>> checks;
+  for (const auto &child : root->getChildren()) {
+    if (child->getNodeType() == AST::Declaration &&
+        std::static_pointer_cast<DeclarationNode>(child)->getEntityType() ==
+            "compileCheck") {
+      checks.push_back(std::static_pointer_cast<DeclarationNode>(child));
+    }
+  }
+  return checks;
+}
+
+// The streams of a check's condition, each computing one Switch
+std::vector<ASTNode> checkConditions(const std::shared_ptr<DeclarationNode> &check) {
+  auto condition = check->getPropertyValue("condition");
+  if (!condition || condition->getNodeType() != AST::List) {
+    return {};
+  }
+  return condition->getChildren();
+}
+
+// The hidden constant that a check's condition `index` writes
+std::string checkConditionName(const std::string &check, size_t index) {
+  return check + "_Condition" + std::to_string(index);
+}
+
+std::shared_ptr<DeclarationNode> rootConstant(const std::string &name,
+                                              ASTNode root) {
+  for (const auto &child : root->getChildren()) {
+    if ((child->getNodeType() == AST::Declaration ||
+         child->getNodeType() == AST::ArrayDeclaration) &&
+        std::static_pointer_cast<DeclarationNode>(child)->getName() == name) {
+      auto decl = std::static_pointer_cast<DeclarationNode>(child);
+      if (decl->getEntityType() == "constant") {
+        return decl;
+      }
+    }
+  }
+  return nullptr;
+}
+
+// compileCheck X { condition: [ [A, 3] >> Less(); ] } becomes
+//   constant X_Condition0 { type: UInt8 }
+//   [A, 3] >> Less() >> X_Condition0;
+// so the constant fills compute, and so evaluate, the condition. The
+// stream moves to the root, and the condition names the constant instead.
+void lowerCompileChecks(ASTNode root) {
+  if (!root) {
+    return;
+  }
+  for (const auto &check : compileChecks(root)) {
+    auto condition = check->getPropertyValue("condition");
+    if (!condition || condition->getNodeType() != AST::List) {
+      continue;
+    }
+    const auto conditions = condition->getChildren();
+    std::vector<ASTNode> names;
+    for (size_t i = 0; i < conditions.size(); ++i) {
+      const std::string name = checkConditionName(check->getName(), i);
+      const std::string fileName = conditions[i]->getFilename();
+      const char *file = fileName.c_str();
+      const int line = conditions[i]->getLine();
+      names.push_back(std::make_shared<EntityNode>(name, file, line));
+      if (conditions[i]->getNodeType() == AST::Entity &&
+          ASTQuery::getNodeName(conditions[i]) == name) {
+        continue; // Lowered already (a tree from the cache)
+      }
+      auto properties = std::make_shared<ListNode>(file, line);
+      // A constant is a number: 1 when the condition is on
+      properties->addChild(std::make_shared<PropertyNode>(
+          "type", std::make_shared<EntityNode>("UInt8", file, line), file,
+          line));
+      root->addChild(std::make_shared<DeclarationNode>(name, "constant",
+                                                       properties, file, line));
+      auto destination = std::make_shared<EntityNode>(name, file, line);
+      ASTNode source = conditions[i];
+      if (source->getNodeType() == AST::Stream) {
+        auto last = std::static_pointer_cast<StreamNode>(source);
+        while (last->getRight() &&
+               last->getRight()->getNodeType() == AST::Stream) {
+          last = std::static_pointer_cast<StreamNode>(last->getRight());
+        }
+        if (last->getRight()) {
+          last->setRight(std::make_shared<StreamNode>(
+              last->getRight(), destination, file, line));
+        } else {
+          last->setRight(destination);
+        }
+        root->addChild(source);
+      } else {
+        root->addChild(
+            std::make_shared<StreamNode>(source, destination, file, line));
+      }
+    }
+    auto list = std::make_shared<ListNode>(condition->getFilename().c_str(),
+                                           condition->getLine());
+    for (const auto &name : names) {
+      list->addChild(name);
+    }
+    check->setPropertyValue("condition", list);
+    // The resolver replaces the constants in `values` with what they hold,
+    // so the report keeps their names
+    auto listed = check->getPropertyValue("values");
+    if (listed && listed->getNodeType() == AST::List &&
+        !check->getCompilerProperty("valueNames")) {
+      auto valueNames = std::make_shared<ListNode>(
+          listed->getFilename().c_str(), listed->getLine());
+      for (const auto &item : listed->getChildren()) {
+        valueNames->addChild(std::make_shared<ValueNode>(
+            ASTQuery::getNodeName(item), item->getFilename().c_str(),
+            item->getLine()));
+      }
+      check->setCompilerProperty("valueNames", valueNames);
+    }
+  }
+}
+
+std::string describeValue(const ASTNode &value) {
+  if (!value) {
+    return "?";
+  }
+  if (value->getNodeType() == AST::List) {
+    std::string text = "[";
+    for (const auto &member : value->getChildren()) {
+      text += (text.size() > 1 ? ", " : "") + describeValue(member);
+    }
+    return text + "]";
+  }
+  if (value->getNodeType() == AST::Switch) {
+    return std::static_pointer_cast<ValueNode>(value)->getSwitchValue() ? "on"
+                                                                        : "off";
+  }
+  if (value->getNodeType() == AST::Int || value->getNodeType() == AST::Real ||
+      value->getNodeType() == AST::String) {
+    return std::static_pointer_cast<ValueNode>(value)->toString();
+  }
+  return "?";
+}
+
+// Reports each check whose condition is off. A condition that was not
+// evaluated (it reads something not known while compiling) is an error: a
+// check never runs on the target. Its stream goes either way.
+bool reportCompileChecks(ASTNode root,
+                         const std::set<std::string> &evaluated,
+                         const std::map<std::string, std::string> &deferred) {
+  bool passed = true;
+  for (const auto &check : compileChecks(root)) {
+    const std::string where =
+        check->getFilename() + ":" + std::to_string(check->getLine()) + " ";
+    auto severity = check->getPropertyValue("severity");
+    const bool warning =
+        severity && severity->getNodeType() == AST::String &&
+        std::static_pointer_cast<ValueNode>(severity)->getStringValue() ==
+            "warning";
+    std::string message = "(no message)";
+    auto messageNode = check->getPropertyValue("message");
+    if (messageNode && messageNode->getNodeType() == AST::String) {
+      message = std::static_pointer_cast<ValueNode>(messageNode)->getStringValue();
+    }
+    const auto conditions = checkConditions(check);
+    if (conditions.empty()) {
+      LOG_ERROR() << where << "compileCheck '" << check->getName()
+                  << "' has no condition" << std::endl;
+      passed = false;
+    }
+    for (size_t i = 0; i < conditions.size(); ++i) {
+      const std::string name = checkConditionName(check->getName(), i);
+      auto constant = rootConstant(name, root);
+      if (!evaluated.count(name) || !constant) {
+        auto reason = deferred.find(name);
+        LOG_ERROR() << where << "compileCheck '" << check->getName()
+                    << "' can't be checked while compiling: its condition "
+                    << (reason != deferred.end()
+                            ? reason->second
+                            : std::string("could not be computed on its own"))
+                    << std::endl;
+        passed = false;
+        for (const auto &child : root->getChildren()) {
+          if (child->getNodeType() == AST::Stream &&
+              ASTQuery::getNodeName(streamDestination(
+                  std::static_pointer_cast<StreamNode>(child))) == name) {
+            removeEverywhere(root, child);
+            break;
+          }
+        }
+        continue;
+      }
+      auto value = constant->getPropertyValue("value");
+      const bool on =
+          value &&
+          ((value->getNodeType() == AST::Switch &&
+            std::static_pointer_cast<ValueNode>(value)->getSwitchValue()) ||
+           (value->getNodeType() == AST::Int &&
+            std::static_pointer_cast<ValueNode>(value)->getIntValue() != 0));
+      if (on) {
+        continue;
+      }
+      std::string values;
+      auto valueNames = check->getCompilerProperty("valueNames");
+      if (valueNames && valueNames->getNodeType() == AST::List) {
+        for (const auto &item : valueNames->getChildren()) {
+          const std::string name =
+              std::static_pointer_cast<ValueNode>(item)->getStringValue();
+          auto constant = rootConstant(name, root);
+          values += (values.empty() ? " (" : ", ") + name + " = " +
+                    describeValue(constant ? constant->getPropertyValue("value")
+                                           : nullptr);
+        }
+        if (!values.empty()) {
+          values += ")";
+        }
+      }
+      auto listed = check->getPropertyValue("values");
+      if (values.empty() && listed && listed->getNodeType() == AST::List) {
+        for (const auto &item : listed->getChildren()) {
+          auto resolved = ASTFunctions::resolveConstant(item, {}, root);
+          values += (values.empty() ? " (" : ", ") +
+                    ASTQuery::getNodeName(item) + " = " +
+                    describeValue(resolved);
+        }
+        if (!values.empty()) {
+          values += ")";
+        }
+      }
+      const std::string which =
+          conditions.size() > 1 ? " [condition " + std::to_string(i + 1) + "]"
+                                : "";
+      if (warning) {
+        LOG_WARNING() << where << "compileCheck '" << check->getName()
+                      << "': " << message << which << values << std::endl;
+      } else {
+        LOG_ERROR() << where << "compileCheck '" << check->getName()
+                    << "' failed: " << message << which << values << std::endl;
+        passed = false;
+      }
+    }
+  }
+  return passed;
+}
 } // namespace
 
-void StrideEnvironment::evaluateConstantFills(ASTNode root) {
-  if (!root || !m_evaluateConstants) {
-    return;
+bool StrideEnvironment::evaluateConstantFills(ASTNode root) {
+  if (!root) {
+    return true;
+  }
+  std::set<std::string> evaluated;
+  // Why a fill runs at load time instead, by constant
+  std::map<std::string, std::string> deferred;
+  auto finish = [&]() { return reportCompileChecks(root, evaluated, deferred); };
+  if (!m_evaluateConstants) {
+    if (!compileChecks(root).empty()) {
+      LOG_WARNING() << "compileChecks are not checked: constant evaluation "
+                       "is off"
+                    << std::endl;
+    }
+    // Nothing is evaluated, so every check would be an error; drop them
+    for (const auto &check : compileChecks(root)) {
+      for (size_t i = 0; i < checkConditions(check).size(); ++i) {
+        const std::string name = checkConditionName(check->getName(), i);
+        for (const auto &child : root->getChildren()) {
+          if (child->getNodeType() == AST::Stream &&
+              ASTQuery::getNodeName(streamDestination(
+                  std::static_pointer_cast<StreamNode>(child))) == name) {
+            removeEverywhere(root, child);
+            break;
+          }
+        }
+      }
+    }
+    return true;
   }
   // The streams that fill constants, in order: top-level streams, then each
   // domain's onLoad
@@ -1137,6 +1413,7 @@ void StrideEnvironment::evaluateConstantFills(ASTNode root) {
       if (!read.empty()) {
         LOG_INFO() << "Constant " << name << " is filled at load time: its "
                    << "stream reads " << read << std::endl;
+        deferred[name] = "reads " + read;
         continue;
       }
       std::set<std::string> visited;
@@ -1146,6 +1423,8 @@ void StrideEnvironment::evaluateConstantFills(ASTNode root) {
         LOG_INFO() << "Constant " << name << " is filled at load time: its "
                    << "stream calls " << impure
                    << ", a platform module that is not pure: on" << std::endl;
+        deferred[name] = "calls " + impure +
+                         ", a platform module that is not pure: on";
         continue;
       }
       fills.push_back({container, stream, constant});
@@ -1164,7 +1443,7 @@ void StrideEnvironment::evaluateConstantFills(ASTNode root) {
     }
   }
   if (fills.empty()) {
-    return;
+    return finish();
   }
 
   // Compile the fill streams alone, with the constants they use as globals
@@ -1178,9 +1457,9 @@ void StrideEnvironment::evaluateConstantFills(ASTNode root) {
   ScopeStack rootScope = {{nullptr, root->getChildren()}};
   state.m_intanceTree = CodeAnalysis::getStateStructInformation({}, root);
   state.buildStateStructTypes(state.m_intanceTree, rootScope, root);
+  // Fills are computed now, on the host, whatever the program targets.
+  std::vector<ASTNode> frameworkScope;
   {
-    // Fills are computed now, on the host, whatever the program targets.
-    std::vector<ASTNode> frameworkScope;
     declarePlatformModules(hostPlatformMembers(), frameworkScope, state);
     for (const auto &child : root->getChildren()) {
       if (child->getNodeType() == AST::Declaration ||
@@ -1202,11 +1481,12 @@ void StrideEnvironment::evaluateConstantFills(ASTNode root) {
   const std::string functionName = "__constant_fill";
   if (!StrideGenerator::generateStreamsFunction(functionName, streams, root,
                                                 state, nullptr,
-                                                "constant fill")) {
+                                                "constant fill",
+                                                &frameworkScope)) {
     LOG_ERROR() << "The streams that fill constants could not be compiled "
                    "on their own; they run at load time"
                 << std::endl;
-    return;
+    return finish();
   }
   // The filled constants must survive optimization and be found by name
   std::map<std::string, FilledGlobal> globals;
@@ -1223,17 +1503,16 @@ void StrideEnvironment::evaluateConstantFills(ASTNode root) {
     LOG_ERROR() << "The streams that fill constants could not be compiled; "
                    "they run at load time"
                 << std::endl;
-    return;
+    return finish();
   }
   auto function = evaluation.getFunction(functionName);
   if (!function) {
     llvm::consumeError(function.takeError());
-    return;
+    return finish();
   }
   function->toPtr<void (*)()>()();
 
   // The results become the constants' values; the streams go
-  std::set<std::string> evaluated;
   for (const auto &fill : fills) {
     const std::string name = fill.constant->getName();
     auto found = globals.find(name);
@@ -1281,6 +1560,7 @@ void StrideEnvironment::evaluateConstantFills(ASTNode root) {
   if (!evaluated.empty()) {
     foldConstantReads(root, root, evaluated);
   }
+  return finish();
 }
 
 void StrideEnvironment::optimizeModule() {

@@ -352,6 +352,17 @@ std::vector<llvm::Value *> StrideCompiler::resolveGepIndices(
                                          *strIdx + "_idx");
       }
       idxList.push_back(indexVal);
+    } else if (auto *global = TheModule
+                                  ? TheModule->getGlobalVariable(*strIdx, true)
+                                  : nullptr) {
+      // A constant, e.g. one filled while compiling, is a module global
+      llvm::Value *indexVal =
+          Builder->CreateLoad(global->getValueType(), global, *strIdx);
+      if (indexVal->getType()->isFloatingPointTy()) {
+        indexVal = Builder->CreateFPToSI(indexVal, Builder->getInt64Ty(),
+                                         *strIdx + "_idx");
+      }
+      idxList.push_back(indexVal);
     } else {
       assert(0 == 1);
     }

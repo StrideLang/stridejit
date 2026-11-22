@@ -98,13 +98,16 @@ public:
                                    ASTNode tree, StrideCompiler &state);
   // A function with no arguments and no state that runs streams in the root
   // scope: they can use constants and other module globals, not a domain's
-  // blocks. Returns nullptr if it cannot be compiled.
+  // blocks. frameworkScope holds the framework's platform modules when they
+  // are not in the tree (such as Equal@Int_Bool, which overrides a module).
+  // Returns nullptr if it cannot be compiled.
   static llvm::Function *
   generateStreamsFunction(const std::string &name,
                           const std::vector<ASTNode> &streams, ASTNode tree,
                           StrideCompiler &state,
                           std::shared_ptr<DeclarationNode> owner,
-                          const std::string &displayName);
+                          const std::string &displayName,
+                          const std::vector<ASTNode> *frameworkScope = nullptr);
 
   static std::vector<std::unique_ptr<ExprAST>>
   generateStreamsForNodes(const std::vector<ASTNode> &nodes, ScopeStack scope,

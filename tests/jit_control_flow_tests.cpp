@@ -363,6 +363,100 @@ TEST(JITControlFlowTest, ConstantFillCallsOnlyPureHostFunctions) {
   EXPECT_EQ(value("PureOut"), 8);
 }
 
+// A compileCheck whose conditions are on compiles, and nothing of it is left
+// to run: its streams are evaluated with the constant fills
+TEST(JITControlFlowTest, CompileCheckPasses) {
+  strd::Logger::startBuffering();
+  strd::StrideEnvironment strenv;
+  const bool generated =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "compile_check.stride");
+  const std::string logs = strd::Logger::getBufferedOutput();
+  ASSERT_TRUE(generated) << logs;
+  EXPECT_EQ(logs.find("compileCheck"), std::string::npos) << logs;
+  for (const auto &function : strenv.mStrideEnv.TheModule->functions()) {
+    EXPECT_EQ(function.getName().str().find("Equal"), std::string::npos)
+        << function.getName().str();
+  }
+  ASSERT_TRUE(strenv.compileInMemory());
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(strenv
+                .getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                      "RootDomain")
+                .value_or(-1),
+            12);
+}
+
+// A condition that is off fails the compile with the check's message, the
+// condition that failed and the values it lists; a warning only reports
+TEST(JITControlFlowTest, CompileCheckFails) {
+  strd::Logger::startBuffering();
+  strd::StrideEnvironment strenv;
+  const bool generated = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                           "compile_check_fail.stride");
+  const std::string logs = strd::Logger::getBufferedOutput();
+  EXPECT_FALSE(generated) << logs;
+  EXPECT_NE(logs.find("compileCheck 'TableHoldsSevens' failed: Table[2] is "
+                      "not the expected value [condition 2] (Expected = 7, "
+                      "Table = [0, 3, 6, 9, 12, 15])"),
+            std::string::npos)
+      << logs;
+  EXPECT_NE(logs.find("compileCheck 'TableWarning': Table[1] is not 4"),
+            std::string::npos)
+      << logs;
+  EXPECT_EQ(logs.find("compileCheck 'TableWarning' failed"), std::string::npos)
+      << logs;
+}
+
+// A condition that reads a signal can't be checked while compiling, and a
+// check never runs on the target, so it is an error
+TEST(JITControlFlowTest, CompileCheckNeedsConstants) {
+  strd::Logger::startBuffering();
+  strd::StrideEnvironment strenv;
+  const bool generated = strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                           "compile_check_runtime.stride");
+  const std::string logs = strd::Logger::getBufferedOutput();
+  EXPECT_FALSE(generated) << logs;
+  EXPECT_NE(logs.find("compileCheck 'ReadsSignal' can't be checked while "
+                      "compiling: its condition reads Live"),
+            std::string::npos)
+      << logs;
+}
+
+// The library's timer solver (Timer.stride) runs while compiling: a 1 kHz
+// tick on an 8-bit timer takes prescaler 64, top 249 at 16 MHz and top 124
+// at 8 MHz; 10 Hz fits no prescaler
+TEST(JITControlFlowTest, TimerConfigurationFilledWhileCompiling) {
+  strd::Logger::startBuffering();
+  strd::StrideEnvironment strenv;
+  const bool generated =
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "timer_config.stride");
+  const std::string logs = strd::Logger::getBufferedOutput();
+  ASSERT_TRUE(generated) << logs;
+  auto integer = [&](const char *name) -> int64_t {
+    auto *global = strenv.mStrideEnv.TheModule->getGlobalVariable(name, true);
+    if (!global || !global->isConstant() || !global->hasInitializer()) {
+      ADD_FAILURE() << name << " is not a filled constant\n" << logs;
+      return -999;
+    }
+    auto *value = llvm::dyn_cast<llvm::ConstantInt>(global->getInitializer());
+    return value ? value->getSExtValue() : -998;
+  };
+  EXPECT_EQ(integer("Prescaler16"), 2);
+  EXPECT_EQ(integer("Top16"), 249);
+  EXPECT_EQ(integer("Prescaler8"), 2);
+  EXPECT_EQ(integer("Top8"), 124);
+  EXPECT_EQ(integer("SlowPrescaler"), -1);
+  auto *rate = strenv.mStrideEnv.TheModule->getGlobalVariable("Rate16", true);
+  ASSERT_NE(rate, nullptr) << logs;
+  ASSERT_TRUE(rate->hasInitializer());
+  auto *rateValue = llvm::dyn_cast<llvm::ConstantFP>(rate->getInitializer());
+  ASSERT_NE(rateValue, nullptr);
+  EXPECT_NEAR(rateValue->getValueAPF().convertToDouble(), 1000.0, 1e-9);
+}
+
 // A neighbour table filled while compiling, read in a broadcast: each
 // instance reads a fixed section, the edge reads off, and nothing reads the
 // table at run time (the code the Steps pattern generates by hand)

@@ -476,7 +476,9 @@ private:
   // constants' value lists, and the streams are removed. Reads of those
   // constants with a known index are then folded. Streams that cannot be
   // evaluated are left to run at load time.
-  void evaluateConstantFills(ASTNode root);
+  // Fills constants while compiling and checks the compileChecks; false when
+  // a check fails or can't be checked while compiling
+  bool evaluateConstantFills(ASTNode root);
 
   // The platformlib members whose platformModule signatures the program is
   // compiled against. They come from the framework of the program's system

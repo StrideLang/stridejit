@@ -1467,8 +1467,17 @@ void StrideGenerator::generateLoadFunction(const std::string &domainName,
 llvm::Function *StrideGenerator::generateStreamsFunction(
     const std::string &name, const std::vector<ASTNode> &streams,
     ASTNode tree, StrideCompiler &state,
-    std::shared_ptr<DeclarationNode> owner, const std::string &displayName) {
-  ScopeStack scope = {{nullptr, tree->getChildren()}};
+    std::shared_ptr<DeclarationNode> owner, const std::string &displayName,
+    const std::vector<ASTNode> *frameworkScope) {
+  // One scope, as compile() has: the framework's platform modules, then the
+  // tree (lookups that read only the innermost scope see both)
+  std::vector<ASTNode> members;
+  if (frameworkScope) {
+    members = *frameworkScope;
+  }
+  const auto &children = tree->getChildren();
+  members.insert(members.end(), children.begin(), children.end());
+  ScopeStack scope = {{nullptr, members}};
   std::vector<std::unique_ptr<ExprAST>> body;
   for (const auto &node : streams) {
     if (node->getNodeType() != AST::Stream) {
@@ -3796,6 +3805,28 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         if (funcDecl->getEntityType() == "platformModule") {
           externFunc = state.getExternalFunction(func->getName(), retType,
                                                  args.MainIn.argTypes);
+          // The destination may have another type than the module gives,
+          // as a Switch written to an integer: take the variant by the type
+          // it declares, and convert on the store
+          if (!externFunc) {
+            auto outputList = funcDecl->getPropertyValue("outputs");
+            if (outputList && outputList->getNodeType() == AST::List &&
+                !outputList->getChildren().empty() &&
+                outputList->getChildren()[0]->getNodeType() == AST::Entity) {
+              auto declared = state.typesMap.find(
+                  std::static_pointer_cast<EntityNode>(
+                      outputList->getChildren()[0])
+                      ->getName());
+              if (declared != state.typesMap.end() &&
+                  declared->second != retType) {
+                externFunc = state.getExternalFunction(
+                    func->getName(), declared->second, args.MainIn.argTypes);
+                if (externFunc) {
+                  retType = declared->second;
+                }
+              }
+            }
+          }
         }
 
         std::unique_ptr<ExprAST> nextExpr = nullptr;

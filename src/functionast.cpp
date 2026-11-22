@@ -38,6 +38,7 @@
 
 #include "stride/utils/astquery.h"
 
+#include <cstring>
 #include <iostream>
 
 using namespace strd;
@@ -3564,6 +3565,29 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
             instr = "srem" + instr.substr(4);
           }
         } else {
+          // Both floating point (operands converted to Real on the way in):
+          // the float version of an integer instruction
+          if (lhs->getType()->isFloatingPointTy() &&
+              rhs->getType()->isFloatingPointTy()) {
+            static const std::pair<const char *, const char *> toFloat[] = {
+                {"icmp sgt", "fcmp ogt"}, {"icmp ugt", "fcmp ogt"},
+                {"icmp sge", "fcmp oge"}, {"icmp uge", "fcmp oge"},
+                {"icmp slt", "fcmp olt"}, {"icmp ult", "fcmp olt"},
+                {"icmp sle", "fcmp ole"}, {"icmp ule", "fcmp ole"},
+                {"icmp eq", "fcmp oeq"},  {"icmp ne", "fcmp one"},
+                {"add", "fadd"},          {"sub", "fsub"},
+                {"mul", "fmul"},          {"sdiv", "fdiv"},
+                {"udiv", "fdiv"},         {"srem", "frem"},
+                {"urem", "frem"}};
+            for (const auto &[from, to] : toFloat) {
+              const size_t length = std::strlen(from);
+              if (instr.compare(0, length, from) == 0 &&
+                  (instr.size() == length || instr[length] == ' ')) {
+                instr = to + instr.substr(length);
+                break;
+              }
+            }
+          }
           bool isFloatOp = (instr.rfind("fcmp", 0) == 0 ||
                             instr.rfind("fadd", 0) == 0 ||
                             instr.rfind("fsub", 0) == 0 ||
