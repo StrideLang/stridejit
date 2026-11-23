@@ -1008,4 +1008,49 @@ TEST(MultiDomainTest, InlineSubdomainCallsInStream) {
   EXPECT_FALSE(*condTrig);
 }
 
+TEST(MultiDomainTest, UnusedSubdomainSkipped) {
+  strd::StrideEnvironment env;
+  ASSERT_TRUE(env.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                             "domain_flexible_subdomains.stride"));
+
+  // ParentDomain_init and ParentDomain_process must not call unused subdomains.
+  std::string parentInitIr;
+  {
+    auto *fn = env.mStrideEnv.TheModule->getFunction("ParentDomain_init");
+    ASSERT_NE(fn, nullptr);
+    llvm::raw_string_ostream os(parentInitIr);
+    fn->print(os);
+  }
+  std::string parentProcIr;
+  {
+    auto *fn = env.mStrideEnv.TheModule->getFunction("ParentDomain_process");
+    ASSERT_NE(fn, nullptr);
+    llvm::raw_string_ostream os(parentProcIr);
+    fn->print(os);
+  }
+  EXPECT_EQ(parentInitIr.find("UnusedPreSub_init"), std::string::npos);
+  EXPECT_EQ(parentInitIr.find("UnusedPostSub_init"), std::string::npos);
+  EXPECT_EQ(parentProcIr.find("UnusedPreSub_process"), std::string::npos);
+  EXPECT_EQ(parentProcIr.find("UnusedPostSub_process"), std::string::npos);
+
+  ASSERT_TRUE(env.compileInMemory());
+
+  auto *postStep = env.getGlobal<int32_t>("PostStep");
+  ASSERT_NE(postStep, nullptr);
+
+  auto initParentSym = env.getFunction("ParentDomain_init");
+  auto procParentSym = env.getFunction("ParentDomain_process");
+  ASSERT_TRUE((bool)initParentSym);
+  ASSERT_TRUE((bool)procParentSym);
+  auto *initParent = initParentSym->toPtr<void (*)()>();
+  auto *procParent = procParentSym->toPtr<void (*)()>();
+
+  initParent();
+  EXPECT_EQ(*postStep, 0);
+
+  // Expected order: ActivePreSub (1) -> ParentDomain (2) -> ActivePostSub (3)
+  procParent();
+  EXPECT_EQ(*postStep, 123);
+}
+
 } // namespace

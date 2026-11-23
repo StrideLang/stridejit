@@ -1,0 +1,48 @@
+# Tests that unused subdomains listed in preSubdomains/postSubdomains/parentDomain
+# are skipped (no _init or _process calls emitted), while active pre/post
+# subdomains still run in list order.
+
+_domainDefinition ParentDomain {
+    framework: _JitFramework
+    rate: 100
+    preSubdomains: [UnusedPreSub, ActivePreSub]
+    postSubdomains: [ActivePostSub, UnusedPostSub]
+    domainFunctionCode: ''
+}
+
+_domainDefinition UnusedPreSub {
+    framework: _JitFramework
+    parentDomain: ParentDomain
+    rate: 100
+    domainFunctionCode: ''
+}
+
+_domainDefinition ActivePreSub {
+    framework: _JitFramework
+    parentDomain: ParentDomain
+    rate: 100
+    domainFunctionCode: ''
+}
+
+_domainDefinition ActivePostSub {
+    framework: _JitFramework
+    parentDomain: ParentDomain
+    rate: 100
+    domainFunctionCode: ''
+}
+
+_domainDefinition UnusedPostSub {
+    framework: _JitFramework
+    parentDomain: ParentDomain
+    rate: 100
+    domainFunctionCode: ''
+}
+
+signal PreStep { type: Int default: 0 domain: ActivePreSub }
+signal ParentStep { type: Int default: 0 domain: ParentDomain }
+signal PostStep { type: Int default: 0 domain: ActivePostSub }
+
+# Expected order: ActivePreSub (1) -> ParentDomain (2) -> ActivePostSub (3)
+PostStep * 10 + 1 >> PreStep;
+PreStep * 10 + 2 >> ParentStep;
+ParentStep * 10 + 3 >> PostStep;

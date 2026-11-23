@@ -540,6 +540,75 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
   state.stateMachineInfos.clear();
   GeneratedIRCode generatedIRCode = generateCodeForTree(tree, scope, state);
 
+  // Only schedule subdomains that actually have generated code (or active
+  // descendants), so unused framework/program domains incur zero calls.
+  std::set<std::string> activeDomains;
+  for (const auto &pair : generatedIRCode.domainGeneratedCode) {
+    if (!pair.second.empty()) {
+      activeDomains.insert(pair.first);
+    }
+  }
+  for (const auto &node : tree->getChildren()) {
+    if (node->getNodeType() == AST::Declaration) {
+      auto decl = std::static_pointer_cast<DeclarationNode>(node);
+      if (decl->getEntityType() == "_domainDefinition" ||
+          decl->getEntityType() == "gameDefinition") {
+        auto smList = decl->getPropertyValue("stateMachines");
+        if (smList && smList->getNodeType() == AST::List &&
+            !smList->getChildren().empty()) {
+          activeDomains.insert(decl->getName());
+        }
+      }
+    }
+  }
+  {
+    bool changed = true;
+    while (changed) {
+      changed = false;
+      for (const auto &node : tree->getChildren()) {
+        if (node->getNodeType() != AST::Declaration) {
+          continue;
+        }
+        auto decl = std::static_pointer_cast<DeclarationNode>(node);
+        if (decl->getEntityType() != "_domainDefinition" &&
+            decl->getEntityType() != "gameDefinition") {
+          continue;
+        }
+        const std::string domName = decl->getName();
+        if (domName.empty()) {
+          continue;
+        }
+        if (activeDomains.count(domName)) {
+          auto parentProp = decl->getPropertyValue("parentDomain");
+          if (parentProp && parentProp->getNodeType() != AST::None) {
+            std::string parentName = ASTQuery::getNodeName(parentProp);
+            if (!parentName.empty() && activeDomains.insert(parentName).second) {
+              changed = true;
+            }
+          }
+        } else {
+          for (const char *listPropName : {"preSubdomains", "postSubdomains"}) {
+            auto subList = decl->getPropertyValue(listPropName);
+            if (subList && subList->getNodeType() == AST::List) {
+              for (const auto &subNode : subList->getChildren()) {
+                std::string subName =
+                    (subNode->getNodeType() == AST::String)
+                        ? std::static_pointer_cast<ValueNode>(subNode)
+                              ->getStringValue()
+                        : ASTQuery::getNodeName(subNode);
+                if (activeDomains.count(subName) &&
+                    activeDomains.insert(domName).second) {
+                  changed = true;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   auto registerSubdomain = [&](const std::string &parentName,
                                const std::shared_ptr<DeclarationNode> &childDecl,
                                bool forceRegister) {
@@ -548,6 +617,9 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
     }
     std::string childName = childDecl->getName();
     domainParentMap[childName] = parentName;
+    if (!activeDomains.count(childName)) {
+      return;
+    }
     auto &vec = parentTickedSubdomains[parentName];
     for (const auto &existing : vec) {
       if (existing.childName == childName) {
@@ -652,6 +724,9 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
     std::set<std::string> scheduledSubdomains;
     auto findOrBuildSubdomainInfo =
         [&](const std::string &subName) -> std::optional<ParentTickedSubdomain> {
+      if (!activeDomains.count(subName)) {
+        return std::nullopt;
+      }
       if (parentTickedSubdomains.count(domainName)) {
         for (const auto &s : parentTickedSubdomains[domainName]) {
           if (s.childName == subName) {
