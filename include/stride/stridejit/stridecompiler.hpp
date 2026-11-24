@@ -269,6 +269,11 @@ public:
   // counts them; generateIr fails when there are any.
   bool strict{false};
   unsigned strictErrors{0};
+  // Errors found while generating code that would otherwise compile to a
+  // wrong program, such as a call that names no declaration (it would output
+  // zero) or a reaction triggered by a value that is not a switch. They are
+  // logged where found; compiling fails when there are any.
+  unsigned compileErrors{0};
   static constexpr unsigned kStatusLogSize = 8;
   static std::string statusLogName(const std::string &domain) {
     return domain + "_statusLog";

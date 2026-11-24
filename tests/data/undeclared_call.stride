@@ -1,0 +1,13 @@
+# A call that names no declaration is an error, not a call left out (which
+# would leave Out at zero).
+_domainDefinition RootDomain {
+    framework: _JitFramework
+    rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [ signal In { domain: RootDomain type: Real default: 1.0 } ]
+    outputs: [ signal Out { domain: RootDomain type: Real default: 0.0 } ]
+    domainFunctionCode: ''
+}
+
+In >> Missing() >> Out;

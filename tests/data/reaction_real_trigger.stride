@@ -1,0 +1,18 @@
+# A reaction's trigger must be a switch: a Real is an error.
+_domainDefinition RootDomain {
+    framework: _JitFramework
+    rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [ signal Level { domain: RootDomain type: Real default: 1.0 } ]
+    outputs: [ signal Out { domain: RootDomain type: Real default: 0.0 } ]
+    domainFunctionCode: ''
+}
+
+reaction SetTwo {
+    ports: [ mainOutputPort OutputPort { entity: Output } ]
+    entities: [ signal Output { type: Real domain: OutputPort.domain } ]
+    streams: [ 2.0 >> Output; ]
+}
+
+Level >> SetTwo() >> Out;

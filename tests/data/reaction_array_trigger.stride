@@ -1,0 +1,26 @@
+# A reaction triggered by one element of a switch array: Flags[1] and
+# Flags[Index] fire on that element, not on Flags[0].
+_domainDefinition RootDomain {
+    framework: _JitFramework
+    rate: -1
+    substitutions: [ ]
+    domainIncludes: []
+    inputs: [
+        switch Flags[3] { domain: RootDomain default: off }
+        signal Index { domain: RootDomain type: Int default: 0 }
+    ]
+    outputs: [
+        signal ConstOut { domain: RootDomain type: Real default: 0.0 }
+        signal VarOut { domain: RootDomain type: Real default: 0.0 }
+    ]
+    domainFunctionCode: ''
+}
+
+reaction SetTwo {
+    ports: [ mainOutputPort OutputPort { entity: Output } ]
+    entities: [ signal Output { type: Real domain: OutputPort.domain } ]
+    streams: [ 2.0 >> Output; ]
+}
+
+Flags[1] >> SetTwo() >> ConstOut;
+Flags[Index] >> SetTwo() >> VarOut;

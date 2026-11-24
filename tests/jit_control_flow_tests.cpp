@@ -1403,3 +1403,51 @@ TEST(JITControlFlowTest, UnsignedComparisonsStayInteger) {
     }
   }
 }
+
+// Flags[1] >> SetTwo() and Flags[Index] >> SetTwo() fire on the element they
+// name. They used to read Flags[0].
+TEST(JITControlFlowTest, ReactionTriggeredByArrayElement) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                "reaction_array_trigger.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  auto setFlags = [&](bool a, bool b, bool c) {
+    strenv.setStateVar(statePtr.get(), "Flags", a, 0, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "Flags", b, 1, "RootDomain");
+    strenv.setStateVar(statePtr.get(), "Flags", c, 2, "RootDomain");
+  };
+  auto out = [&](const char *name) {
+    return strenv
+        .getStateVar<double>(statePtr.get(), name, std::nullopt, "RootDomain")
+        .value_or(-1.0);
+  };
+
+  // Only Flags[0] is on: neither reaction fires
+  setFlags(true, false, false);
+  strenv.setStateVar(statePtr.get(), "Index", 2, std::nullopt, "RootDomain");
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(out("ConstOut"), 0.0);
+  EXPECT_EQ(out("VarOut"), 0.0);
+
+  // Flags[1] and Flags[2] (Index) are on: both fire
+  setFlags(false, true, true);
+  strenv.invoke("RootDomain_process", args);
+  EXPECT_EQ(out("ConstOut"), 2.0);
+  EXPECT_EQ(out("VarOut"), 2.0);
+}
+
+TEST(JITControlFlowTest, ReactionTriggerMustBeASwitch) {
+  strd::StrideEnvironment strenv;
+  EXPECT_FALSE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                 "reaction_real_trigger.stride"));
+}
+
+TEST(JITControlFlowTest, UndeclaredCallIsAnError) {
+  strd::StrideEnvironment strenv;
+  EXPECT_FALSE(
+      strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "undeclared_call.stride"));
+}

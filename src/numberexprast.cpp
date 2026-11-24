@@ -98,3 +98,29 @@ VariableExprAST::codegen(StrideCompiler &state) {
   }
   return {V, T};
 }
+
+llvm::Value *strd::loadConditionValue(ExprAST &expr, StrideCompiler &state) {
+  auto [value, type] = expr.codegen(state);
+  if (!value) {
+    return nullptr;
+  }
+  llvm::Type *boolTy = llvm::Type::getInt1Ty(*state.TheContext);
+  if (!value->getType()->isPointerTy()) {
+    return value;
+  }
+  llvm::Type *elemTy = type.value_or(boolTy);
+  if (elemTy->isArrayTy()) {
+    elemTy = elemTy->getArrayElementType();
+  }
+  // A variable comes back as the address of the whole array
+  if (auto *varExpr = dynamic_cast<VariableExprAST *>(&expr)) {
+    auto indices = varExpr->getIndices();
+    if (!indices.empty()) {
+      auto idxList = state.resolveGepIndices(indices);
+      if (!idxList.empty()) {
+        value = state.Builder->CreateGEP(elemTy, value, idxList);
+      }
+    }
+  }
+  return state.Builder->CreateLoad(elemTy, value, "cond");
+}

@@ -96,6 +96,11 @@ public:
   std::vector<std::variant<size_t, std::string>> getIndices() const;
 };
 
+/// The value of `expr` used as a condition (a reaction's trigger, a reset).
+/// A variable is loaded; for `Flags[I]` the element I names is loaded, not
+/// the start of the array. Returns nullptr when `expr` has no value.
+llvm::Value *loadConditionValue(ExprAST &expr, StrideCompiler &state);
+
 class MemberAccessAST : public ExprAST {
   std::string Name;
   std::string Property;

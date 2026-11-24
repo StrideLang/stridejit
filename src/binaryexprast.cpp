@@ -814,13 +814,9 @@ ResetExprAST::ResetExprAST(std::string Name, std::unique_ptr<ExprAST> Condition,
 std::pair<llvm::Value *, std::optional<llvm::Type *>>
 ResetExprAST::codegen(StrideCompiler &state) {
   llvm::Function *TheFunction = state.Builder->GetInsertBlock()->getParent();
-  llvm::Value *V = Condition->codegen(state).first;
+  llvm::Value *V = loadConditionValue(*Condition, state);
   if (!V)
     return {nullptr, std::nullopt};
-  if (V->getType()->isPointerTy()) {
-    V = state.Builder->CreateLoad(
-        llvm::Type::getInt1Ty(*state.TheContext), V, "cond");
-  }
   if (V->getType()->isFloatingPointTy()) {
     V = state.Builder->CreateFCmpONE(
         V, llvm::ConstantFP::get(V->getType(), 0.0), "ifcond");

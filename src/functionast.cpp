@@ -2757,26 +2757,23 @@ CallExprAST::codegen(StrideCompiler &state) {
   llvm::CallInst *call;
 
   if (callType == CallableType::Reaction && !InArgs.empty()) {
-    llvm::Value *CondV = InArgs[0]->codegen(state).first;
+    llvm::Value *CondV = loadConditionValue(*InArgs[0], state);
+    if (!CondV) {
+      return {nullptr, std::nullopt};
+    }
     if (Logger::isDebugEnabled()) {
       std::string s;
       llvm::raw_string_ostream rso(s);
       CondV->print(rso);
       LOG_DEBUG() << "CondV: " << rso.str() << "\n";
     }
-    if (CondV->getType()->isPointerTy()) {
-      CondV = state.Builder->CreateLoad(
-          llvm::Type::getInt1Ty(*state.TheContext), CondV, "cond");
-    }
-    // Convert condition to a bool by comparing non-equal to 0.0 or 0.
-    if (CondV->getType()->isFloatingPointTy()) {
-      CondV = state.Builder->CreateFCmpONE(
-          CondV, llvm::ConstantFP::get(CondV->getType(), 0.0),
-          "ifcond");
-    } else if (CondV->getType()->isIntegerTy() &&
-               !CondV->getType()->isIntegerTy(1)) {
-      CondV = state.Builder->CreateICmpNE(
-          CondV, llvm::ConstantInt::get(CondV->getType(), 0), "ifcond");
+    // A reaction runs when its trigger is on: the trigger is a switch.
+    if (!CondV->getType()->isIntegerTy(1)) {
+      LOG_ERROR() << getRelativeFilename() << ":" << getLine()
+                  << ": the trigger of reaction " << Callee
+                  << " must be a switch" << std::endl;
+      ++state.compileErrors;
+      return {nullptr, std::nullopt};
     }
     llvm::Function *TheFunction = state.Builder->GetInsertBlock()->getParent();
     llvm::BasicBlock *ThenBB =
