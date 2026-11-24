@@ -1,0 +1,52 @@
+platformModule __HostTwice {
+    inputs: [Int]
+    outputs: [Int]
+    processing: "%%outtokens:0%% = call i32 @__stride_test_twice(i32 %%intokens:0%%)"
+    inherits: [_Signal]
+}
+
+platformModule __GreaterOrEqual@Int_Bool {
+    inputs: [Int, Int]
+    outputs: [Switch]
+    processing: "%%outtokens:0%% = llvm::icmp sge %%intokens:0%%, %%intokens:1%%"
+}
+
+module GreaterOrEqual {
+    ports: [
+        mainOutputPort OutputPort { entity: Output }
+        mainInputPort InputPort { entity: Input }
+    ]
+    entities: [
+        signal Input[2] { domain: OutputPort.domain type: Int }
+        switch Output { domain: OutputPort.domain }
+    ]
+    streams: [
+        [Input[0], Input[1]] >> __GreaterOrEqual() >> Output;
+    ]
+}
+
+loop SumTwice {
+    ports: [
+        propertyInputPort CountPort { name: "count" entity: Count }
+        mainOutputPort OutPort { entity: Total }
+    ]
+    entities: [
+        signal Count { type: Int }
+        signal Total { default: 0 type: Int reset: Reset }
+        signal Index { default: 0 type: Int reset: Reset }
+        signal Val { type: Int }
+        switch Done { default: off }
+        trigger Reset {}
+    ]
+    onExecution: Reset
+    terminateWhen: Done
+    streams: [
+        Index >> __HostTwice() >> Val;
+        Total + Val >> Total;
+        Index + 1 >> Index;
+        [Index, Count] >> GreaterOrEqual() >> Done;
+    ]
+}
+
+signal Out { type: Int domain: RootDomain }
+SumTwice(count: 4) >> Out;

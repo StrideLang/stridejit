@@ -2884,12 +2884,16 @@ CallExprAST::codegen(StrideCompiler &state) {
   if (callType == CallableType::External) {
     if (!call->getType()->isVoidTy() && !statusReturned && OutArgs.size() > 0) {
       auto [outVal, outType] = OutArgs[0]->codegen(state);
+      llvm::Value *result = call;
+      if (outType.has_value() && outType.value()) {
+        result = convertScalar(state, result, outType.value());
+      }
       if (outVal->getType()->isPointerTy()) {
-        llvm::Value *result = call;
-        if (outType.has_value() && outType.value()) {
-          result = convertScalar(state, result, outType.value());
-        }
         state.Builder->CreateStore(result, outVal);
+      } else if (auto *varExpr =
+                     dynamic_cast<VariableExprAST *>(OutArgs[0].get())) {
+        // Loop PHI variables are scalar values in NamedValues, not allocas.
+        state.NamedValues[varExpr->getName()] = {result, result->getType()};
       }
     }
   } else {

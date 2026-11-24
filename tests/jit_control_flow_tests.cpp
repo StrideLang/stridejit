@@ -1451,3 +1451,21 @@ TEST(JITControlFlowTest, UndeclaredCallIsAnError) {
   EXPECT_FALSE(
       strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR "undeclared_call.stride"));
 }
+
+TEST(JITControlFlowTest, LoopExternalCallWritesPhiVariable) {
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(strenv.generateIr(STRIDEJIT_TESTS_SOURCE_DIR
+                                "loop_external_call_phi.stride"));
+  ASSERT_TRUE(strenv.compileInMemory());
+
+  auto statePtr = strenv.allocateSharedState("RootDomain");
+  ASSERT_NE(statePtr.get(), nullptr);
+  void *args[] = {statePtr.get()};
+  strenv.invoke("RootDomain_process", args);
+
+  auto out =
+      strenv.getStateVar<int32_t>(statePtr.get(), "Out", std::nullopt,
+                                  "RootDomain");
+  ASSERT_TRUE(out.has_value());
+  EXPECT_EQ(*out, 12);
+}
