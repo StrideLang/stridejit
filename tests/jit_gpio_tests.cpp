@@ -354,3 +354,95 @@ Pressed >> DigitalIO::DigitalOut(pin: BlinkRig::Relay);
   EXPECT_NE(bytes.find(std::string("\x25\x9A", 2)), std::string::npos)
       << "no sbi DDRB,5";
 }
+
+namespace {
+
+void verifyPicoGpioBoard(const char *boardName, const char *triple,
+                         const char *cpu, const char *objFileName) {
+  Project project(boardName);
+  project.write("BlinkRig.stride",
+                std::string(R"(
+package BlinkRig
+
+import Gpio
+import )") + boardName + R"(
+
+hardwareBoard BlinkRig {
+    overlays: )" + boardName + R"(
+}
+
+gpioPin Button { pin: )"+ boardName + R"(::GP2 mode: Gpio::PinInput pull: Gpio::PullUp activeLow: on }
+gpioPin Status { pin: )"+ boardName + R"(::LED mode: Gpio::PinOutput initial: off }
+gpioPin Relay  { pin: )"+ boardName + R"(::GP3 mode: Gpio::PinOutput }
+)");
+  auto program = project.write("Blink.stride", R"(
+use Pico version 1.0 on BlinkRig
+
+import DigitalIO
+import BlinkRig
+
+switch Blink { default: off domain: PlatformLoopDomain }
+Blink >> Not() >> Blink;
+Blink >> DigitalIO::Led(pin: BlinkRig::Status);
+0.5 >> Sleep(domain: PlatformLoopDomain);
+
+switch Pressed { default: off domain: PlatformTimerDomain }
+BlinkRig::Button >> DigitalIO::DigitalIn() >> Pressed;
+Pressed >> DigitalIO::DigitalOut(pin: BlinkRig::Relay);
+)");
+
+  strd::StrideEnvironment strenv;
+  strenv.setTarget(triple, cpu);
+  strenv.setOptimizationLevel(2);
+  ASSERT_TRUE(strenv.generateIr(program));
+  strenv.emitDomainStateBuffers();
+
+  std::error_code ec;
+  auto objPath = std::filesystem::temp_directory_path(ec) / objFileName;
+  std::filesystem::remove(objPath, ec);
+  ASSERT_TRUE(strenv.emitObjectFile(objPath.string(), triple, cpu, "",
+                                    "static", ""));
+  EXPECT_TRUE(std::filesystem::exists(objPath));
+  EXPECT_GT(std::filesystem::file_size(objPath), 0u);
+  std::filesystem::remove(objPath, ec);
+
+  std::string ir;
+  {
+    llvm::raw_string_ostream os(ir);
+    strenv.mStrideEnv.TheModule->print(os, nullptr);
+  }
+  EXPECT_NE(ir.find("@__stride_pico_loop_sleep"), std::string::npos) << ir;
+  EXPECT_NE(ir.find("store volatile i32"), std::string::npos) << ir;
+  // RP2040 SIO GPIO_OUT_SET is 0xD0000014 (-805306348 / 3489660948);
+  // RP2350 SIO GPIO_OUT_SET is 0xD0000018 (-805306344 / 3489660952).
+  if (std::string(boardName) == "RaspberryPiPico2") {
+    EXPECT_TRUE(ir.find("-805306344") != std::string::npos ||
+                ir.find("3489660952") != std::string::npos)
+        << ir;
+  } else {
+    EXPECT_TRUE(ir.find("-805306348") != std::string::npos ||
+                ir.find("3489660948") != std::string::npos)
+        << ir;
+  }
+  EXPECT_EQ(ir.find("double"), std::string::npos) << ir;
+  if (std::string(triple).rfind("thumbv6m", 0) == 0) {
+    EXPECT_EQ(ir.find("cmpxchg"), std::string::npos) << ir;
+  }
+
+  auto loop = ir.find("@PicoLoopDomain_process()");
+  ASSERT_NE(loop, std::string::npos) << ir;
+  std::string loopBody = ir.substr(loop, ir.find("\n}", loop) - loop);
+  EXPECT_NE(loopBody.find("store volatile i32"), std::string::npos) << loopBody;
+}
+
+} // namespace
+
+TEST(JITGpioTest, PicoWritesUseConstantSioRegisters) {
+  verifyPicoGpioBoard("RaspberryPiPico", "thumbv6m-none-eabi", "cortex-m0plus",
+                      "stride_gpio_pico.o");
+}
+
+TEST(JITGpioTest, Pico2WritesUseConstantSioRegisters) {
+  verifyPicoGpioBoard("RaspberryPiPico2", "thumbv8m.main-none-eabihf",
+                      "cortex-m33", "stride_gpio_pico2.o");
+}

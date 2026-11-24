@@ -1399,7 +1399,11 @@ void StrideGenerator::generateLoadFunction(const std::string &domainName,
 #else
     const std::string tripleStr = state.TheModule->getTargetTriple();
 #endif
-    const bool singleCoreTarget = (tripleStr.rfind("avr", 0) == 0);
+    // Targets without hardware compare-and-exchange (AVR, ARMv6-M Cortex-M0+)
+    // must use a plain i8 load-once guard so they do not emit __atomic_* calls.
+    const bool singleCoreTarget =
+        (tripleStr.rfind("avr", 0) == 0) ||
+        (tripleStr.rfind("thumbv6m", 0) == 0);
     if (singleCoreTarget) {
       auto *i8 = llvm::Type::getInt8Ty(context);
       auto *guard = new llvm::GlobalVariable(
@@ -2490,6 +2494,7 @@ bool StrideGenerator::processPreviousFunction(
   if (!funcDecl) {
     LOG_ERROR() << "ERROR: no function declaration for "
                 << ASTQuery::getNodeName(prevFuncCall) << std::endl;
+    ++state.compileErrors;
     return false;
   }
   auto retType = state.getLLVMType(funcDecl);
@@ -3446,8 +3451,18 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       auto funcDecl =
           CodeAnalysis::matchDefinitionToTypes(decls, func, scope, tree);
       if (!funcDecl) {
-        LOG_ERROR() << "ERROR can't find/match declaration for "
-                    << func->getName() << std::endl;
+        // Compiling on would leave the call out, and its outputs zero.
+        std::string written;
+        for (const auto &ns : func->getNamespaceList()) {
+          written += ns + "::";
+        }
+        written += func->getName();
+        LOG_ERROR() << func->getFilename() << ":" << func->getLine() << ": "
+                    << (decls.empty()
+                            ? "no declaration for "
+                            : "no declaration matches the types of the call ")
+                    << written << "()" << std::endl;
+        ++state.compileErrors;
         continue;
       }
       // A framework variant (Select@Double) takes its values as inputs and
@@ -4036,8 +4051,12 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
               std::static_pointer_cast<ValueNode>(processing)->getStringValue();
           if (externFunc->name != declared) {
             for (const auto &candidate : state.functionMap[funcDecl->getName()]) {
+              auto *want = candidate.llvmFunctionType;
+              auto *have = externFunc->llvmFunctionType;
               if (candidate.name == declared &&
-                  candidate.llvmFunctionType == externFunc->llvmFunctionType) {
+                  candidate.isConstrainedList == externFunc->isConstrainedList &&
+                  want->getNumParams() == have->getNumParams() &&
+                  want->getReturnType() == have->getReturnType()) {
                 externFunc = candidate;
                 break;
               }
@@ -4498,7 +4517,10 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         std::string condName = "stream_cond";
         if (leftDecl) {
           condName = leftDecl->getName();
-          condExpr = std::make_unique<VariableExprAST>(condName);
+          // Flags[I] >> React(): the trigger is the element I names
+          condExpr = leftNode->getNodeType() == AST::Array
+                         ? createExpr(leftNode)
+                         : std::make_unique<VariableExprAST>(condName);
         } else if (leftNode) {
           if (leftNode->getNodeType() == AST::MemberAccess) {
             auto pp = std::static_pointer_cast<MemberAccessNode>(leftNode);

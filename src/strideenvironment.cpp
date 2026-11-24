@@ -391,10 +391,13 @@ bool StrideEnvironment::prepareTree(ASTNode tree) {
 
   auto systemNodes = ASTQuery::getSystemNodes(tree);
   if (systemNodes.size() == 0) {
-    auto systemNode =
-        std::make_shared<SystemNode>("JIT", 1, 0, __FILE__, __LINE__);
+    auto systemNode = std::make_shared<SystemNode>(
+        !m_systemOverride.empty() ? m_systemOverride : "JIT", 1, 0, __FILE__,
+        __LINE__);
     tree->addChild(systemNode);
     systemNodes.push_back(systemNode);
+  } else if (!m_systemOverride.empty()) {
+    systemNodes.front()->setPlatformName(m_systemOverride);
   }
   if (!m_boardOverride.empty() && !systemNodes.empty()) {
     systemNodes.front()->setHwPlatforms({m_boardOverride});
@@ -446,6 +449,24 @@ std::string stringProperty(const std::shared_ptr<DeclarationNode> &decl,
   return {};
 }
 
+bool isLlvmCodegen(const std::shared_ptr<DeclarationNode> &decl) {
+  auto value = decl ? decl->getPropertyValue("codegen") : nullptr;
+  if (!value) {
+    return false;
+  }
+  if (value->getNodeType() == AST::Entity) {
+    auto entity = std::static_pointer_cast<EntityNode>(value);
+    const auto &ns = entity->getNamespaceList();
+    return entity->getName() == "Llvm" &&
+           (ns.empty() || (ns.size() == 1 && ns[0] == "Codegen"));
+  }
+  if (value->getNodeType() == AST::String) {
+    return std::static_pointer_cast<ValueNode>(value)->getStringValue() ==
+           "llvm";
+  }
+  return false;
+}
+
 } // namespace
 
 std::vector<ASTNode> StrideEnvironment::hostPlatformMembers() const {
@@ -493,8 +514,7 @@ StrideEnvironment::frameworkPlatformMembers(const ASTNode &tree) const {
         m_strideRoot + "/frameworks/" + framework + "/" + version +
         "/platformlib");
     auto description = findFrameworkDescription(loaded);
-    if (stringProperty(description, "codegen") != "llvm" &&
-        framework != "JIT") {
+    if (!isLlvmCodegen(description) && framework != "JIT") {
       break; // a C++ template framework: nothing usable for LLVM
     }
     std::set<std::string> declaredHere;
@@ -667,7 +687,11 @@ bool StrideEnvironment::generateIr(const std::vector<std::string> &paths,
                                              getPreparedAstCacheTag());
     }
 
+    mStrideEnv.compileErrors = 0;
     StrideGenerator::compile(tree, globalScope, mStrideEnv);
+    if (mStrideEnv.compileErrors > 0) {
+      return false;
+    }
 
     if (emitAllFunctions) {
       generateAllRootFunctions(tree);
@@ -727,7 +751,11 @@ bool StrideEnvironment::generateIr(ASTNode root, bool emitAllFunctions) {
   initializeJIT();
 
   mStrideEnv.strictErrors = 0;
+  mStrideEnv.compileErrors = 0;
   StrideGenerator::compile(root, globalScope, mStrideEnv);
+  if (mStrideEnv.compileErrors > 0) {
+    return false;
+  }
   if (mStrideEnv.strict && mStrideEnv.strictErrors > 0) {
     LOG_ERROR() << mStrideEnv.strictErrors
                 << " String write(s) can be cut off (strict)." << std::endl;
@@ -3124,6 +3152,9 @@ int32_t StrideEnvironment::stepTick(const std::string &domainOrFuncName,
 
 std::string StrideEnvironment::getPreparedAstCacheTag() const {
   std::string tag = "prepared_JIT";
+  if (!m_systemOverride.empty()) {
+    tag += "_sys_" + m_systemOverride;
+  }
   if (!m_boardOverride.empty()) {
     tag += "_board_" + m_boardOverride;
   }
@@ -3141,6 +3172,9 @@ std::string StrideEnvironment::getJitObjectTag() const {
                            ? llvm::sys::getDefaultTargetTriple()
                            : m_targetTriple;
   std::string tag = "jit_obj_" + triple + "_" + (m_optimizeCode ? "O2" : "O0");
+  if (!m_systemOverride.empty()) {
+    tag += "_sys_" + m_systemOverride;
+  }
   if (!m_boardOverride.empty()) {
     tag += "_board_" + m_boardOverride;
   }

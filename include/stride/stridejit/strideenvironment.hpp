@@ -235,6 +235,7 @@ public:
     m_targetCPU = cpu;
     m_targetFeatures = features;
   }
+  void setSystemOverride(const std::string &systemName) { m_systemOverride = systemName; }
   void setBoardOverride(const std::string &boardName) {
     m_boardOverride = boardName;
   }
@@ -483,7 +484,7 @@ private:
   // The platformlib members whose platformModule signatures the program is
   // compiled against. They come from the framework of the program's system
   // (`use AVR version 1.0`) when its _frameworkDescription says
-  // `codegen: "llvm"`, followed by the LLVM frameworks it inherits from; a
+  // `codegen: Codegen::Llvm`, followed by the LLVM frameworks it inherits from; a
   // platformModule name a framework declares hides the inherited overloads
   // of that name. Any other framework, or no system at all, gives the JIT
   // framework.
@@ -504,6 +505,7 @@ private:
   std::optional<unsigned> m_cacheLine;
   std::string m_targetCPU;
   std::string m_targetFeatures;
+  std::string m_systemOverride;
   std::string m_boardOverride;
   std::vector<std::string> m_includePaths;
   std::vector<ASTNode> m_trees;
