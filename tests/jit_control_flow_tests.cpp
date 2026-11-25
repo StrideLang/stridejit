@@ -10,6 +10,7 @@
 #include "stride/stridejit/stridegenerator.hpp"
 #include "stride/utils/astfunctions.h"
 #include "stride/utils/astquery.h"
+#include "stride/utils/astvalidation.h"
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
@@ -608,7 +609,7 @@ TEST(JITControlFlowTest, NoReactionDeclaresAMainInput) {
     if (!tree) {
       continue; // Fixtures of parse errors
     }
-    for (auto &error : strd::CodeValidator::findReactionMainInputs(tree)) {
+    for (auto &error : strd::ASTValidation::findReactionMainInputs(tree)) {
       ADD_FAILURE() << entry.path().filename().string() << ": "
                     << error.getErrorText();
     }

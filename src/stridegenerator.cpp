@@ -65,7 +65,7 @@ void collectUsedPortPropertiesImpl(
     }
   };
 
-  for (const auto &pp : CodeAnalysis::getUsedMemberAccesses(funcDecl)) {
+  for (const auto &pp : ASTQuery::getUsedMemberAccesses(funcDecl)) {
     addUnique(pp);
   }
 
@@ -409,10 +409,10 @@ buildSubdomainScheduleInfo(const std::shared_ptr<DeclarationNode> &childDecl,
     sub.isTriggered = true;
     sub.triggerNode = trigProp;
   }
-  double childRate = CodeAnalysis::getDomainDefaultRate(childDecl);
-  auto parentDecl = CodeAnalysis::findDomainDeclaration(parentName, tree);
+  double childRate = ASTQuery::getDomainDefaultRate(childDecl);
+  auto parentDecl = ASTQuery::findDomainDeclaration(parentName, tree);
   double parentRate =
-      parentDecl ? CodeAnalysis::getDomainDefaultRate(parentDecl) : -1.0;
+      parentDecl ? ASTQuery::getDomainDefaultRate(parentDecl) : -1.0;
   if (childRate > 0.0 && parentRate > 0.0) {
     sub.isRateDriven = true;
     sub.parentRate = parentRate;
@@ -602,7 +602,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
                             ->getStringValue()
                       : ASTQuery::getNodeName(subNode);
               if (auto subDecl =
-                      CodeAnalysis::findDomainDeclaration(subName, tree)) {
+                      ASTQuery::findDomainDeclaration(subName, tree)) {
                 registerSubdomain(domName, subDecl, true);
               }
             }
@@ -659,7 +659,7 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
           }
         }
       }
-      if (auto subDecl = CodeAnalysis::findDomainDeclaration(subName, tree)) {
+      if (auto subDecl = ASTQuery::findDomainDeclaration(subName, tree)) {
         return buildSubdomainScheduleInfo(subDecl, domainName, tree);
       }
       return std::nullopt;
@@ -1964,7 +1964,7 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
               bool isSharedMemorySignal = false;
               if (domainProp && domainProp->getNodeType() == AST::Entity) {
                 std::string dName = ASTQuery::getNodeName(domainProp);
-                if (!CodeAnalysis::getParentDomain(dName, tree).empty()) {
+                if (!ASTQuery::getParentDomain(dName, tree).empty()) {
                   isSharedMemorySignal = true;
                 } else {
                   for (const auto &n : tree->getChildren()) {
@@ -1973,7 +1973,7 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
                           std::static_pointer_cast<DeclarationNode>(n);
                       if (otherDecl->getEntityType() == "_domainDefinition" ||
                           otherDecl->getEntityType() == "gameDefinition") {
-                        if (CodeAnalysis::getParentDomain(otherDecl->getName(),
+                        if (ASTQuery::getParentDomain(otherDecl->getName(),
                                                           tree) == dName) {
                           isSharedMemorySignal = true;
                           break;
@@ -2022,7 +2022,7 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
           decl->getEntityType() == "gameDefinition") {
         auto stagesProp = decl->getCompilerProperty("streamStages");
         if (stagesProp && stagesProp->getNodeType() == AST::List) {
-          double domRate = CodeAnalysis::getDomainDefaultRate(decl);
+          double domRate = ASTQuery::getDomainDefaultRate(decl);
           std::string domName = decl->getName();
           for (const auto &stageNode : stagesProp->getChildren()) {
             double stageRate = -1.0;
@@ -2112,13 +2112,13 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
         auto &seg = segStates[domName];
         if (!seg.domainResolved) {
           seg.domainResolved = true;
-          auto domDecl = CodeAnalysis::findDomainDeclaration(domName, tree);
+          auto domDecl = ASTQuery::findDomainDeclaration(domName, tree);
           if (!domDecl) {
             domDecl = ASTQuery::findDeclarationByName(domName, scope, tree);
           }
           seg.domainDecl = domDecl;
           if (domDecl) {
-            seg.domainRate = CodeAnalysis::getDomainDefaultRate(domDecl);
+            seg.domainRate = ASTQuery::getDomainDefaultRate(domDecl);
           }
         }
         return seg;
@@ -2172,7 +2172,7 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
         if (prev == nullptr && next != nullptr) {
           std::string nextDomain = CodeAnalysis::getNodeDomainName(next, scope, tree);
           if (!nextDomain.empty() && !domainName.empty() && domainName != nextDomain) {
-            if (!CodeAnalysis::getCommonAncestorDomain(domainName, nextDomain, tree).empty()) {
+            if (!ASTQuery::getCommonAncestorDomain(domainName, nextDomain, tree).empty()) {
               domainName = nextDomain;
             }
           }
@@ -2229,7 +2229,7 @@ StrideGenerator::generateCodeForTree(ASTNode tree, ScopeStack &scope,
           decl->getEntityType() == "gameDefinition") {
         auto stagesProp = decl->getCompilerProperty("streamStages");
         if (stagesProp && stagesProp->getNodeType() == AST::List) {
-          double domRate = CodeAnalysis::getDomainDefaultRate(decl);
+          double domRate = ASTQuery::getDomainDefaultRate(decl);
           std::string domName = decl->getName();
           for (const auto &stageNode : stagesProp->getChildren()) {
             double stageRate = -1.0;
@@ -3085,13 +3085,13 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
     auto &seg = rateSegments[domName];
     if (!seg.domainResolved) {
       seg.domainResolved = true;
-      auto domDecl = CodeAnalysis::findDomainDeclaration(domName, tree);
+      auto domDecl = ASTQuery::findDomainDeclaration(domName, tree);
       if (!domDecl) {
         domDecl = ASTQuery::findDeclarationByName(domName, scope, tree);
       }
       seg.domainDecl = domDecl;
       if (domDecl) {
-        seg.domainRate = CodeAnalysis::getDomainDefaultRate(domDecl);
+        seg.domainRate = ASTQuery::getDomainDefaultRate(domDecl);
       }
     }
     return seg;
@@ -3241,7 +3241,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
       }
       if (!nextDomain.empty() && !domainName.empty() && domainName != nextDomain) {
         if (!getSleepTargetDomain(next).empty() ||
-            !CodeAnalysis::getCommonAncestorDomain(domainName, nextDomain, tree).empty()) {
+            !ASTQuery::getCommonAncestorDomain(domainName, nextDomain, tree).empty()) {
           domainName = nextDomain;
         }
       }
@@ -3715,7 +3715,7 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
         if (enclosing && inputList && inputList->getNodeType() == AST::List &&
             inputList->getChildren().size() == args.MainIn.argTypes.size()) {
           auto enclosingDecl =
-              ASTQuery::findDeclarationByName(enclosing->getName(), scope, tree);
+              ASTQuery::findDeclarationForNode(enclosing, scope, tree);
           for (size_t i = 0; enclosingDecl && i < args.MainIn.argTypes.size();
                ++i) {
             auto elemDecl = ASTQuery::findDeclarationForNode(
@@ -4639,7 +4639,7 @@ bool StrideGenerator::resolveIOParamsFromDefinition(
   }
 
   if (ioParamsResolved) {
-    auto usedEntities = CodeAnalysis::getUsedEntitiesInStreams(funcDecl);
+    auto usedEntities = ASTQuery::getUsedEntitiesInStreams(funcDecl);
     auto termNode = funcDecl->getPropertyValue("terminateWhen");
     if (termNode && termNode->getNodeType() == AST::Entity) {
       usedEntities.push_back(termNode);

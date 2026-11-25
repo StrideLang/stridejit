@@ -29,7 +29,7 @@ This document outlines critical architectural patterns, code generation invarian
 - **Outputs vs. Globals**:
   - Declarations inside `outputs: [ ... ]` are parameters passed by pointer to `_process`. They are **not** global signals and cannot be looked up via `strenv.getGlobal<T>`.
   - Only signals/switches declared at the root/domain level outside of `inputs`/`outputs` are globals accessible via `strenv.getGlobal<T>("Name")`.
-  - A `constant` with a `value` is a read-only internal global. A `constant` without one (`constant Table[8] { type: Int }`) is a **writable** internal global, written once at run time; stridegen's `CodeValidator::findConstantRewrites` rejects a second write.
+  - A `constant` with a `value` is a read-only internal global. A `constant` without one (`constant Table[8] { type: Int }`) is a **writable** internal global, written once at run time; strideutils's `ASTValidation::findConstantRewrites` rejects a second write.
   - A standalone function called from C++ (an action, no caller instance) takes no parameters for module globals; its body reads and writes them directly. Called from another function, the caller still passes them in.
 - **Output port sizes**: `signal Output[OutputPort.size]` in a loop or module takes the size of what the call writes to (the call's `outputEntity`), as `InputPort.size` takes the size of what feeds it. An array is written in place; a slice (`>> T[2:4]`) goes through a temporary array copied to each member after the call (`CallExprAST::codegen`, `scatterOuts`). Array outputs are never prefilled with their `default`. A sized port with nothing to size it is an `UnsizedPort` error from stridegen's `CodeValidator::findUnsizedPorts`. Fixtures: `loop_output_size.stride`, `loop_output_cases.stride`, `loop_output_chained.stride`, `loop_output_unwritten.stride`, `loop_input_unfed.stride`, `constant_fill.stride`. The language-level description is strideroot's `library/1.0/doc/CodeGenerators.md`.
 
@@ -38,7 +38,7 @@ This document outlines critical architectural patterns, code generation invarian
 ## 3. Typecasting & Compiler Properties
 
 - **Typecast Preprocessing**:
-  - The AST preprocessing pass (`CodeResolver::resolveTypeCastForStream`) identifies heterogeneous lists and streams, tagging AST nodes with the `"typecast"` compiler property (e.g. `Real` or `Int`).
+  - The AST preprocessing pass (`TypeCastResolver::resolveTypeCastForStream`) identifies heterogeneous lists and streams, tagging AST nodes with the `"typecast"` compiler property (e.g. `Real` or `Int`).
 - **Cached Out DataType Caveat**:
   - `CodeAnalysis::resolveNodeOutDataType` caches type names under `resolvedOutDataType_` *before* typecasting resolution finishes.
   - **Always inspect `node->getCompilerProperty("typecast")` first** before querying `resolveNodeOutDataType`:
@@ -124,7 +124,7 @@ This document outlines critical architectural patterns, code generation invarian
 - **Reactions with Declared Input Ports**:
   - Reactions cannot declare mainInputPorts, they can only have propertyInputPorts, an input to a reaction is a trigger/switch to
     determing if the reaction should run. A switch converts to a trigger automatically (passing its value). Actions
-    follow the same rule (they share `CallableType::Reaction`). stridegen's `CodeValidator::findReactionMainInputs`
+    follow the same rule (they share `CallableType::Reaction`). strideutils's `ASTValidation::findReactionMainInputs`
     reports a main input declared by a reaction or an action as a `ReactionMainInput` error, and
     `JITControlFlowTest.NoReactionDeclaresAMainInput` keeps the fixtures free of them. `CallExprAST::codegen` has no
     input path for them: what comes before a reaction call is always its trigger.
