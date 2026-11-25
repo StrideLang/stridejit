@@ -4,3 +4,9 @@ build/
 .qtcreator/
 .vscode/
 out/
+*.elf
+*.hex
+*.bin
+*.uf2
+*.layout.json
+*_build/
