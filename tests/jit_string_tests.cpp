@@ -518,7 +518,11 @@ std::vector<uint64_t> scratchSizes(StrideEnvironment &env,
   for (auto &block : *function) {
     for (auto &inst : block) {
       if (auto *alloca = llvm::dyn_cast<llvm::AllocaInst>(&inst)) {
+#if LLVM_VERSION_MAJOR >= 16
         if (alloca->getName().starts_with("string_scratch")) {
+#else
+        if (alloca->getName().startswith("string_scratch")) {
+#endif
           sizes.push_back(alloca->getAllocatedType()->getArrayNumElements());
         }
       }

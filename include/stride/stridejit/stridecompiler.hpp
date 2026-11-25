@@ -27,6 +27,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -195,6 +196,23 @@ public:
   globals() const {
     return m_globals;
   }
+
+  // ---- Preemptive / ISR shared variable safety ----
+  // Variables shared between an ExecutionInterrupt domain and a cooperative
+  // domain need volatile loads/stores, and multi-byte accesses (> 8 bits on
+  // AVR) inside a cooperative domain need an SREG save + cli + restore guard.
+  std::set<std::string> isrSharedVariables;
+  std::set<std::string> interruptDomains;
+  bool isCurrentDomainInterrupt{false};
+  bool isAvrTarget() const;
+  bool isIsrSharedVariable(const std::string &name) const {
+    return isrSharedVariables.count(name) > 0;
+  }
+  llvm::LoadInst *createVarLoad(llvm::Type *ty, llvm::Value *ptr,
+                                const std::string &varName,
+                                const std::string &instName = "");
+  llvm::StoreInst *createVarStore(llvm::Value *val, llvm::Value *ptr,
+                                  const std::string &varName);
 
   // ---- String storage ----
   // A String variable is a {ptr, length} view plus a companion variable,

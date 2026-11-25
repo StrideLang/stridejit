@@ -162,9 +162,10 @@ BinaryExprAST::codegen(StrideCompiler &state) {
             gepElemType = static_cast<llvm::ArrayType *>(gepElemType)->getElementType();
           }
           auto *GEP = state.Builder->CreateGEP(gepElemType, Val, idxList);
-          Val = state.Builder->CreateLoad(gepElemType, GEP, varExpr->getName());
+          Val = state.createVarLoad(gepElemType, GEP, varExpr->getName(),
+                                    varExpr->getName());
         } else {
-          Val = state.Builder->CreateLoad(Type, Val);
+          Val = state.createVarLoad(Type, Val, varExpr->getName());
         }
       } else {
         Val = state.Builder->CreateLoad(Type, Val);
@@ -258,11 +259,11 @@ BinaryExprAST::codegen(StrideCompiler &state) {
         if (state.NamedValues[LHSE->getName()]
                 .first->getType()
                 ->isPointerTy()) {
-          state.Builder->CreateStore(Val, Variable);
+          state.createVarStore(Val, Variable, LHSE->getName());
         }
       } else {
         // GLobal
-        state.Builder->CreateStore(Val, Variable);
+        state.createVarStore(Val, Variable, LHSE->getName());
       }
     }
     // A String keeps its characters in its own buffer. A literal or a
@@ -344,10 +345,11 @@ BinaryExprAST::codegen(StrideCompiler &state) {
           }
           // TODO explore using CreateInBoundsGEP when possible
           auto GEP = state.Builder->CreateGEP(gepElemType, L, idxList);
-          L = state.Builder->CreateLoad(gepElemType, GEP, varExpr->getName());
+          L = state.createVarLoad(gepElemType, GEP, varExpr->getName(),
+                                  varExpr->getName());
           LType = gepElemType;
         } else {
-          L = state.Builder->CreateLoad(LType.value(), L);
+          L = state.createVarLoad(LType.value(), L, varExpr->getName());
         }
       } else {
         L = state.Builder->CreateLoad(LType.value(), L);
@@ -368,13 +370,14 @@ BinaryExprAST::codegen(StrideCompiler &state) {
             gepElemType = static_cast<llvm::ArrayType *>(gepElemType)->getElementType();
           }
           auto GEP = state.Builder->CreateGEP(gepElemType, R, idxList);
-          R = state.Builder->CreateLoad(gepElemType, GEP, varExpr->getName());
+          R = state.createVarLoad(gepElemType, GEP, varExpr->getName(),
+                                  varExpr->getName());
           RType = gepElemType;
           //          Variable = state.Builder->CreateLoad(
           //              Variable->getType()->getNonOpaquePointerElementType(),
           //              GEP, varExpr->getName());
         } else {
-          R = state.Builder->CreateLoad(RType.value(), R);
+          R = state.createVarLoad(RType.value(), R, varExpr->getName());
         }
       } else {
         R = state.Builder->CreateLoad(RType.value(), R);

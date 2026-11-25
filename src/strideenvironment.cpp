@@ -122,9 +122,13 @@ void StrideEnvironment::initializeJIT() {
 #if LLVM_VERSION_MAJOR >= 20
       auto TM = target->createTargetMachine(theTriple, targetCPU,
                                             m_targetFeatures, opt, std::nullopt);
-#else
+#elif LLVM_VERSION_MAJOR >= 16
       auto TM = target->createTargetMachine(theTriple.str(), targetCPU,
                                             m_targetFeatures, opt, std::nullopt);
+#else
+      auto TM = target->createTargetMachine(theTriple.str(), targetCPU,
+                                            m_targetFeatures, opt,
+                                            llvm::Optional<llvm::Reloc::Model>());
 #endif
       if (TM) {
         m_dataLayout = TM->createDataLayout();

@@ -717,7 +717,12 @@ TEST(JITControlFlowTest, DomainOnLoad) {
       for (const auto &instruction : block) {
         if (auto *call = llvm::dyn_cast<llvm::CallInst>(&instruction)) {
           if (call->getCalledFunction() &&
-              call->getCalledFunction()->getName().starts_with(callee)) {
+#if LLVM_VERSION_MAJOR >= 16
+              call->getCalledFunction()->getName().starts_with(callee)
+#else
+              call->getCalledFunction()->getName().startswith(callee)
+#endif
+          ) {
             return true;
           }
         }

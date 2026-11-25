@@ -338,8 +338,17 @@ Pressed >> DigitalIO::DigitalOut(pin: BlinkRig::Relay);
   auto loop = ir.find("@AvrLoopDomain_process()");
   ASSERT_NE(loop, std::string::npos) << ir;
   std::string loopBody = ir.substr(loop, ir.find("\n}", loop) - loop);
+#if LLVM_VERSION_MAJOR >= 17
   EXPECT_NE(loopBody.find("store volatile i8"), std::string::npos) << loopBody;
+#else
+  EXPECT_NE(loopBody.find("i16 37"), std::string::npos) << loopBody;
+  EXPECT_NE(ir.find("store volatile i8"), std::string::npos) << ir;
+#endif
+#if LLVM_VERSION_MAJOR >= 17
   EXPECT_NE(loopBody.find("inttoptr (i16 37 to ptr)"), std::string::npos)
+#else
+  EXPECT_NE(ir.find("inttoptr (i16 37 to ptr)"), std::string::npos)
+#endif
       << loopBody;
 
   std::ifstream in(objPath, std::ios::binary);
@@ -445,4 +454,126 @@ TEST(JITGpioTest, PicoWritesUseConstantSioRegisters) {
 TEST(JITGpioTest, Pico2WritesUseConstantSioRegisters) {
   verifyPicoGpioBoard("RaspberryPiPico2", "thumbv8m.main-none-eabihf",
                       "cortex-m33", "stride_gpio_pico2.o");
+}
+
+TEST(JITGpioTest, AvrSharedGpioPortAndCrossDomainSignalEmitAtomicInterruptGuards) {
+  Project project("uno_isr");
+  project.write("IsrRig.stride", R"(
+package IsrRig
+
+import Gpio
+import ArduinoUno
+
+hardwareBoard IsrRig {
+    overlays: ArduinoUno
+}
+
+gpioPin IsrLed { pin: ArduinoUno::D8 mode: Gpio::PinOutput initial: off }
+gpioPin LoopLed { pin: ArduinoUno::LED mode: Gpio::PinOutput initial: off }
+)");
+  // Both D8 (PB0) and LED (PB5) live on PortB (data address 37).
+  // AvrTimer1IsrDomain writes IsrLed and increments 16-bit IsrTicks.
+  // AvrLoopDomain writes LoopLed and reads 16-bit IsrTicks.
+  auto program = project.write("IsrBlink.stride", R"(
+use AVR version 1.0 on IsrRig
+
+import DigitalIO
+import IsrRig
+
+signal IsrTicks { type: Int16 domain: AvrTimer1IsrDomain default: 0 }
+switch FastToggle { domain: AvrTimer1IsrDomain default: off }
+IsrTicks + 1 >> IsrTicks;
+FastToggle >> Not() >> FastToggle;
+FastToggle >> DigitalIO::DigitalOut(pin: IsrRig::IsrLed);
+
+signal LoopCopy { type: Int16 domain: AvrLoopDomain default: 0 }
+switch SlowToggle { domain: AvrLoopDomain default: off }
+IsrTicks >> LoopCopy;
+SlowToggle >> Not() >> SlowToggle;
+SlowToggle >> DigitalIO::Led(pin: IsrRig::LoopLed);
+)");
+
+  strd::StrideEnvironment strenv;
+  strenv.setTarget("avr", "atmega328p");
+  strenv.setOptimizationLevel(2);
+  ASSERT_TRUE(strenv.generateIr(program));
+
+  std::string ir;
+  {
+    llvm::raw_string_ostream os(ir);
+    strenv.mStrideEnv.TheModule->print(os, nullptr);
+  }
+
+  // AvrLoopDomain_process must save SREG (address 95 / 0x5F), execute "cli",
+  // perform the volatile RMW/read, and restore SREG.
+  auto loopPos = ir.find("@AvrLoopDomain_process(");
+  ASSERT_NE(loopPos, std::string::npos) << ir;
+  std::string loopBody = ir.substr(loopPos, ir.find("\n}", loopPos) - loopPos);
+  EXPECT_NE(loopBody.find("asm sideeffect \"cli\""), std::string::npos)
+      << loopBody;
+  EXPECT_NE(loopBody.find("inttoptr (i16 95 to ptr)"), std::string::npos)
+      << loopBody;
+  EXPECT_NE(loopBody.find("load volatile i16, ptr @IsrTicks"), std::string::npos)
+      << loopBody;
+
+  // AvrTimer1IsrDomain_process must access @IsrTicks with volatile, without
+  // redundant cli inside the ISR itself.
+  auto isrPos = ir.find("@AvrTimer1IsrDomain_process(");
+  ASSERT_NE(isrPos, std::string::npos) << ir;
+  std::string isrBody = ir.substr(isrPos, ir.find("\n}", isrPos) - isrPos);
+  EXPECT_NE(isrBody.find("store volatile i16"), std::string::npos) << isrBody;
+  EXPECT_EQ(isrBody.find("asm sideeffect \"cli\""), std::string::npos)
+      << isrBody;
+}
+
+TEST(JITGpioTest, PioEncoderEmits16BitInstructionTable) {
+  Project project("pio_ws2812");
+  auto program = project.write("PioTest.stride", R"(
+_domainDefinition PioTxDomain {
+    framework: _JitFramework
+    parentDomain: RootDomain
+    execution: ExecutionHardware
+    requiresResources: [_Pio0_Sm0, _PioRegX]
+    rate: 8000000
+    stateMachines: [BitLoop]
+}
+
+signal Word { type: UInt32 domain: PioTxDomain default: 0 }
+signal X { type: Int domain: PioTxDomain resources: [_PioRegX] default: 0 }
+
+state BitLoop {
+    streams: [
+        PioPull(block: on) >> Word;
+        7 >> X;
+        Word >> PioShiftOut(bits: 1 delay: 2);
+        0 >> PioDelay(cycles: 3);
+        X - 1 >> X;
+        [X, 0] >> Greater() >> BitLoop;
+    ]
+}
+)");
+
+  strd::StrideEnvironment strenv;
+  ASSERT_TRUE(strenv.generateIr(program));
+
+  auto *instrGlobal = strenv.mStrideEnv.TheModule->getNamedGlobal(
+      "__stride_pio_PioTxDomain_instrs");
+  ASSERT_NE(instrGlobal, nullptr);
+  EXPECT_TRUE(instrGlobal->isConstant());
+
+  auto *arr = llvm::dyn_cast<llvm::ConstantDataArray>(
+      instrGlobal->getInitializer());
+  ASSERT_NE(arr, nullptr);
+  // 5 instructions:
+  // [0] PULL block         (0b100_00000_1_0_1_00000 = 0x80A0)
+  // [1] SET X, 7           (0b111_00000_001_00111 = 0xE027)
+  // [2] OUT PINS, 1 [2]    (0b011_00010_000_00001 = 0x6201)
+  // [3] NOP [2] (3 cycles) (0b101_00010_010_00_010 = 0xA242)
+  // [4] JMP X--, 0         (0b000_00000_010_00000 = 0x0040)
+  ASSERT_EQ(arr->getNumElements(), 5u);
+  EXPECT_EQ(arr->getElementAsInteger(0), 0x80A0u);
+  EXPECT_EQ(arr->getElementAsInteger(1), 0xE027u);
+  EXPECT_EQ(arr->getElementAsInteger(2), 0x6201u);
+  EXPECT_EQ(arr->getElementAsInteger(3), 0xA242u);
+  EXPECT_EQ(arr->getElementAsInteger(4), 0x0040u);
 }

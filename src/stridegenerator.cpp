@@ -10,6 +10,7 @@
 #include "stride/stridejit/functionast.hpp"
 #include "stride/stridejit/listexprast.hpp"
 #include "stride/stridejit/numberexprast.hpp"
+#include "stride/stridejit/pioencoder.hpp"
 #include "stride/stridejit/stridegenerator.hpp"
 
 // stride
@@ -538,6 +539,130 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
   std::map<std::string, std::string> domainParentMap;
 
   state.stateMachineInfos.clear();
+  state.interruptDomains.clear();
+  state.isrSharedVariables.clear();
+  state.isCurrentDomainInterrupt = false;
+  for (const auto &node : tree->getChildren()) {
+    if (node->getNodeType() == AST::Declaration) {
+      auto decl = std::static_pointer_cast<DeclarationNode>(node);
+      if (decl->getEntityType() == "_domainDefinition" ||
+          decl->getEntityType() == "gameDefinition") {
+        if (auto execProp = decl->getPropertyValue("execution")) {
+          bool isIsr = false;
+          if (auto origin = execProp->getCompilerProperty("resolvedFrom")) {
+            if (origin->getNodeType() == AST::Declaration &&
+                std::static_pointer_cast<DeclarationNode>(origin)->getName() ==
+                    "ExecutionInterrupt") {
+              isIsr = true;
+            }
+          } else if (execProp->getNodeType() == AST::Int) {
+            isIsr =
+                std::static_pointer_cast<ValueNode>(execProp)->getIntValue() == 1;
+          } else {
+            std::string em = ASTQuery::getNodeName(execProp);
+            isIsr = (em.find("ExecutionInterrupt") != std::string::npos);
+          }
+          if (isIsr) {
+            state.interruptDomains.insert(decl->getName());
+          }
+        }
+      }
+    }
+  }
+  if (!state.interruptDomains.empty()) {
+    std::set<std::string> isrTouchedVars;
+    std::set<std::string> coopTouchedVars;
+    auto stripQ = [](std::string n) {
+      size_t pos = n.rfind("::");
+      return pos != std::string::npos ? n.substr(pos + 2) : n;
+    };
+    auto getStreamDom = [&](const std::shared_ptr<StreamNode> &s) {
+      std::string found;
+      std::function<void(const ASTNode &)> findD = [&](const ASTNode &n) {
+        if (!n || !found.empty()) {
+          return;
+        }
+        if (n->getNodeType() == AST::Stream) {
+          auto st = std::static_pointer_cast<StreamNode>(n);
+          findD(st->getRight());
+          findD(st->getLeft());
+          return;
+        }
+        std::string d = stripQ(CodeAnalysis::getNodeDomainName(n, {}, tree));
+        if (!d.empty()) {
+          found = d;
+        }
+      };
+      findD(s);
+      return found;
+    };
+    std::function<void(const ASTNode &, bool)> collectVars =
+        [&](const ASTNode &n, bool inIsr) {
+          if (!n) {
+            return;
+          }
+          if (n->getNodeType() == AST::Entity ||
+              n->getNodeType() == AST::Array) {
+            std::string name = ASTQuery::getNodeName(n);
+            if (!name.empty()) {
+              if (inIsr) {
+                isrTouchedVars.insert(name);
+              } else {
+                coopTouchedVars.insert(name);
+              }
+            }
+          }
+          if (n->getNodeType() == AST::Stream) {
+            auto st = std::static_pointer_cast<StreamNode>(n);
+            collectVars(st->getLeft(), inIsr);
+            collectVars(st->getRight(), inIsr);
+            return;
+          }
+          if (n->getNodeType() == AST::Expression) {
+            for (const auto &c : n->getChildren()) {
+              collectVars(c, inIsr);
+            }
+            return;
+          }
+          if (n->getNodeType() == AST::Function) {
+            auto fn = std::static_pointer_cast<FunctionNode>(n);
+            for (const auto &p : fn->getProperties()) {
+              if (p) {
+                collectVars(p->getValue(), inIsr);
+              }
+            }
+            return;
+          }
+          for (const auto &c : n->getChildren()) {
+            collectVars(c, inIsr);
+          }
+        };
+    for (const auto &node : tree->getChildren()) {
+      if (node->getNodeType() == AST::Stream) {
+        auto st = std::static_pointer_cast<StreamNode>(node);
+        std::string dom = getStreamDom(st);
+        bool inIsr = state.interruptDomains.count(dom) > 0;
+        collectVars(st, inIsr);
+      } else if (node->getNodeType() == AST::Declaration ||
+                 node->getNodeType() == AST::ArrayDeclaration) {
+        auto decl = std::static_pointer_cast<DeclarationNode>(node);
+        const std::string &et = decl->getEntityType();
+        if (et == "signal" || et == "switch" || et == "trigger") {
+          std::string dom =
+              stripQ(CodeAnalysis::getNodeDomainName(decl, {}, tree));
+          if (state.interruptDomains.count(dom) > 0) {
+            isrTouchedVars.insert(decl->getName());
+          }
+        }
+      }
+    }
+    for (const auto &v : isrTouchedVars) {
+      if (coopTouchedVars.count(v) > 0) {
+        state.isrSharedVariables.insert(v);
+      }
+    }
+  }
+
   GeneratedIRCode generatedIRCode = generateCodeForTree(tree, scope, state);
 
   // Only schedule subdomains that actually have generated code (or active
@@ -619,6 +744,29 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
     domainParentMap[childName] = parentName;
     if (!activeDomains.count(childName)) {
       return;
+    }
+    if (auto execProp = childDecl->getPropertyValue("execution")) {
+      bool skipParentSchedule = false;
+      if (auto origin = execProp->getCompilerProperty("resolvedFrom")) {
+        if (origin->getNodeType() == AST::Declaration) {
+          std::string n =
+              std::static_pointer_cast<DeclarationNode>(origin)->getName();
+          skipParentSchedule =
+              (n == "ExecutionInterrupt" || n == "ExecutionHardware");
+        }
+      } else if (execProp->getNodeType() == AST::Int) {
+        int64_t val =
+            std::static_pointer_cast<ValueNode>(execProp)->getIntValue();
+        skipParentSchedule = (val == 1 || val == 4);
+      } else {
+        std::string em = ASTQuery::getNodeName(execProp);
+        skipParentSchedule =
+            (em.find("ExecutionInterrupt") != std::string::npos ||
+             em.find("ExecutionHardware") != std::string::npos);
+      }
+      if (skipParentSchedule) {
+        return;
+      }
     }
     auto &vec = parentTickedSubdomains[parentName];
     for (const auto &existing : vec) {
@@ -1379,6 +1527,19 @@ void StrideGenerator::compile(ASTNode tree, ScopeStack &scope,
   // the onLoad streams does not disturb their code
   for (const auto &domainCode : generatedIRCode.domainGeneratedCode) {
     generateLoadFunction(domainCode.first, tree, state);
+  }
+
+  // Encode ExecutionHardware PIO domains into 16-bit instruction tables
+  for (const auto &node : tree->getChildren()) {
+    if (node->getNodeType() == AST::Declaration) {
+      auto decl = std::static_pointer_cast<DeclarationNode>(node);
+      if ((decl->getEntityType() == "_domainDefinition" ||
+           decl->getEntityType() == "gameDefinition") &&
+          PioEncoder::isPioDomain(decl)) {
+        auto prog = PioEncoder::compileDomain(decl, tree, nullptr);
+        PioEncoder::emitGlobals(prog, state);
+      }
+    }
   }
 }
 

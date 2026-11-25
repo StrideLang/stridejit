@@ -13,6 +13,7 @@
 // #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
 // #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 // #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/raw_ostream.h"
 // #include "llvm/IR/LegacyPassManager.h"
@@ -378,7 +379,19 @@ llvm::Function *FunctionAST::codegen(StrideCompiler &state) {
   state.statusLogPtr = nullptr;
   state.statusCountPtr = nullptr;
   llvm::AllocaInst *calleeStatus = nullptr;
-  if (callType != CallableType::DomainFunction) {
+  if (callType == CallableType::DomainFunction) {
+    std::string domName = P.getName();
+    for (const char *suffix : {"_process", "_init", "_reset", "_cleanup"}) {
+      size_t pos = domName.find(suffix);
+      if (pos != std::string::npos) {
+        domName = domName.substr(0, pos);
+        break;
+      }
+    }
+    state.isCurrentDomainInterrupt =
+        (P.getName().find("_process") != std::string::npos) &&
+        (state.interruptDomains.count(domName) > 0);
+  } else {
     calleeStatus = state.CreateEntryBlockAlloca(
         TheFunction, "callable_status", state.Builder->getInt8Ty());
     state.Builder->CreateStore(state.Builder->getInt8(0), calleeStatus);
@@ -3369,24 +3382,52 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
         llvm::Value *setMask = asInt(ops[3], regTy);
         llvm::Value *clearMask = asInt(ops[4], regTy);
         llvm::Value *rmw = asBool(ops[5]);
+        auto doRmw = [&] {
+          // One branch per level, so each is a read-modify-write with a
+          // constant mask: sbi in one and cbi in the other on AVR.
+          branch(
+              level,
+              [&] {
+                llvm::Value *ptr = ptrOf(setAddr);
+                llvm::Value *old = B.CreateLoad(regTy, ptr, true, "regval");
+                outval = B.CreateStore(B.CreateOr(old, setMask), ptr, true);
+              },
+              [&] {
+                llvm::Value *ptr = ptrOf(setAddr);
+                llvm::Value *old = B.CreateLoad(regTy, ptr, true, "regval");
+                outval = B.CreateStore(
+                    B.CreateAnd(old, B.CreateNot(clearMask)), ptr, true);
+              });
+        };
         branch(
             rmw,
             [&] {
-              // One branch per level, so each is a read-modify-write with a
-              // constant mask: sbi in one and cbi in the other on AVR.
-              branch(
-                  level,
-                  [&] {
-                    llvm::Value *ptr = ptrOf(setAddr);
-                    llvm::Value *old = B.CreateLoad(regTy, ptr, true, "regval");
-                    outval = B.CreateStore(B.CreateOr(old, setMask), ptr, true);
-                  },
-                  [&] {
-                    llvm::Value *ptr = ptrOf(setAddr);
-                    llvm::Value *old = B.CreateLoad(regTy, ptr, true, "regval");
-                    outval = B.CreateStore(
-                        B.CreateAnd(old, B.CreateNot(clearMask)), ptr, true);
-                  });
+              if (state.isAvrTarget()) {
+                // When a WriteReadModify port is shared between an
+                // ExecutionInterrupt domain and a cooperative domain,
+                // CodeResolver sets clearAddress = 0 (!= setAddress) on the
+                // cooperative call so we wrap the RMW in SREG save + cli +
+                // SREG restore.
+                llvm::Value *needGuard = B.CreateICmpNE(
+                    asInt(setAddr, intPtrTy), asInt(clearAddr, intPtrTy));
+                branch(
+                    needGuard,
+                    [&] {
+                      llvm::Value *sregPtr =
+                          ptrOf(llvm::ConstantInt::get(intPtrTy, 0x5F));
+                      llvm::Value *savedSreg =
+                          B.CreateLoad(regTy, sregPtr, true, "sreg");
+                      auto *voidFnTy = llvm::FunctionType::get(
+                          llvm::Type::getVoidTy(*state.TheContext), false);
+                      B.CreateCall(llvm::InlineAsm::get(
+                          voidFnTy, "cli", "~{memory}", true));
+                      doRmw();
+                      B.CreateStore(savedSreg, sregPtr, true);
+                    },
+                    doRmw);
+              } else {
+                doRmw();
+              }
             },
             [&] {
               llvm::Value *addr = B.CreateSelect(level, asInt(setAddr, intPtrTy),
@@ -3415,6 +3456,17 @@ LLVMCommandAST::codegen(StrideCompiler &state) {
         LOG_ERROR() << "ERROR: unknown llvm::gpio instruction or operand count: "
                     << instr << std::endl;
         return {nullptr, std::nullopt};
+      }
+    } else if (instr.rfind("pio ", 0) == 0) {
+      // PIO instructions are encoded directly into @__stride_pio_<Domain>_instrs
+      // by PioEncoder. On the CPU side, produce a dummy zero value if the
+      // platformModule has an output (PioPull, PioShiftIn).
+      llvm::Type *i32Ty = llvm::Type::getInt32Ty(*state.TheContext);
+      if (!OutArgs.empty()) {
+        outval = llvm::ConstantInt::get(i32Ty, 0, false);
+        outtype = i32Ty;
+      } else {
+        outval = llvm::ConstantInt::get(i32Ty, 0, false);
       }
     } else if (instr.rfind("load volatile ", 0) == 0 ||
                instr.rfind("store volatile ", 0) == 0) {

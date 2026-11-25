@@ -17,6 +17,7 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
@@ -692,6 +693,75 @@ StrideCompiler::stringCapacity(const std::string &name) {
     chars = chars->getArrayElementType();
   }
   return chars->getArrayNumElements();
+}
+
+bool StrideCompiler::isAvrTarget() const {
+  if (!TheModule) {
+    return false;
+  }
+#if LLVM_VERSION_MAJOR >= 20
+  const std::string triple = TheModule->getTargetTriple().str();
+#else
+  const std::string triple = TheModule->getTargetTriple();
+#endif
+  return triple.rfind("avr", 0) == 0;
+}
+
+llvm::LoadInst *StrideCompiler::createVarLoad(llvm::Type *ty, llvm::Value *ptr,
+                                              const std::string &varName,
+                                              const std::string &instName) {
+  if (!isIsrSharedVariable(varName)) {
+    return Builder->CreateLoad(ty, ptr, instName);
+  }
+  bool needGuard = !isCurrentDomainInterrupt && isAvrTarget() && ty &&
+                   ty->getPrimitiveSizeInBits() > 8;
+  if (!needGuard) {
+    return Builder->CreateLoad(ty, ptr, /*isVolatile=*/true, instName);
+  }
+  llvm::Type *i8Ty = llvm::Type::getInt8Ty(*TheContext);
+  llvm::Type *intPtrTy = TheModule->getDataLayout().getIntPtrType(*TheContext);
+  llvm::Value *sregPtr = Builder->CreateIntToPtr(
+      llvm::ConstantInt::get(intPtrTy, 0x5F),
+      llvm::PointerType::get(*TheContext, 0), "sreg_ptr");
+  llvm::Value *savedSreg =
+      Builder->CreateLoad(i8Ty, sregPtr, /*isVolatile=*/true, "sreg");
+  auto *voidFnTy =
+      llvm::FunctionType::get(llvm::Type::getVoidTy(*TheContext), false);
+  Builder->CreateCall(
+      llvm::InlineAsm::get(voidFnTy, "cli", "~{memory}", /*hasSideEffects=*/true));
+  llvm::LoadInst *load =
+      Builder->CreateLoad(ty, ptr, /*isVolatile=*/true, instName);
+  Builder->CreateStore(savedSreg, sregPtr, /*isVolatile=*/true);
+  return load;
+}
+
+llvm::StoreInst *StrideCompiler::createVarStore(llvm::Value *val,
+                                                llvm::Value *ptr,
+                                                const std::string &varName) {
+  if (!isIsrSharedVariable(varName)) {
+    return Builder->CreateStore(val, ptr);
+  }
+  llvm::Type *ty = val ? val->getType() : nullptr;
+  bool needGuard = !isCurrentDomainInterrupt && isAvrTarget() && ty &&
+                   ty->getPrimitiveSizeInBits() > 8;
+  if (!needGuard) {
+    return Builder->CreateStore(val, ptr, /*isVolatile=*/true);
+  }
+  llvm::Type *i8Ty = llvm::Type::getInt8Ty(*TheContext);
+  llvm::Type *intPtrTy = TheModule->getDataLayout().getIntPtrType(*TheContext);
+  llvm::Value *sregPtr = Builder->CreateIntToPtr(
+      llvm::ConstantInt::get(intPtrTy, 0x5F),
+      llvm::PointerType::get(*TheContext, 0), "sreg_ptr");
+  llvm::Value *savedSreg =
+      Builder->CreateLoad(i8Ty, sregPtr, /*isVolatile=*/true, "sreg");
+  auto *voidFnTy =
+      llvm::FunctionType::get(llvm::Type::getVoidTy(*TheContext), false);
+  Builder->CreateCall(
+      llvm::InlineAsm::get(voidFnTy, "cli", "~{memory}", /*hasSideEffects=*/true));
+  llvm::StoreInst *store =
+      Builder->CreateStore(val, ptr, /*isVolatile=*/true);
+  Builder->CreateStore(savedSreg, sregPtr, /*isVolatile=*/true);
+  return store;
 }
 
 llvm::Value *StrideCompiler::takeScratch(uint64_t bytes) {
@@ -1412,7 +1482,12 @@ StrideCompiler::getStateStructInfo(const std::string &name) const {
       llvm::StringRef stName = pair.second.structType->getName();
       // LLVM appends ".N" when it renames a duplicate struct type.
       if (stName == exactStructName || stName == name ||
-          stName.starts_with(exactStructName + ".")) {
+#if LLVM_VERSION_MAJOR >= 16
+          stName.starts_with(exactStructName + ".")
+#else
+          stName.startswith(exactStructName + ".")
+#endif
+      ) {
         return &pair.second;
       }
     }
