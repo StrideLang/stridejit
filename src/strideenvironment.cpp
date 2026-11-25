@@ -17,7 +17,7 @@
 #include "stride/stridegen/codeanalysis.hpp"
 #include "stride/stridegen/coderesolver.hpp"
 #include "stride/stridegen/codevalidator.hpp"
-#include "stride/stridegen/featureresolver.hpp"
+#include "stride/utils/featureresolver.h"
 #include "stride/stridegen/stridesystem.hpp"
 #include "stride/utils/astfunctions.h"
 #include "stride/utils/astquery.h"
@@ -116,6 +116,9 @@ void StrideEnvironment::initializeJIT() {
       llvm::TargetOptions opt;
   opt.FunctionSections = true;
   opt.DataSections = true;
+  if (theTriple.getEnvironment() == llvm::Triple::EABIHF) {
+    opt.FloatABIType = llvm::FloatABI::Hard;
+  }
 #if LLVM_VERSION_MAJOR >= 20
       auto TM = target->createTargetMachine(theTriple, targetCPU,
                                             m_targetFeatures, opt, std::nullopt);
@@ -411,7 +414,7 @@ bool StrideEnvironment::prepareTree(ASTNode tree) {
                             ? m_strideRoot
                             : ASTFunctions::getDefaultStrideRoot(),
                         SystemConfiguration(),
-                        featConfig);
+                        featResolver.resolvedConfig());
   resolver.process();
   // Errors the resolver can't compile past, such as a gpioPin the board
   // can't support
@@ -3547,6 +3550,9 @@ bool StrideEnvironment::generateCompiledObject(std::string path,
   llvm::TargetOptions opt;
   opt.FunctionSections = true;
   opt.DataSections = true;
+  if (triple.getEnvironment() == llvm::Triple::EABIHF) {
+    opt.FloatABIType = llvm::FloatABI::Hard;
+  }
 #if LLVM_VERSION_MAJOR >= 16
   auto RM = std::optional<llvm::Reloc::Model>();
   auto CM = std::nullopt;
@@ -3871,6 +3877,9 @@ bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
   llvm::TargetOptions opt;
   opt.FunctionSections = true;
   opt.DataSections = true;
+  if (theTriple.getEnvironment() == llvm::Triple::EABIHF) {
+    opt.FloatABIType = llvm::FloatABI::Hard;
+  }
 #if LLVM_VERSION_MAJOR >= 16
   std::optional<llvm::Reloc::Model> rm;
 #else
