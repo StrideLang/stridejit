@@ -1,0 +1,94 @@
+# NestedModuleRateTest.stride
+# A module's rate reaches the modules it calls, for every instance. Outer is
+# generated once and shared by both domains, so the rate it passes to Inner
+# must be its own rate parameter, not the rate of the instance generated first.
+
+import Testing as Testing
+
+# Scales its input by the rate of its output
+module Inner {
+    ports: [
+        mainInputPort InPort {
+            entity: Input
+        },
+        mainOutputPort OutPort {
+            entity: Output
+        }
+    ]
+    entities: [
+        signal Input { type: OutPort.type rate: OutPort.rate domain: OutPort.domain }
+        signal Output { type: OutPort.type rate: OutPort.rate domain: OutPort.domain }
+    ]
+    streams: [
+        Input * OutPort.rate >> Output;
+    ]
+}
+
+# Calls Inner, so Inner's rate comes from Outer's
+module Outer {
+    ports: [
+        mainInputPort InPort {
+            entity: Input
+        },
+        mainOutputPort OutPort {
+            entity: Output
+        }
+    ]
+    entities: [
+        signal Input { type: OutPort.type rate: OutPort.rate domain: OutPort.domain }
+        signal Output { type: OutPort.type rate: OutPort.rate domain: OutPort.domain }
+    ]
+    streams: [
+        Input >> Inner() >> Output;
+    ]
+}
+
+_domainDefinition SlowDom {
+    framework: _JitFramework
+    rate: 10
+    substitutions: []
+    domainIncludes: []
+    inputs: [
+        signal SlowIn { domain: SlowDom type: Real }
+    ]
+    outputs: [
+        signal SlowOut { domain: SlowDom type: Real }
+    ]
+    domainFunctionCode: ''
+}
+SlowIn >> Outer() >> SlowOut;
+
+_domainDefinition FastDom {
+    framework: _JitFramework
+    rate: 20
+    substitutions: []
+    domainIncludes: []
+    inputs: [
+        signal FastIn { domain: FastDom type: Real }
+    ]
+    outputs: [
+        signal FastOut { domain: FastDom type: Real }
+    ]
+    domainFunctionCode: ''
+}
+FastIn >> Outer() >> FastOut;
+
+functionTest SlowRateTest {
+    target: SlowDom
+    prepare: [
+        [ 1.0, 2.0, 3.0 ] >> SlowIn;
+    ]
+    validate: [
+        [ SlowOut, [ 10.0, 20.0, 30.0 ] ] >> Testing::ExpectNear(epsilon: 0.0001);
+    ]
+}
+
+functionTest FastRateTest {
+    target: FastDom
+    prepare: [
+        [ 1.0, 2.0, 3.0 ] >> FastIn;
+    ]
+    validate: [
+        [ FastOut, [ 20.0, 40.0, 60.0 ] ] >> Testing::ExpectNear(epsilon: 0.0001);
+    ]
+}

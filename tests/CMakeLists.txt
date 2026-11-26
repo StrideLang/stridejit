@@ -74,6 +74,14 @@ if (STRIDEJIT_BUILD_TESTS)
     if (TARGET stridetest)
       file(GLOB STRIDE_TEST_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/data/*Test.stride")
       foreach(TEST_FILE ${STRIDE_TEST_FILES})
+        # Some *Test.stride files are fixtures for the gtest suites (e.g.
+        # StringsTest.stride for jit_string_tests.cpp) and declare no
+        # functionTest; stridetest fails on those, so they are not registered.
+        file(STRINGS "${TEST_FILE}" HAS_FUNCTION_TEST
+             REGEX "^[ \t]*functionTest[ \t]" LIMIT_COUNT 1)
+        if (NOT HAS_FUNCTION_TEST)
+          continue()
+        endif()
         get_filename_component(TEST_NAME ${TEST_FILE} NAME_WE)
         if (STRIDEROOT)
           add_test(

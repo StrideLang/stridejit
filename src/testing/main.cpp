@@ -300,6 +300,14 @@ int main(int argc, char *argv[]) {
 
   reporter.printConsoleSummary(std::cout);
 
+  // Running nothing is not a pass: a file without functionTest declarations
+  // (or one whose tests were not found) would otherwise succeed silently.
+  if (reporter.passedTests() + reporter.failedTests() == 0) {
+    std::cerr << "Error: no functionTest declarations found in " << targetPath
+              << "\n";
+    return 1;
+  }
+
   if (!junitPath.empty()) {
     std::ofstream xmlFile(junitPath);
     if (xmlFile.is_open()) {

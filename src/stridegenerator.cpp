@@ -208,6 +208,66 @@ std::vector<std::shared_ptr<MemberAccessNode>> collectUsedPortProperties(
   return out;
 }
 
+// For a call made inside a callable's body: the port of that caller whose
+// rate parameter the callee's `calleePort.rate` must be forwarded from, or ""
+// when the call is not inside a callable body or the caller gets no such
+// parameter (the rate is then fixed and can be a constant).
+//
+// A callable body is generated once and shared by every instance (one symbol
+// per declaration and type signature), so a rate resolved through the
+// instance in scope would bake the first instance's rate into all of them.
+// The mapping mirrors collectUsedPortPropertiesImpl, which decides which rate
+// parameters the caller's prototype receives.
+std::string forwardedCallerRatePort(
+    const std::shared_ptr<DeclarationNode> &calleeDecl,
+    const std::string &calleePort, const ScopeStack &scope,
+    const ASTNode &tree) {
+  for (size_t i = scope.size(); i-- > 0;) {
+    const ASTNode &owner = scope[i].first;
+    if (!owner) {
+      continue;
+    }
+    ScopeStack outerScope(scope.begin(), scope.begin() + i);
+    std::shared_ptr<DeclarationNode> callerDecl;
+    if (owner->getNodeType() == AST::Declaration) {
+      callerDecl = std::static_pointer_cast<DeclarationNode>(owner);
+    } else if (owner->getNodeType() == AST::Function) {
+      // A polymorphic body has its instance in scope instead of its
+      // declaration
+      callerDecl = ASTQuery::findDeclarationForNode(owner, outerScope, tree);
+    }
+    if (!callerDecl) {
+      continue;
+    }
+    const auto &entityType = callerDecl->getEntityType();
+    if (entityType != "module" && entityType != "loop" &&
+        entityType != "reaction") {
+      continue;
+    }
+    std::string mapped = calleePort;
+    std::string callerMainIn = findPortNameByType(callerDecl, "mainInputPort");
+    std::string callerMainOut =
+        findPortNameByType(callerDecl, "mainOutputPort");
+    if (calleePort == findPortNameByType(calleeDecl, "mainOutputPort")) {
+      if (!callerMainOut.empty()) {
+        mapped = callerMainOut;
+      }
+    } else if (calleePort == findPortNameByType(calleeDecl, "mainInputPort")) {
+      if (!callerMainIn.empty()) {
+        mapped = callerMainIn;
+      }
+    }
+    for (const auto &pp : collectUsedPortProperties(callerDecl, outerScope,
+                                                    tree)) {
+      if (pp->getEntity() == mapped && pp->getPropertyName() == "rate") {
+        return mapped;
+      }
+    }
+    return "";
+  }
+  return "";
+}
+
 
 // A constant listed in a typeClass of constants, an enumeration such as
 // _DomainExecution or Gpio::_PinPulls.
@@ -4580,9 +4640,26 @@ StrideGenerator::createStreamCode(std::shared_ptr<StreamNode> stream,
                   PortPropArgs.push_back(std::move(dynamicSizeExpr));
                 }
               } else if (ppNode->getPropertyName() == "rate") {
-                auto rate = CodeAnalysis::evaluateRateMemberAccess(
-                    ppNode->getEntity(), innerScope, funcDecl, func, tree);
-                if (rate > 0) {
+                // Inside a shared callable body, pass on the caller's own
+                // rate parameter rather than the rate of whichever instance
+                // is in scope.
+                // TODO When every instance of the caller runs at the same
+                // rate, a constant could be emitted here instead, letting the
+                // rate fold into the callee. That needs all instances known
+                // before the shared body is generated (or the callee given
+                // internal linkage so LLVM's IPSCCP propagates the argument).
+                std::string callerRatePort = forwardedCallerRatePort(
+                    funcDecl, ppNode->getEntity(), scope, tree);
+                auto rate =
+                    callerRatePort.empty()
+                        ? CodeAnalysis::evaluateRateMemberAccess(
+                              ppNode->getEntity(), innerScope, funcDecl, func,
+                              tree)
+                        : -1.0;
+                if (!callerRatePort.empty()) {
+                  PortPropArgs.push_back(
+                      std::make_unique<MemberAccessAST>(callerRatePort, "rate"));
+                } else if (rate > 0) {
                   PortPropArgs.push_back(std::make_unique<RealExprAST>(rate));
                 } else {
                   std::unique_ptr<ExprAST> dynRateExpr;
