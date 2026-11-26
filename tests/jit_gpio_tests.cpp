@@ -452,7 +452,7 @@ TEST(JITGpioTest, PicoWritesUseConstantSioRegisters) {
 }
 
 TEST(JITGpioTest, Pico2WritesUseConstantSioRegisters) {
-  verifyPicoGpioBoard("RaspberryPiPico2", "thumbv8m.main-none-eabihf",
+  verifyPicoGpioBoard("RaspberryPiPico2", "thumbv8m.main-none-eabi",
                       "cortex-m33", "stride_gpio_pico2.o");
 }
 

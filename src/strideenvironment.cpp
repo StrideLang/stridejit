@@ -99,7 +99,10 @@ void StrideEnvironment::initializeJIT() {
     llvm::InitializeAllAsmParsers();
     llvm::InitializeAllAsmPrinters();
 
-    llvm::Triple theTriple(m_targetTriple);
+    // Normalized: a 3-part triple such as thumbv7em-none-eabihf would
+    // otherwise parse "eabihf" as the OS, leaving the environment unknown,
+    // so the target silently got the soft-float calling convention.
+    llvm::Triple theTriple(llvm::Triple::normalize(m_targetTriple));
     std::string error;
 #if LLVM_VERSION_MAJOR >= 20
     const llvm::Target *target =
@@ -3538,7 +3541,7 @@ bool StrideEnvironment::generateCompiledObject(std::string path,
   auto CPU = "generic";
   auto Features = "";
   std::string Error;
-  llvm::Triple triple(TargetTriple);
+  llvm::Triple triple(llvm::Triple::normalize(TargetTriple));
 #if LLVM_VERSION_MAJOR >= 20
   auto Target = llvm::TargetRegistry::lookupTarget(triple, Error);
 #else
@@ -3856,7 +3859,8 @@ bool StrideEnvironment::emitObjectFile(const std::string &outputPath,
 
   std::string tripleStr =
       targetTriple.empty() ? llvm::sys::getDefaultTargetTriple() : targetTriple;
-  llvm::Triple theTriple(tripleStr);
+  // Normalized, so a 3-part triple keeps its environment (eabihf).
+  llvm::Triple theTriple(llvm::Triple::normalize(tripleStr));
 
   std::string error;
 #if LLVM_VERSION_MAJOR >= 20
