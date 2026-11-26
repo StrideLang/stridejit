@@ -39,6 +39,7 @@
 
 #include "stride/utils/astquery.h"
 
+#include <algorithm>
 #include <cstring>
 #include <iostream>
 
